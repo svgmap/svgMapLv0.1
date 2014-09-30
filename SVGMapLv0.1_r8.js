@@ -93,9 +93,11 @@
 // 重複が疑われる関数 (getLayer, getLayers)  (getSymbolProps, getImageProps)
 // rootContainerでvector2Dが入ると破綻する 2014.7.25
 //
-// ToDo : LineとかPolygonとか（文字とか^^;）？
 // ToDo : 注記表示[htmlかcanvasか?]、メタデータ検索
-// ToDo : IE以外でcanvas外でドラッグズーム動作とまる挙動
+// * 注記表示[htmlかcanvasか?]、メタデータ検索
+// * IE以外でcanvas外でドラッグズーム動作とまる挙動
+// * 動的レイヤーだとcanvasの重ね準が崩れる？
+// * レイヤーのグルーピング機能が欲しい
 //
 ( function ( window , undefined ) { // 2014.6.6
 
