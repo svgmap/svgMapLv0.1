@@ -84,20 +84,23 @@
 // 2014/07/31 : zooming,pannning anim : transform3d
 // 2014/08/06 : SVGImages[]のsvg文書内で、htmlのimg,divとの関係を作るためにつけていたidを、"iid"属性に変更 大規模変更なのでバグ入ったかも・・
 // 2014/09/01 : container.svgのlayer classの特性に"batch"を追加 これを指定すると同じクラス名のレイヤーを一括ON/OFFできるUI(項目)が追加
-// 2014/09/08 : レイヤーUI用select要素が multipleの場合に対応。さらにjqueryui のmultiselect(http://www.erichynds.com/blog/jquery-ui-multiselect-widget)を用いている場合にも対応。
+// 2014/09/08 : レイヤーUI用select要素が multipleの場合に対応。さらにjqueryui のmultiselectを用いている場合にも対応。
 //
-// devNote
+// ToDo:
+// 各要素のdisplay,visibilityがcss style属性で指定しても効かない
+// 動的レイヤーで重ね順が破綻する(see http://svg2.mbsrv.net/devinfo/devkddi/lvl0/locally/nowcastHR/)
+// レイヤーグループ機能(方式も含め要検討)
+//
+// devNote:
 // http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/airPort_r4.html#svgView(viewBox(global,135,35,1,1))
 // isPointInPath plolygonのばあいはそのまま、lineの場合は、このルーチンで生成したpathHitPoitnに小さなポリゴン(rect)を生成し、そこだけで、hittestする　これならばHTMLDOMへの影響が無いので、改修範囲が広範囲にならないかと思う。
 // 
 // 重複が疑われる関数 (getLayer, getLayers)  (getSymbolProps, getImageProps)
 // rootContainerでvector2Dが入ると破綻する 2014.7.25
 //
+// ToDo : LineとかPolygonとか（文字とか^^;）？
 // ToDo : 注記表示[htmlかcanvasか?]、メタデータ検索
-// * 注記表示[htmlかcanvasか?]、メタデータ検索
-// * IE以外でcanvas外でドラッグズーム動作とまる挙動
-// * 動的レイヤーだとcanvasの重ね準が崩れる？
-// * レイヤーのグルーピング機能が欲しい
+// ToDo : IE以外でcanvas外でドラッグズーム動作とまる挙動
 //
 ( function ( window , undefined ) { // 2014.6.6
 
@@ -922,12 +925,11 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	}
 	
 	//konno 2014/2/25 http://*の際に、元々のスクリプトではdocDirがおかしくなる。
-    if(docPath.indexOf("http://") >= 0){
-      docDir = "";
-    }
-    else {
-      var docDir = docPath.substring(0,docPath.lastIndexOf("/")+1);
-    }
+	if(docPath.indexOf("http://") >= 0){
+		docDir = "";
+	} else {
+		var docDir = docPath.substring(0,docPath.lastIndexOf("/")+1);
+	}
 	for ( var i = 0 ; i < svgNodes.length ; i++ ){
 //		console.log("node:" + i + "/" + svgNodes.length + " : " +svgNodes[i].nodeName);
 		var svgNode = svgNodes[i];
@@ -996,7 +998,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			}
 			var imageId = svgNode.getAttribute("iid");
 			// 読み込んだSVG Image,(iframe|Animation),use要素に共通　通し番のIDを付ける
-			if ( ! imageId || imageId.indexOf("i")!=0 ){ // idの無い要素にidを付ける (元々idが付いていると破綻するかも・・)2013/1 (とりあえず的な対応を実施・・後程もっと良い対策をしたい)
+			if ( ! imageId || imageId.indexOf("i")!=0 ){ // idの無い要素にidを付ける (元々idが付いていると破綻するかも・・)2013/1 (とりあえず的な対応を実施・・後程もっと良い対策をしたい) .. idの代わりに"iid"を使うようにしてベターな対策を打った 2014.8
 				imageId = "i" + imageSeqNumber;
 				svgNode.setAttribute("iid" , imageId);
 //				console.log("Add imageId:"+imageId , svgImages[docId].getElementById(imageId),svgImages[docId]);
@@ -3351,7 +3353,7 @@ function setLayerUI(){
 		
 		if (typeof  $ != "undefined" && $("#layer").multiselect ){
 //		if (typeof jQuery != "undefined" && $("#layer").multiselect ){
-			$("#layer").multiselect("refresh");
+			setTimeout(function(){ $("#layer").multiselect("refresh"); }, 100);
 		}
 		
 		/**
