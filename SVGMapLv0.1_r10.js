@@ -96,6 +96,7 @@
 // 2015/03/23 : stroke-dasharray (besides non-scaling-stroke)
 // 2015/03/25 : marker subset (arrow) and canvs related debug
 // 2015/03/31 : marker
+// 2015/05/26 : 非同期な動的コンテンツのためにユーティリティ関数（画面更新）を拡張
 // 
 // Issues:
 // 2014/11/21 Thunderbird33.1.1で伸縮アクション中に画面が乱れるようになってしまった・・・　リビジョンに関係なく
@@ -835,6 +836,8 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].script.CRS = svgImagesProps[docId].CRS;
 			svgImagesProps[docId].script.location = getSvgLocation( svgImagesProps[docId].Path );
 			svgImagesProps[docId].script.verIE = verIE;
+//			console.log( "isObj?:" , refreshScreen );
+			svgImagesProps[docId].script.refreshScreen = refreshScreen; // 2015.5.26 add utility function for asynchronous software picture refreshing
 			
 			if ( svgImagesProps[docId].script.onload ){
 //				console.log("call First onload() for dynamic content");
@@ -5336,6 +5339,23 @@ function showPoiProperty(target){
 	var message="";
 	if ( target.getAttribute("content") ){ // contentメタデータがある場合
 		var metaData = target.getAttribute("content").split(",");
+		for ( var j = 0 ; j < metaData.length ; j++ ){
+			metaData[j]=metaData[j].replace(/^\s+|\s+$/g,'');
+			if (metaData[j].indexOf("'")==0 || metaData[j].indexOf('"')==0){
+				var countss = 0;
+				console.log("test:",metaData[j]," ::: ",metaData[j].substr(metaData[j].length-1,1));
+				while(metaData[j].substr(metaData[j].length-1,1) !="'" && metaData[j].substr(metaData[j].length-1,1) !='"'){
+					metaData[j]=metaData[j]+","+metaData[j+1];
+					metaData.splice(j+1,1);
+					console.log(countss,metaData[j]);
+					++countss;
+					if ( countss > 5 ){
+						break;
+					}
+				}
+				metaData[j]=metaData[j].replace(/['"]/g,"");
+			}
+		}
 		
 		if ( metaSchema.length == metaData.length ){
 			message = "[name] , [value]\n";
