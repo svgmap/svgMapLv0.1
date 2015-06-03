@@ -1,4 +1,9 @@
-svgMapLv0.1
+#svgMapLv0.1
 ===========
 
-Partial (Level0.1) polyfill for mapping platform by svg2
+Partial polyfill for mapping framework by SVG2
+
+[examples](http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/)
+
+
+stakagi is performing standards work for performing most functions of this polyfill to the native function of a web browser. 
