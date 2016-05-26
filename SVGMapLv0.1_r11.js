@@ -97,8 +97,9 @@
 // 2015/03/25 : marker subset (arrow) and canvs related debug
 // 2015/03/31 : marker
 // 2015/05/26 : 非同期な動的コンテンツのためにユーティリティ関数（画面更新）を拡張
-// 2015/07/08 : image要素でビットイメージが参照されているときに、そのspatial media fragmentを解釈しクリップする
+// 2015/07/08 : Rev.11: image要素でビットイメージが参照されているときに、そのspatial media fragmentを解釈しクリップする
 // 2015/09/11 : 動的コンテンツで、スクリプトがエスケープされていなくても動作するようにした
+// 2016/05/16 : Fix Safari crash
 // 
 // Issues:
 // 2014/11/21 Thunderbird33.1.1で伸縮アクション中に画面が乱れるようになってしまった・・・　リビジョンに関係なく
@@ -1154,7 +1155,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					};
 //					console.log("elmTransform:",elmTransform);
 //					console.log(child2canvas,ip.transform,ip.x,ip.y );
-					console.log("hasTransform:",elmTransform,xd,yd);
+//					console.log("hasTransform:",elmTransform,xd,yd);
 						
 				} else { // ないとき
 				
@@ -1983,7 +1984,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.height = height;
 	}
 	if ( !txtFlg && img.src && href && img.getAttribute("src") != href){ // firefoxでは(同じURLかどうかに関わらず)srcを書き換えるとロードしなおしてしまうのを抑制 2014.6.12 絶対パスになってバグが出てない？2015.7.8 getAttrで取れば絶対パスにならないで破たんしない。
-		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
+//		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
 		img.src = href;
 	}
 	if ( transform ){ // ま、とりあえず 2014.6.18
@@ -5435,7 +5436,7 @@ function getHashByDocPath( docPath ){
 	for ( var i in svgImagesProps ){
 //		console.log(i);
 		if ( (svgImagesProps[i].Path) == null ){
-			console.log("pass");
+//			console.log("pass");
 		} else if ( (svgImagesProps[i].Path).indexOf( docPath )>=0 ){
 			ans= i;
 //			console.log("found!");
@@ -5498,11 +5499,11 @@ function showPoiProperty(target){
 			metaData[j]=metaData[j].replace(/^\s+|\s+$/g,'');
 			if (metaData[j].indexOf("'")==0 || metaData[j].indexOf('"')==0){
 				var countss = 0;
-				console.log("test:",metaData[j]," ::: ",metaData[j].substr(metaData[j].length-1,1));
+//				console.log("test:",metaData[j]," ::: ",metaData[j].substr(metaData[j].length-1,1));
 				while(metaData[j].substr(metaData[j].length-1,1) !="'" && metaData[j].substr(metaData[j].length-1,1) !='"'){
 					metaData[j]=metaData[j]+","+metaData[j+1];
 					metaData.splice(j+1,1);
-					console.log(countss,metaData[j]);
+//					console.log(countss,metaData[j]);
 					++countss;
 					if ( countss > 5 ){
 						break;
