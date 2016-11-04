@@ -100,12 +100,10 @@
 // 2015/07/08 : Rev.11: image要素でビットイメージが参照されているときに、そのspatial media fragmentを解釈しクリップする
 // 2015/09/11 : 動的コンテンツで、スクリプトがエスケープされていなくても動作するようにした
 // 2016/05/16 : Fix Safari crash
+// 2016/08/10 : Fix CORS contents bug.. konnoさんのコードに手を付けたので、サイドエフェクトが懸念される・・ 8.10のコメントのところ
 // 
 // Issues:
-// 2014/11/21 Thunderbird33.1.1で伸縮アクション中に画面が乱れるようになってしまった・・・　リビジョンに関係なく
-// 2014/12/04 Thunderbird34で上記問題解消した？(解消して無いマシンもある。ＰＣに依る感じがする）
-// http://www.paulirish.com/2012/why-moving-elements-with-translate-is-better-than-posabs-topleft/ や、http://html5experts.jp/cssradar/2027/　この辺参考になるかな・・・
-// setInterval -> setTimeout -> requestanimationframe を試し中(ドラッグ処理, smoothZoom以外)　　効果はない感じもする・・・(CF-R9)・・ような、効果ある感じもする様な 
+// 2016/06    Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？)
 //
 // ToDo:
 // 各要素のdisplay,visibilityがcss style属性で指定しても効かない
@@ -692,11 +690,17 @@ function zoomdown(){
 
 function refreshWindowSize(){
 //	console.log("refreshWindowSize()");
+	var newMapCanvasSize = getCanvasSize(); // window resize後、initLoad()と同じくgetCanvasSizeが定まらない時があり得るかも 2016.5.31
+	if ( ! newMapCanvasSize || newMapCanvasSize.width < 1 || newMapCanvasSize.height < 1 ){
+		setTimeout(refreshWindowSize, 50);
+		return;
+	}
+	
 	var prevS2C = getRootSvg2Canvas( rootViewBox , mapCanvasSize )
 	var pervCenterX = rootViewBox.x + 0.5 * rootViewBox.width;
 	var pervCenterY = rootViewBox.y + 0.5 * rootViewBox.height;
 	
-	mapCanvasSize = getCanvasSize();
+	mapCanvasSize = newMapCanvasSize;
 	
 	rootViewBox.width  = mapCanvasSize.width  / prevS2C.a;
 	rootViewBox.height = mapCanvasSize.height / prevS2C.d;
@@ -729,7 +733,7 @@ function handleClick( evt ){
 
 // loadSVG(this)[XHR] -> handleResult[buildDOM] -> dynamicLoad[updateMap] -> parseSVG[parseXML & set/chgImage2Canvas] -> (ifNecessary) loadSVG(child)
 function loadSVG( path , id , parentElem , parentSvgDocId) {
-//	console.log("called loadSVG  id:",id);
+	console.log("called loadSVG  id:",id, " path:",path);
 	if ( !svgImages[id] ){ 
 //		console.log("call loadSVG");
 		svgImagesProps[id] = new function(){}; //  2014.5.27
@@ -738,7 +742,13 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 		if ( httpObj ) {
 //			console.log(" path:" + path);
 			loadingImgs[id] = true;
-			httpObj.open("GET", getSvgReq(path) , true );
+			
+			if ( typeof getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
+				var pxPath = getUrlViaProxy(path);
+				httpObj.open("GET", getSvgReq(pxPath) , true );
+			} else {
+				httpObj.open("GET", getSvgReq(path) , true );
+			}
 			httpObj.send(null);
 		}
 //		console.log("make XHR : ", id);
@@ -1023,15 +1033,13 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	}
 	
 	var docDir;
-	//konno 2014/2/25 http://*の際に、元々のスクリプトではdocDirがおかしくなる。
-	if(docPath.indexOf("http://") >= 0){
-		docDir = ""; // これはなんかまずい感じ・・・2015.11.9
-	} else {
-		var pathWoQF = docPath.replace(/#.*/g,"");
-		pathWoQF = pathWoQF.replace(/\?.*/,"");
-		docDir = pathWoQF.substring(0,pathWoQF.lastIndexOf("/")+1);
-//		docDir = docPath.substring(0,docPath.lastIndexOf("/")+1);
-	}
+	
+	// 2016.8.10 ここに konnoさんによる、http://時の特殊処理( http://の場合docDir=""にする 2014.2.25 )が入っていたのを削除 (たぶん proxy処理に対するエラーだったと思うが・・・　テスト不十分
+	var pathWoQF = docPath.replace(/#.*/g,"");
+	pathWoQF = pathWoQF.replace(/\?.*/,"");
+	docDir = pathWoQF.substring(0,pathWoQF.lastIndexOf("/")+1);
+//	docDir = docPath.substring(0,docPath.lastIndexOf("/")+1);
+	
 	for ( var i = 0 ; i < svgNodes.length ; i++ ){
 //		console.log("node:" + i + "/" + svgNodes.length + " : " +svgNodes[i].nodeName);
 		var svgNode = svgNodes[i];
@@ -1275,7 +1283,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory != POI && childCategory != BITIMAGE && childCategory != TEXT ){ // animation|iframe要素の場合、子svg文書を読み込む( htmlへの親要素埋め込み後に移動した 2014.6.5)
 //						console.log("call loadSVG:",imageId, ip.href);
 						var childSVGPath = "";
-						if ( ip.href.lastIndexOf("http://", 0) == 0 ){ // 2016.5.10 debug
+						if ( ip.href.lastIndexOf("http://", 0) == 0 || ip.href.lastIndexOf("https://", 0) == 0 ){ // 2016.5.10 debug
 							childSVGPath = ip.href;
 						} else {
 							childSVGPath = docDir + ip.href;
@@ -1520,7 +1528,8 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 						}
 						var markMat = { a: bbox.endCos , b: bbox.endSin , c: -bbox.endSin , d: bbox.endCos , e: bbox.endX , f: bbox.endY };
 						
-						canContext.setLineDash([0]);
+//						canContext.setLineDash([0]); // 2016.9.6 不要？？ ffox45でフリーズ原因・・
+						canContext.setLineDash([]);
 						setSVGpathPoints( svgNode , canContext , markMat , clickable , markPath , cStyle.nonScalingOffset );
 //						console.log("draw marker:",markPath);
 //						var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset);
@@ -2366,10 +2375,12 @@ function getImageProps( imgE , category , parentProps , subCategory ){
 		if ( category == EMBEDSVG && subCategory == SVG2EMBED ){ // svg2のsvgインポート
 //			console.log(imgE);
 			href = imgE.getAttribute("src");
-			if ( typeof getUrlViaProxy == "function" ){
-				//Proxyサーバ経由でアクセス
-				href = getUrlViaProxy(href);
-			}
+			
+			// original 2014.2.25 by konno
+//			if ( typeof getUrlViaProxy == "function" ){ // このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
+//				//Proxyサーバ経由でアクセス
+//				href = getUrlViaProxy(href);
+//			}
 			var idx = href.indexOf("globe",href.lastIndexOf("#"));
 			var postpone = imgE.getAttribute("postpone");
 			if ( !postpone ){
@@ -2435,10 +2446,11 @@ function getImageProps( imgE , category , parentProps , subCategory ){
 				href = href.substring(0,href.indexOf("#")); // ブラウザが#以下があるとキャッシュ無視するのを抑止
 			}
 			
-			if ( typeof getUrlViaProxy == "function" ){
+			// このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
+//			if ( typeof getUrlViaProxy == "function" ){
 				//Proxyサーバ経由でアクセス
-				href = getUrlViaProxy(href);
-			}
+//				href = getUrlViaProxy(href);
+//			}
 		}
 		elemClass = imgE.getAttribute("class");
 	} else if ( category == POI ){ // POI
@@ -2571,6 +2583,7 @@ function createXMLHttpRequest(cbFunc){
 		}
 	}
 	if (XMLhttpObject) XMLhttpObject.onreadystatechange = cbFunc;
+//	XMLhttpObject.withCredentials = true; // 認証情報をCORS時に入れる(ちょっと無条件は気になるが・・ CORSがワイルドカードだとアクセス失敗するので一旦禁止) 2016.8.23
 	return XMLhttpObject;
 }
 
@@ -5244,29 +5257,34 @@ function getCollidedImgs(imgs){
 function isCollided( POIelemId ){
 //	console.log( "call isCollided lazy ");
 	// とりあえず選ばれたアイコンにだけ重なっているものを取り出す
-	var targetPOI = visiblePOIs[POIelemId];
-	var overwrappedPOIs = new Array();
-	for ( var i in visiblePOIs ){
-		if ( i != POIelemId ){
-			if ( targetPOI.x + targetPOI.width < visiblePOIs[i].x ||
-				targetPOI.x > visiblePOIs[i].x + visiblePOIs[i].width ||
-				targetPOI.y + targetPOI.height < visiblePOIs[i].y ||
-				targetPOI.y > visiblePOIs[i].y + visiblePOIs[i].height ) {
-					// none
-				} else {
-					visiblePOIs[i].id = i;
-					overwrappedPOIs.push(visiblePOIs[i]);
-					
-				}
+	try{ // 2016.6.15 isCollided関数がからの状態のoverwrappedPOIsを返すことがある？
+		var targetPOI = visiblePOIs[POIelemId];
+		var overwrappedPOIs = new Array();
+		for ( var i in visiblePOIs ){
+			if ( i != POIelemId ){
+				if ( targetPOI.x + targetPOI.width < visiblePOIs[i].x ||
+					targetPOI.x > visiblePOIs[i].x + visiblePOIs[i].width ||
+					targetPOI.y + targetPOI.height < visiblePOIs[i].y ||
+					targetPOI.y > visiblePOIs[i].y + visiblePOIs[i].height ) {
+						// none
+					} else {
+						visiblePOIs[i].id = i;
+						overwrappedPOIs.push(visiblePOIs[i]);
+						
+					}
+			}
 		}
-	}
-//	console.log("overwrapped items:",overwrappedPOIs.length);
-	if ( overwrappedPOIs.length == 0 ){
+	//	console.log("overwrapped items:",overwrappedPOIs.length);
+		if ( overwrappedPOIs.length == 0 ){
+			return ( false );
+		} else {
+			targetPOI.id = POIelemId;
+			overwrappedPOIs.push(targetPOI);
+			return( overwrappedPOIs );
+		}
+	} catch(e) {
+		console.log("ERROR",e);
 		return ( false );
-	} else {
-		targetPOI.id = POIelemId;
-		overwrappedPOIs.push(targetPOI);
-		return( overwrappedPOIs );
 	}
 }
 
