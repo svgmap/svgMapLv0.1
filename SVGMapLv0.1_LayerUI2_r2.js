@@ -1,0 +1,535 @@
+// 
+// Description:
+// SVGMap Standard LayerUI2 for SVGMapLv0.1 >rev12
+// Programmed by Satoru Takagi
+// 
+//  Programmed by Satoru Takagi
+//  
+//  Copyright (C) 2016-2016 by Satoru Takagi @ KDDI CORPORATION
+//  
+// License: (GPL v3)
+//  This program is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 3 as
+//  published by the Free Software Foundation.
+//  
+//  This program is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//  
+//  You should have received a copy of the GNU General Public License
+//  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// 
+// History:
+// 2016/10/14 : svgMapLayerUI2 Rev.1 : SVGMapLvl0.1_r12の新機能を実装する全く新しいUIを再構築開始 まだ全然粗削りです。
+// 2016/10/14 : JQueryUI/multiselectを切り離してスクラッチで構築
+// 2016/10/14 : グループで折りたたむ機能、リストを広げたまま他の作業が行える機能
+// 2016/10/14 : レイヤー固有のGUIを提供するフレームワーク data-controller 属性で、レイヤー固有UIのリンクを記載(html||bitImage)
+// 2016/10/17 : レイヤー固有UI(iframe)に、zoomPanMap イベントを配信
+// 2016/10/28 : Rev.2: classをいろいろ付けた。フレームワーク化
+//
+//
+//
+// ISSUES:
+//  レイヤが消えているのにレイヤ特化UIが残っているのはまずい
+
+
+( function ( window , undefined ) { 
+var document = window.document;
+var navigator = window.navigator;
+var location = window.location;
+
+
+var svgMapLayerUI = ( function(){ 
+
+
+var layerList, uiOpen , layerTableDiv , uiOpened , layerGroupStatus ; // layerGroupStatusは今はグループ折り畳み状態のみ管理
+var layerSpecificUI; // layerSpecificUIの要素
+function layerListOpenClose(){
+	uiOpenBtn = document.getElementById("layerListOpenButton");
+	layerTableDiv = document.getElementById("layerTableDiv");
+	var tb = document.getElementById("layerTable");
+//	console.log("layerListOpenClose:layerTable",tb);
+	if ( layerList.style.height=="25px" ){ // layer list is colsed
+		setLayerTable(tb);
+		layerList.style.height="90%";
+		uiOpenBtn.value="^";
+		layerTableDiv.style.display="";
+		uiOpened = true;
+	} else { // opened
+		layerList.style.height="25px";
+		removeAllLayerItems(tb);
+		uiOpenBtn.value="v";
+		layerTableDiv.style.display="none";
+		uiOpened = false;
+	}
+}
+
+function getGroupFoldingStatus( groupName ){ // グループ折り畳み状況回答
+	var gfolded;
+	if ( layerGroupStatus[groupName] ){ // グループ折り畳み状態を得る[デフォルトはopen]
+		gfolded = layerGroupStatus[groupName];
+	} else {
+		gfolded = false;
+		layerGroupStatus[groupName] = gfolded;
+	}
+	return ( gfolded );
+}
+
+
+function setLayerTable(tb){
+//	console.log("call setLayerTable:",tb);
+	var groups = new Object(); // ハッシュ名のグループの最後のtr項目を収めている
+	var lps = svgMap.getRootLayersProps();
+//	console.log(lps);
+	var visibleLayers=0;
+	for ( var i = lps.length -1 ; i >=0  ; i-- ){
+		var tr = getLayerTR(lps[i].title, lps[i].id, lps[i].visible , false , lps[i].groupName);
+		if (lps[i].groupName ){ 
+			// グループがある場合の処理
+			
+			var gfolded = getGroupFoldingStatus( lps[i].groupName ); // グループ折り畳み状況獲得
+			
+			if ( groups[lps[i].groupName] ){ // すでにグループが記載されている場合
+				//そのグループの最後の項目として追加
+				var lastGroupMember = groups[lps[i].groupName];
+				if ( ! gfolded ){
+					tb.insertBefore(tr, lastGroupMember.nextSibling);
+				}
+				groups[lps[i].groupName] = tr;
+			} else {
+				// 新しくグループ用trを生成・項目追加
+				var groupTr =  getGroupTR(lps[i], gfolded);
+				tb.appendChild(groupTr);
+				// その後にレイヤー項目を追加
+				groups[lps[i].groupName] = tr;
+				if ( ! gfolded ){
+					tb.appendChild(tr);
+				}
+			}
+		} else { // グループに属さない場合、単に項目追加
+			tb.appendChild(tr);
+		}
+		if (lps[i].visible){++visibleLayers;}
+	}
+	document.getElementById("layerListmessage").innerHTML="Layer List: "+visibleLayers+" layers visible";
+	checkLayerList();
+}
+
+function getLayerTR(title, id ,visible,hasLayerList,groupName){
+	var tr = document.createElement("tr");
+	tr.id ="layerList_"+id;
+	if ( groupName ){
+		tr.dataset.group =groupName;
+		tr.className = "layerItem";
+	} else {
+		tr.className = "layerItem noGroup";
+	}
+	var cbid = "cb_"+id; // id for each layer's check box
+	var btid = "bt_"+id; // id for each button for layer specific UI
+	var ck = "";
+	
+	// レイヤラベルおよびオンオフチェックボックス生成.
+	// checkBox
+	var lcbtd = document.createElement("td");
+	var lcb = document.createElement("input");
+	lcb.className = "layerCheck";
+	lcb.type="checkBox";
+	lcb.id=cbid;
+	if ( visible ){
+		lcb.checked=true;
+		tr.style.fontWeight="bold"; // bold style for All TR elem.
+	}
+	lcb.addEventListener("change",toggleLayer);
+	lcbtd.appendChild(lcb);
+	tr.appendChild(lcbtd);
+	// label
+	var labeltd = document.createElement("td");
+	labeltd.style.overflow="hidden";
+	var label = document.createElement("label");
+	label.setAttribute("for",cbid);
+	label.className="layerLabel";
+	label.innerHTML=title;
+	labeltd.appendChild(label);
+	tr.appendChild(labeltd);
+	
+	// レイヤ固有UIのボタン生成
+	var td = document.createElement("td");
+	var btn = document.createElement("input");
+	btn.type="button";
+	btn.className="layerUiButton";
+	btn.id = btid;
+	btn.value=">";
+//	btn.setAttribute("onClick","svgMapLayerUI.showLayerSpecificUI(event)");
+	btn.addEventListener("click",showLayerSpecificUI,false);
+	if ( visible ){
+		btn.disabled=false;
+	} else {
+		btn.disabled=true;
+	}
+	if ( !hasLayerList){
+		btn.style.visibility="hidden";
+	}
+	
+	td.appendChild(btn);
+	tr.appendChild(td);
+	
+	
+	return ( tr );
+}
+
+
+
+function checkLayerList(count){
+	if ( !count ){count=1}
+	var layerProps=svgMap.getRootLayersProps();
+	var hasUnloadedLayers = false;
+	for ( var i = 0 ; i < layerProps.length ; i++ ){
+		if ( layerProps[i].visible ){
+			if ( !layerProps[i].svgImageProps ){
+				hasUnloadedLayers = true;
+			} else {
+				if ( layerProps[i].svgImageProps.controller ){
+					var ctbtn = document.getElementById("bt_"+layerProps[i].id);
+					if ( ctbtn ){ // グループが閉じられている場合にはボタンがないので
+						ctbtn.style.visibility="visible";
+						ctbtn.dataset.url = layerProps[i].svgImageProps.controller ;
+					}
+				}
+			}
+		}
+	}
+//	console.log( "hasUnloadedLayers:",hasUnloadedLayers,count);
+	if ( hasUnloadedLayers && count < 100){ // 念のためリミッターをかけておく
+		setTimeout(checkLayerList,200,count+1);
+	}
+}
+
+function getGroupTR(lp, gfolded){ // グループ項目を生成する
+	
+	var groupTr = document.createElement("tr");
+	groupTr.dataset.group = lp.groupName;
+	groupTr.className="groupItem"
+	groupTr.style.fontWeight="bold";
+	groupTr.style.width="100%";
+	var isBatchGroup = false;
+	
+	// groupLabel and batch checkbox
+	var groupTD = document.createElement("td");
+	groupTD.setAttribute("colspan","2");
+	groupTD.className = "groupLabel";
+	
+	groupTDlabel = document.createElement("label");
+	
+	var gbid = "gb_"+lp.groupName; // for fold checkbox
+	groupTDlabel.setAttribute("for", gbid);
+	
+	
+	var gLabel = document.createTextNode("[" + lp.groupName + "]");
+	groupTDlabel.appendChild(gLabel);
+	groupTD.appendChild(groupTDlabel);
+	
+	
+	var bid="";
+	if ( lp.groupFeature == "batch"){
+		isBatchGroup = true;
+		bid="ba_"+lp.groupName;
+		
+		var batchCheckBox = document.createElement("input");
+		batchCheckBox.type="checkBox";
+		batchCheckBox.id=bid;
+		batchCheckBox.addEventListener("change",toggleBatch,false);
+		
+		groupTD.appendChild(batchCheckBox);
+		if ( lp.visible ){
+			batchCheckBox.checked="true";
+		}
+	}
+	groupTr.appendChild(groupTD);
+	
+	// group fold button
+	var foldTd = document.createElement("td");
+	var foldButton = document.createElement("input");
+	foldButton.id = gbid;
+	foldButton.type="button";
+	foldButton.addEventListener("click",toggleGroupFold,false);
+	if ( ! gfolded ){
+		foldButton.value = "^";
+	} else {
+		foldButton.value = "v";
+	}
+	foldTd.appendChild(foldButton);
+	groupTr.appendChild(foldTd);
+	
+	return ( groupTr );
+}
+
+
+function removeAllLayerItems(tb){
+	for ( var i = tb.childNodes.length-1;i>=0;i--){
+		tb.removeChild(tb.childNodes[i]);
+	}
+	var colg = document.createElement("colgroup");
+	var col0 = document.createElement("col");
+	col0.span = "1";
+	col0.style.width="25px";
+	var col1 = document.createElement("col");
+	col1.span = "1";
+	var col2 = document.createElement("col");
+	col2.span = "1";
+	col2.style.width="30px";
+	colg.appendChild(col0);
+	colg.appendChild(col1);
+	colg.appendChild(col2);
+	tb.appendChild(colg);
+//	tb.innerHTML="<colgroup><col span=\"1\" style=\"width:25px;\"><col span=\"1\" ><col span=\"1\" style=\"width:30px;\"></colgroup>";
+}
+
+function toggleLayer(e){
+	var lid = (e.target.id).substring(3);
+//	console.log("call toggle Layer",e.target.id,e.target.checked,lid);
+	svgMap.setRootLayersProps(lid, e.target.checked , false );
+	
+	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
+	var tb = document.getElementById("layerTable");
+	removeAllLayerItems(tb);
+	setLayerTable(tb);
+	svgMap.refreshScreen();
+}
+
+function toggleBatch(e){
+	var lid = (e.target.id).substring(3);
+//	console.log("call toggle Batch",e.target.id,e.target.checked,lid);
+	var batchLayers = svgMap.getSwLayers( "batch" ); 
+//	console.log("this ID might be a batch gruop. :"+ lid,batchLayers);
+	
+//	svgMap.setRootLayersProps(lid, e.target.checked , false );
+	
+	// ひとつでもhiddenのレイヤーがあれば全部visibleにする
+	var bVisibility = "hidden";
+	for ( var i = 0 ; i < batchLayers[lid].length ; i++){
+		if ( (batchLayers[lid])[i].getAttribute("visibility" ) == "hidden"){
+			bVisibility = "visible";
+			break;
+		}
+	}
+	for ( var i = 0 ; i < batchLayers[lid].length ; i++){
+		(batchLayers[lid])[i].setAttribute("visibility" , bVisibility);
+	}
+	
+	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
+	var tb = document.getElementById("layerTable");
+	removeAllLayerItems(tb);
+	setLayerTable(tb);
+	svgMap.refreshScreen();
+}
+
+function MouseWheelListenerFunc(e){
+	//レイヤリストのホイールスクロールでは地図の伸縮を抑制する
+//	e.preventDefault();
+	e.stopPropagation();
+}
+
+function initLayerList(){
+	layerGroupStatus = new Object();
+	layerList = document.getElementById("layerList");
+//	console.log("ADD EVT");
+	layerList.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
+	layerList.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
+	layerList.style.zIndex="20";
+	layerSpecificUI = document.getElementById("layerSpecificUI");
+	var lps = svgMap.getRootLayersProps();
+	var visibleLayers=0;
+	for ( var i = lps.length -1 ; i >=0  ; i-- ){
+		if (lps[i].visible){++visibleLayers;}
+	}
+	
+	var llUIlabel = document.createElement("label");
+	llUIlabel.id="layerListmessage";
+	llUIlabel.setAttribute("for","layerListOpenButton");
+	layerList.appendChild(llUIlabel);
+	
+	var llUIbutton = document.createElement("input");
+	llUIbutton.id="layerListOpenButton";
+	llUIbutton.type="button";
+	llUIbutton.value="v";
+	llUIbutton.style.position="absolute";
+	llUIbutton.style.right="0px";
+	llUIbutton.addEventListener("click",layerListOpenClose);
+	layerList.appendChild(llUIbutton);
+	
+	var llUIdiv = document.createElement("div");
+	llUIdiv.id="layerTableDiv";
+	llUIdiv.style.width = "100%";
+	llUIdiv.style.height = "100%";
+	llUIdiv.style.overflowY = "scroll";
+	llUIdiv.style.display = "none";
+	
+	layerList.appendChild(llUIdiv);
+	
+	var llUItable = document.createElement("table");
+	llUItable.id="layerTable";
+	llUItable.setAttribute("border" , "0");
+	llUItable.style.width="100%";
+	llUItable.style.tableLayout ="fixed";
+	llUItable.style.whiteSpace ="nowrap";
+	
+	var llUIcolgroup = document.createElement("colgroup");
+	
+	var llUIcol1 = document.createElement("col");
+	llUIcol1.setAttribute("spanr" , "1");
+	llUIcol1.style.width ="25px";
+	var llUIcol2 = document.createElement("col");
+	llUIcol2.setAttribute("spanr" , "1");
+	var llUIcol3 = document.createElement("col");
+	llUIcol3.setAttribute("spanr" , "1");
+	llUIcol3.style.width ="30px";
+	
+	llUIcolgroup.appendChild(llUIcol1);
+	llUIcolgroup.appendChild(llUIcol2);
+	llUIcolgroup.appendChild(llUIcol3);
+	
+	llUItable.appendChild(llUIcolgroup);
+	
+	llUIdiv.appendChild(llUItable);
+	
+	llUIlabel.innerHTML="Layer List:  "+visibleLayers+" layers visible";
+	
+	initLayerSpecificUI();
+}
+
+function initLayerSpecificUI(){
+	layerSpecificUI.style.zIndex="20";
+	lsUIbdy = document.createElement("div");
+	lsUIbdy.id = "layerSpecificUIbody";
+	lsUIbdy.style.width="100%";
+	lsUIbdy.style.height="100%";
+//	lsUIbdy.style.overflowY="scroll";
+	layerSpecificUI.appendChild(lsUIbdy);
+	
+	lsUIbtn = document.createElement("input");
+	lsUIbtn.type="button";
+	lsUIbtn.value="x";
+	lsUIbtn.style.position="absolute";
+	lsUIbtn.style.right="0px";
+	lsUIbtn.style.top="0px";
+	layerSpecificUI.appendChild(lsUIbtn);
+	lsUIbtn.addEventListener("click",layerSpecificUIhide,false);
+}
+
+svgMap.registLayerUiSetter( initLayerList );
+
+function toggleGroupFold( e ){
+	var lid = (e.target.id).substring(3);
+//	console.log("call toggle Group Hidden",e.target.id,e.target.checked,lid);
+	if ( layerGroupStatus[lid] ){
+		layerGroupStatus[lid] = false;
+	} else {
+		layerGroupStatus[lid] = true;
+	}
+	var tb = document.getElementById("layerTable");
+	removeAllLayerItems(tb);
+	setLayerTable(tb);
+	
+}
+
+//window.addEventListener( 'load', function(){
+//	console.log("call initLayerList");
+//	initLayerList();
+//}, false );
+
+// TEST 2016.10.17
+//window.addEventListener( 'zoomPanMap', function(){
+//	console.log("CATCH ZOOM PAN MAP EVENT ON MAIN WINDOW");
+//},false);
+
+// 同じレイヤーUI(iframeのみ)が開かれているかどうか検証
+function isAlreadyCreated(id,e){
+	if ( document.getElementById("layerSpecificUIframe") ){
+		var iframe = document.getElementById("layerSpecificUIframe");
+		var lid=(e.target.id).substring(3);
+		console.log("evt:",lid,"  iframe:",iframe.contentWindow.myLayerID);
+		if ( iframe.contentWindow && iframe.contentWindow.myLayerID==lid ){
+			return ( true );
+		} else {
+			return ( false );
+		}
+	} else {
+		return ( false );
+	}
+}
+
+function showLayerSpecificUI(e){
+	var lid=(e.target.id).substring(3);
+//	var lprops = svgMap.getRootLayersProps();
+//	var controllerURL = lprops[lid].svgImageProps.controller;
+//	console.log(lprops[lid],controllerURL,e.target.dataset.url);
+	var controllerURL = e.target.dataset.url;
+//	console.log(controllerURL);
+	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
+	layerSpecificUI.style.display = "inline";
+	
+	if ( ! isAlreadyCreated(lid,e) ){
+		for ( var i = layerSpecificUIbody.childNodes.length-1;i>=0;i--){
+			layerSpecificUIbody.removeChild(layerSpecificUIbody.childNodes[i]);
+		}
+		if ( controllerURL.indexOf(".png")>0 || controllerURL.indexOf(".jpg")>0 || controllerURL.indexOf(".gif")>0){
+			var img = document.createElement("img");
+			img.src=controllerURL;
+			img.setAttribute("width","100%");
+			layerSpecificUIbody.appendChild(img);
+		} else {
+			initIframe(lid,controllerURL,svgMap);
+		}
+	}
+}
+
+function initIframe(lid,controllerURL,svgMap){
+	var iframe = document.createElement("iframe");
+	iframe.id = "layerSpecificUIframe";
+	iframe.src=controllerURL;
+	iframe.setAttribute("frameborder","0");
+	iframe.style.width="100%";
+	iframe.style.height="100%";
+	layerSpecificUIbody.appendChild(iframe);
+	iframe.onload=function(){
+		iframe.contentWindow.layerID=lid;
+		iframe.contentWindow.svgMap = svgMap;
+		iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
+		iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
+//		iframe.contentWindow.testIframe("hellow from parent");
+		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe, false);
+		document.addEventListener("zoomPanMap", transferCustomEvent2iframe , false);
+	}
+}
+
+function transferCustomEvent2iframe(){
+	console.log("get zoomPanMap event from root doc");
+	// レイヤー固有UIがある場合のみイベントを転送する
+	if ( document.getElementById("layerSpecificUIframe") ){
+		var ifr = document.getElementById("layerSpecificUIframe");
+		var customEvent = ifr.contentWindow.document.createEvent("HTMLEvents");
+		customEvent.initEvent("zoomPanMap", true , false );
+		ifr.contentWindow.document.dispatchEvent(customEvent);
+	} else {
+		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe, false);
+	}
+}
+
+
+function layerSpecificUIhide(){
+	layerSpecificUI.style.display = "none";
+}
+
+
+return { // svgMapLayerUI. で公開する関数のリスト
+	layerSpecificUIhide : layerSpecificUIhide
+}
+
+})();
+
+window.svgMapLayerUI = svgMapLayerUI;
+
+
+})( window );
+
