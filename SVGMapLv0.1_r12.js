@@ -5355,6 +5355,7 @@ function removeAllCookies() {
 var resumeFirstTime = true;
 function checkResume(){
 	var cook = getCookies();
+	removeAllCookies();
 //	console.log("START checkResume",resume,"firstTime?:",resumeFirstTime,document.cookie,cook);
 	if ( cook.resume ){
 		resume = ( cook.resume=="true" ? true : false);
@@ -5374,7 +5375,6 @@ function checkResume(){
 	if ( resume ){
 		if ( resumeFirstTime ){ // 最初の読み込み直後には、レジュームを行う
 //			console.log("Resume on startup",document.cookie);
-			removeAllCookies();
 			
 			var vbLat = Number(cook.vbLat);
 			var vbLng = Number(cook.vbLng);
@@ -5501,6 +5501,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getConversionMatrixViaGCS : getConversionMatrixViaGCS,
 	getTransformedBox : getTransformedBox,
 //	zoomRatio : zoomRatio,
+	setZoomRatio : function( ratio ){ zoomRatio = ratio },
 //	summarizeCanvas : summarizeCanvas,
 	setSummarizeCanvas : function( val ){ summarizeCanvas = val },
 //	loadingTransitionTimeout : loadingTransitionTimeout,
