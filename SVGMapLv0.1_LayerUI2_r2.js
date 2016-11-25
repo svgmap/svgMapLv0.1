@@ -612,7 +612,7 @@ function testIframeSize( iframe ){
 }
 
 function transferCustomEvent2iframe(){
-	console.log("get zoomPanMap event from root doc");
+//	console.log("get zoomPanMap event from root doc");
 	// レイヤー固有UIがある場合のみイベントを転送する
 	if ( document.getElementById("layerSpecificUIframe") ){
 		var ifr = document.getElementById("layerSpecificUIframe");

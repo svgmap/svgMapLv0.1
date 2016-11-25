@@ -3749,6 +3749,7 @@ function requestRemoveTransition( imgElem , parentElem2 ){ // 2013.7.31 debug �
 
 var loadCompleted = true;
 function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし、必要な処理を起動する。
+// 具体的には、読み込み中のドキュメントをチェックし、もうなければ遅延img削除処理を実行、読み込み完了イベントを発行
 //	console.log("hashLen:", getHashLength(loadingImgs), " loading:" , loadingDatas);
 	var hl = getHashLength(loadingImgs);
 //	console.log("hashLen:", hl, " loadCompl:" , loadCompleted);
@@ -5200,6 +5201,7 @@ function contColorSet() {
 
 
 function refreshScreen(){
+	loadCompleted = false; // 2016.11.24 debug この関数が呼ばれるときは少なくとも(描画に変化がなくとも) loadCompletedをfalseにしてスタートさせないと、あらゆるケースでの描画完了を検知できない
 	dynamicLoad( "root" , mapCanvas );
 }
 	
