@@ -4390,6 +4390,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 	var prevCont = false;
 	var sx = 0, sy = 0;
 	var mx = 0 , my = 0;
+	var startX = 0, startY = 0; // mx,myと似たようなものだがtransformかけてない・・・ 2016/12/1 debug
 	var prevX = 0 , prevY = 0;
 	context.beginPath();
 	var i = 0;
@@ -4421,6 +4422,8 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			sx = Number(d[i]);
 			++i;
 			sy = Number(d[i]);
+			startX = sx;
+			startY = sy;
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
 			mx = cp.x;
 			my = cp.y;
@@ -4433,6 +4436,8 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			sx += Number(d[i]);
 			++i;
 			sy += Number(d[i]);
+			startX = sx;
+			startY = sy;
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
 			mx = cp.x;
 			my = cp.y;
@@ -4541,6 +4546,8 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			context.closePath();
 			hitPoint = getHP(hitPoint, cp);
 			closed = true;
+			sx = startX; // debug 2016.12.1
+			sy = startY;
 			break;
 		default:
 			hitPoint = getHP(hitPoint, cp);
