@@ -592,6 +592,9 @@ function initIframe(lid,controllerURL,svgMap){
 		}
 		iframe.contentWindow.layerID=lid;
 		iframe.contentWindow.svgMap = svgMap;
+		if ( svgMapGIStool ){
+			iframe.contentWindow.svgMapGIStool = svgMapGIStool;
+		}
 		iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
 		iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
 //		iframe.contentWindow.testIframe("hellow from parent");
@@ -612,7 +615,7 @@ function testIframeSize( iframe ){
 }
 
 function transferCustomEvent2iframe(){
-	console.log("get zoomPanMap event from root doc");
+//	console.log("get zoomPanMap event from root doc");
 	// レイヤー固有UIがある場合のみイベントを転送する
 	if ( document.getElementById("layerSpecificUIframe") ){
 		var ifr = document.getElementById("layerSpecificUIframe");
