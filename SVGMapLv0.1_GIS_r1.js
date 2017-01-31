@@ -21,6 +21,9 @@
 //  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 // 
 // History:
+// 2016.12.02 コアにGeoJSONパース機能実装、それを用いたPolygon内のPoitns包含チェック初期実装
+// 2016.12.07 JSTS implementation
+// 2016.12.16 Totally Asynchronus Proecssing　ほぼ満足する機能が入ったと思われる。＞初期リリースとする
 //
 // 
 // ACTIONS:
@@ -44,10 +47,10 @@ var location = window.location;
 
 var svgMapGIStool = ( function(){ 
 
-	console.log("Hello this is svgMapGIStool");
+//	console.log("Hello this is svgMapGIStool");
 	
 	if ( jsts ){ // using jsts (JTS javascript edition)
-		console.log("This apps has jsts (JavaScript Topology Suites)");
+//		console.log("This apps has jsts (JavaScript Topology Suites)");
 		this.featureReader = new jsts.io.GeoJSONReader();
 		this.featureWriter = new jsts.io.GeoJSONWriter();
 		this.getFeature = function( geojs ){
@@ -71,7 +74,7 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
-	console.log(featureReader, featureWriter, getFeature, getGeoJson);
+//	console.log(featureReader, featureWriter, getFeature, getGeoJson);
 	
 	// http://stackoverflow.com/questions/22521982/js-check-if-point-inside-a-polygon
 	function inside(point, vs) {
@@ -139,59 +142,274 @@ var svgMapGIStool = ( function(){
 	
 	
 	// poiID（およびその子供の文書）が、
-	function getIncludedPoints(poiID, polyID, cbFunc, param , inverse){
+	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse ){
+		var superParam = {
+			pointsDocTreeID: poiID,
+			polygonsDocTreeID: polyID,
+			cbFunc: cbFunc,
+			param: param,
+			progrssCallback: progrssCallback,
+			inverse: inverse
+		}
 		var pointsDocTreeID = poiID;
 		var polygonsDocTreeID = polyID;
 		console.log( "called getIncludedPoints:", pointsDocTreeID, polygonsDocTreeID);
-		svgMap.captureGISgeometries(getIncludedPointsS2 , pointsDocTreeID , polygonsDocTreeID , cbFunc , param, inverse );
+//		svgMap.captureGISgeometries(getIncludedPointsS2 , superParam );
+		svgMap.captureGISgeometries(getIncludedPointsS2a , superParam );
 	}
 	
-	function getExcludedPoints(poiID, polyID, cbFunc, param){
-		getIncludedPoints(poiID, polyID, cbFunc, param , true);
+	function getExcludedPoints(poiID, polyID, cbFunc, param , progrssCallback ){
+		getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , true);
 	}
 	
-	function getIncludedPointsS2( geom , pointsDocTreeID, polygonsDocTreeID, cbFunc , param, inverse ){
+	
+	// PolygonやMultiLineStringの中心(実際はbboxの中心)をPointと見做すための処理
+	function getCenterPoint( coordinates ){
+		var minX=60000,minY=60000,maxX=-60000,maxY=-60000;
+		for ( var i = 0 ; i < coordinates.length ; i++ ){
+			for ( var j = 0 ; j < coordinates[i].length ; j++ ){
+				if (coordinates[i][j][0] < minX ){
+					minX = coordinates[i][j][0];
+				}
+				if ( coordinates[i][j][0] > maxX ){
+					maxX = coordinates[i][j][0];
+				}
+				if (coordinates[i][j][1] < minY ){
+					minY = coordinates[i][j][1];
+				}
+				if ( coordinates[i][j][1] > maxY ){
+					maxY = coordinates[i][j][1];
+				}
+			}
+		}
+		var cx = (minX + maxX )/ 2;
+		var cy = (minY + maxY )/ 2;
+		return [cx,cy];
+	}
+	
+	function getIncludedPointsS2( geom , superParam ){
+		
+		// extract from superParams
+		var pointsDocTreeID = superParam.pointsDocTreeID;
+		var polygonsDocTreeID = superParam.polygonsDocTreeID;
+		var cbFunc = superParam.cbFunc;
+		var param = superParam.param;
+		var progrssCallback = superParam.progrssCallback;
+		var inverse = superParam.inverse;
+		
+		console.log("Searched geom:",geom);
 		if ( inverse && inverse == true ){
 		} else {
 			inverse = false;
 		}
-//		console.log("searchedGeom:",geom, "   inverse?:",inverse);
-		if ( geom[pointsDocTreeID] && geom[polygonsDocTreeID] ){
-			var inclPi = [];
-			
-			var poiDoc = geom[pointsDocTreeID];
-			var polDoc = geom[polygonsDocTreeID];
-//			console.log("poi:",poiDoc," pol:",polDoc);
-			
-			var ansPois = new Array();
-			
-			for ( var pic = 0 ; pic < poiDoc.length ; pic++ ){
-				if ( poiDoc[pic].type === "Point" ){
-					for ( plc = 0 ; plc < polDoc.length ; plc ++ ){
-						if ( polDoc[plc].type === "Polygon" ){
-							polygon = polDoc[plc].coordinates;
-							if ( !inverse ){ // 内包判定
-								if ( insidePolygon( poiDoc[pic].coordinates , polygon ) ){
-									// 一個でも内包してたらそれで内包判断完了
-									ansPois.push(poiDoc[pic]);
-									break;
+		
+		var cdi = getChildDocsId(pointsDocTreeID,polygonsDocTreeID)
+		var pointsDocTreeIDs = cdi.childrenId1;
+		var polygonsDocTreeIDs = cdi.childrenId2;
+		var totalPoiCount = 0;
+		var ansPois = new Array();
+		for ( var poiDocC = 0 ; poiDocC < pointsDocTreeIDs.length ; poiDocC++ ){
+		
+	//		console.log("searchedGeom:",geom, "   inverse?:",inverse);
+			if ( geom[pointsDocTreeIDs[poiDocC]]  ){
+				var inclPi = [];
+				
+				var poiDoc = geom[pointsDocTreeIDs[poiDocC]];
+				
+				console.log("poi:",poiDoc);
+				
+				totalPoiCount +=  poiDoc.length;
+				for ( var pic = 0 ; pic < poiDoc.length ; pic++ ){
+					var point;
+					if ( poiDoc[pic].type === "Point" ){
+						point = poiDoc[pic].coordinates;
+					} else if (poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString"){
+						console.log(poiDoc[pic]);
+						point = getCenterPoint(poiDoc[pic].coordinates);
+					} else {
+						continue;
+					}
+						
+					loop: for ( var polDocC = 0 ; polDocC < polygonsDocTreeIDs.length ; polDocC++ ){
+						
+						if ( geom[polygonsDocTreeIDs[polDocC]] ){
+							var polDoc = geom[polygonsDocTreeIDs[polDocC]];
+							
+							console.log("pol:",polDoc);
+							
+							for ( var plc = 0 ; plc < polDoc.length ; plc ++ ){
+								if ( polDoc[plc].type != "Polygon" ){
+									continue;
 								}
-							} else { // 非内包判定
-								if ( insidePolygon( poiDoc[pic].coordinates , polygon ) ){
-									break; // 一個でも内包してたらそれでアウト
-								} else if ( plc == polDoc.length - 1 ){
-									// 最後まで検索できていて内包してなければOK
-									ansPois.push(poiDoc[pic]);
+								polygon = polDoc[plc].coordinates;
+								if ( !inverse ){ // 内包判定
+									if ( insidePolygon( point , polygon ) ){
+										// 一個でも内包してたらそれで内包判断完了
+										ansPois.push(poiDoc[pic]);
+										break loop;
+									}
+								} else { // 非内包判定
+									if ( insidePolygon( point , polygon ) ){
+										break loop; // 一個でも内包してたらそれでアウト
+									} else if ( plc == polDoc.length - 1 ){
+										// 最後まで検索できていて内包してなければOK
+										ansPois.push(poiDoc[pic]);
+									}
 								}
 							}
 						}
 					}
 				}
 			}
-			
-			
-			cbFunc(ansPois , param ); // 検索したPOIを全部Arrayとして返す。一個パラメータを渡せる
 		}
+		cbFunc(ansPois , totalPoiCount , param ); // 検索したPOIを全部Arrayとして返す。一個パラメータを渡せる
+	}
+	
+	// 重くなることがあるので、非同期処理版を作る・・・
+	function getIncludedPointsS2a( geom , superParam ){
+		console.log("getIncludedPointsS2a called : ",geom);
+		var cdi = getChildDocsId(superParam.pointsDocTreeID, superParam.polygonsDocTreeID)
+		var pointsDocTreeIDs = cdi.childrenId1;
+		superParam.pointsDocTreeIDs = pointsDocTreeIDs;
+		var polygonsDocTreeIDs = cdi.childrenId2;
+		superParam.polygonsDocTreeIDs = polygonsDocTreeIDs;
+		var totalPoiCount = 0;
+		var ansPois = new Array();
+		
+		var compArray = [];
+		for ( var poiDocC = 0 ; poiDocC < pointsDocTreeIDs.length ; poiDocC++ ){
+			if ( geom[pointsDocTreeIDs[poiDocC]]  ){
+				var poiDoc = geom[pointsDocTreeIDs[poiDocC]];
+				totalPoiCount +=  poiDoc.length;
+				for ( var pic = 0 ; pic < poiDoc.length ; pic++ ){
+					for ( polDocC = 0 ; polDocC < polygonsDocTreeIDs.length ; polDocC++ ){ // Loop:seki point
+						if ( geom[polygonsDocTreeIDs[polDocC]] ){
+							var polDoc = geom[polygonsDocTreeIDs[polDocC]];
+//							console.log("polDoc:",polDoc);
+							for ( plc = 0 ; plc < polDoc.length ; plc ++ ){
+								compArray.push([poiDocC,pic,polDocC,plc]);
+							}
+						}
+					}
+				}
+			}
+		}
+		superParam.totalPoiCount = totalPoiCount;
+		
+		console.log("call getIncludedPointsS3 :" , compArray);
+		getIncludedPointsS3( geom, superParam , compArray);
+	}
+	
+	function getIncludedPointsS3( geom , superParam , compArray , counter , startTime , ansPois ){
+		
+		
+		if ( ! counter ){
+			startTime = new Date().getTime();
+			ansPois = [];
+			counter = 0;
+		}
+		while ( counter < compArray.length && halt == false){
+			
+//			console.log("counter:",counter);
+			//
+			var poiDocC = compArray[counter][0];
+			
+			var poiDoc = geom[superParam.pointsDocTreeIDs[poiDocC]];
+			
+			
+			//
+			var pic = compArray[counter][1];
+			
+			var point;
+			if ( poiDoc[pic].type === "Point" ){
+				point = poiDoc[pic].coordinates;
+			} else if (poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString"){
+//				console.log(poiDoc[pic]);
+				point = getCenterPoint(poiDoc[pic].coordinates);
+			} else {
+				counter = skipPOIcounter(compArray, counter) ;  // picを一個増加させる・スキップさせる処理
+				// これはまずいのではないか？　結局nullのpointで、下を回してしまうような気がする。
+				// ので以下の処理を入れてみたが・・・バグ出るかも 2016.12.28
+				++ counter;
+				continue;
+			}
+			
+			//
+			var polDocC = compArray[counter][2];
+			
+			var polDoc = geom[superParam.polygonsDocTreeIDs[polDocC]];
+			
+			//
+			var plc = compArray[counter][3];
+			
+			if ( polDoc[plc].type != "Polygon" ){
+				// 2016/12/28 debug 結構残念なバグ・・
+				if ( superParam.inverse && plc == polDoc.length - 1 ){
+					ansPois.push(poiDoc[pic]);
+				}
+				++ counter;
+				continue;
+			}
+			polygon = polDoc[plc].coordinates;
+			if ( !superParam.inverse ){ // 内包判定
+				if ( insidePolygon( point , polygon ) ){
+					// 一個でも内包してたらそれで内包判断完了
+					ansPois.push(poiDoc[pic]);
+					console.log("PUSH");
+					counter = skipPOIcounter(compArray, counter);
+				}
+			} else { // 非内包判定
+				if ( insidePolygon( point , polygon ) ){
+					counter = skipPOIcounter(compArray, counter); // 一個でも内包してたらそれでアウト picを一個増加させる
+				} else if ( plc == polDoc.length - 1 ){
+					// 最後まで検索できていて内包してなければOK
+					console.log("PUSH");
+					ansPois.push(poiDoc[pic]);
+				}
+			}
+			//
+			
+//			console.log("step:",counter,"  comp end");
+			
+			var currentTime =  new Date().getTime();
+			++ counter;
+			if ( currentTime - startTime > 500 ){ // 0.3秒以上たったらちょっと(30ms)休憩
+				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
+				if ( superParam.progrssCallback ){
+					superParam.progrssCallback( Math.ceil(1000 * counter /  compArray.length) / 10 );
+				}
+				startTime = new Date().getTime();
+				setTimeout(getIncludedPointsS3, 30 , geom, superParam, compArray , counter , startTime , ansPois);
+				break;
+			}
+		}
+		halt = false;
+		if ( counter == compArray.length ) {
+			if ( superParam.progrssCallback ){
+				superParam.progrssCallback( 100 );
+			}
+			console.log("Completed!",ansPois );
+			
+			superParam.cbFunc(ansPois , superParam.totalPoiCount , superParam.param );
+			
+		}
+	}
+	
+	// getIncludedPointsS3における、そのPOIに対する評価のためのcompArrayカウンター分をスキップするカウンター値生成
+	function skipPOIcounter(compArray, counter){
+//		console.log("called:skipPOIcounter:",counter);
+		var ansCounter = counter;
+		var currentPoiC = compArray[counter][1];
+		var poiC = currentPoiC;
+		while ( poiC == currentPoiC ){
+			++ansCounter;
+			if ( ansCounter == compArray.length ){
+				console.log("BREAK.....");
+				break;
+			}
+			poiC = compArray[ansCounter][1];
+		}
+		return ( ansCounter -1);
 	}
 	
 	
@@ -220,7 +438,7 @@ var svgMapGIStool = ( function(){
 		for ( var i = 0 ; i < sourceLayerIDs.length ; i++ ){
 			var geoms1 = geom[sourceLayerIDs[i]];
 ///			console.log(geoms1);
-			if ( geoms1.length > 0 ){
+			if ( geoms1 && geoms1.length > 0 ){
 				for ( var k = 0 ; k < geoms1.length ; k++ ){
 					var geom1 = geoms1[k].coordinates;
 					if ( geom1[0].length ){
@@ -237,12 +455,38 @@ var svgMapGIStool = ( function(){
 		return ( points );
 	}
 	
+	function getChildDocsId( layerId1 , layerId2 ){
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var childrenId1 =[];
+		var childrenId2 =[];
+		
+		for ( var docId in svgImagesProps ){
+			if ( layerId1 === svgImagesProps[docId].rootLayer ){
+				childrenId1.push( docId );
+			} else if ( layerId2 === svgImagesProps[docId].rootLayer ){
+				childrenId2.push( docId );
+			}
+		}
+		
+		return {
+			childrenId1: childrenId1,
+			childrenId2: childrenId2
+		}
+	}
+	
+	
 	function buildIntersectionS2( geom, params ){
 //		console.log( "called buildIntersectionS2:",geom, params );
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
-		var source1IDs = [], source2IDs = [];
+//		var source1IDs = [], source2IDs = [];
 		// sourceId1,2がルートレイヤーである子レイヤーをsource1,2IDsに蓄積する
+		
+		var childrenID = getChildDocsId( params.sourceId1 , params.sourceId2 );
+		var source1IDs = childrenID.childrenId1;
+		var source2IDs = childrenID.childrenId2;
+		
+		/**
 		for ( var docId in geom ){
 //			console.log("layerId:",docId , " rootLayer:",svgImagesProps[docId].rootLayer);
 			if ( params.sourceId1 === svgImagesProps[docId].rootLayer ){
@@ -251,17 +495,19 @@ var svgMapGIStool = ( function(){
 				source2IDs.push(docId);
 			}
 		}
+		**/
 		
-//		console.log("source1IDs:",source1IDs,"\nsource2IDs:",source2IDs);
+		console.log("source1IDs:",source1IDs,"\nsource2IDs:",source2IDs);
 		
 		var targetDoc = svgImages[params.targetId];
 		
 		var intersections=[];
 		
+		var src1IDs, src2IDs;
+		
 		var source1Points = countPoints(source1IDs , geom);
 		var source2Points = countPoints(source2IDs , geom);
 		
-		var src1IDs, src2IDs;
 		if ( source1Points < source2Points ){
 			src1IDs = source1IDs;
 			src2IDs = source2IDs;
@@ -269,6 +515,7 @@ var svgMapGIStool = ( function(){
 			src1IDs = source2IDs;
 			src2IDs = source1IDs;
 		}
+		
 		console.log("src1IDs:",src1IDs,"\src2IDs:",src2IDs);
 		
 		
@@ -276,7 +523,7 @@ var svgMapGIStool = ( function(){
 		for ( var i = 0 ; i < src1IDs.length ; i++ ){
 			var geoms1 = geom[src1IDs[i]];
 			console.log(geoms1);
-			if ( geoms1.length>0 ){
+			if ( geoms1 && geoms1.length>0 ){
 				for ( var k = 0 ; k < geoms1.length ; k++ ){
 					var geom1 = geoms1[k];
 					if ( geom1 ){
@@ -292,7 +539,7 @@ var svgMapGIStool = ( function(){
 		var compArray = [];
 		for ( var j = 0 ; j < src2IDs.length ; j++ ){
 			var geoms2 = geom[src2IDs[j]];
-			if ( geoms2.length>0 ){
+			if ( geoms2 && geoms2.length>0 ){
 				for ( var l = 0 ; l < geoms2.length ; l++ ){
 					var geom2 = geoms2[l];
 					if ( geom2 ){
@@ -306,44 +553,6 @@ var svgMapGIStool = ( function(){
 		console.log(compArray);
 		
 		buildIntersectionS3(src2IDs,src1Features, compArray,geom, params);
-		
-		/**
-		for ( var j = 0 ; j < src2IDs.length ; j++ ){
-			if ( params.progrssCallback ){
-				params.progrssCallback( Math.ceil(j / src2IDs.length));
-			}
-			var geoms2 = geom[src2IDs[j]];
-			if ( geoms2.length>0 ){
-				for ( var l = 0 ; l < geoms2.length ; l++ ){
-					var geom2 = geoms2[l];
-					if ( geom2 ){
-						var feature2 = getFeature(geom2);
-						for ( var m = 0 ; m < src1Features.length ; m++ ){
-							var featureA = src1Features[m];
-							try{
-								var isf = featureA.intersection(feature2);
-								if ( isf ){
-									var isGeom = getGeoJson(isf);
-									if ( isGeom.coordinates.length > 0 ){
-										intersections.push(isGeom);
-									}
-								}
-							} catch (e){
-								console.log(e);
-							}
-						}
-					}
-				}
-			}
-		}
-		if ( params.progrssCallback ){
-			params.progrssCallback( 100 );
-		}
-		console.log(intersections);
-		
-		drawGeoJson(intersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor);
-		svgMap.refreshScreen();
-		**/
 		
 	}
 	

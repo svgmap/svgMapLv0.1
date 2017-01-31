@@ -3584,6 +3584,14 @@ function setRootLayersProps(layerID_Numb_Title, visible , editing ){
 	return (  true );
 }
 
+// setRootLayersPropsの簡単版　ただし、layerListUIのアップデートが行われる
+function setLayerVisibility( layerID_Numb_Title, visible ){
+	setRootLayersProps(layerID_Numb_Title, visible , false );
+	if ( typeof updateLayseListUI == "function" ){
+		updateLayseListUI();
+	}
+	refreshScreen();
+}
 
 
 function getLayerName( layer ){
@@ -3752,7 +3760,7 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 // 具体的には、読み込み中のドキュメントをチェックし、もうなければ遅延img削除処理を実行、読み込み完了イベントを発行
 //	console.log("hashLen:", getHashLength(loadingImgs), " loading:" , loadingDatas);
 	var hl = getHashLength(loadingImgs);
-	console.log("checkLoadCompleted::  hashLen:", hl);
+//	console.log("checkLoadCompleted::  hashLen:", hl);
 //	console.log("hashLen:", hl, " loadCompl:" , loadCompleted);
 	if ( hl == 0  || forceDel ){
 //		console.log("do LoadComletion process forceDel:",forceDel);
@@ -5462,7 +5470,7 @@ function resumeToggle(evt){
 }
 
 
-var setLayerUI;
+var setLayerUI, updateLayseListUI;
 
 return { // svgMap. で公開する関数のリスト 2014.6.6
 	// まだ足りないかも？
@@ -5546,8 +5554,10 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	refreshScreen : refreshScreen,
 	getRootLayersProps : getRootLayersProps,
 	setRootLayersProps : setRootLayersProps,
-	registLayerUiSetter : function ( func ){
-		setLayerUI = func;
+	setLayerVisibility : setLayerVisibility,
+	registLayerUiSetter : function ( layerUIinitFunc, layerUIupdateFunc ){
+		setLayerUI = layerUIinitFunc;
+		updateLayseListUI = layerUIupdateFunc;
 	},
 	getUaProp : function (){
 		return {

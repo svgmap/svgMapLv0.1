@@ -29,7 +29,9 @@
 // 2016/10/28 : Rev.2: classをいろいろ付けた。フレームワーク化
 // 2016/11/15 : レイヤリスト、レイヤ固有UIともに、内容のサイズに応じて縦長さを可変に（まだ不完全かも）
 // 2016/11/15 : レイヤリストのグループに配下で表示しているレイヤの個数を表示
-//
+// 2016/12/?  : GIS Tools Support
+// 2016/12/19 : Authoring Tools Support
+// 2017/01/27 : レイヤ固有UIのリサイズメカニズムを拡張。 data-controllerに、#requiredHeight=hhh&requiredWidth=www　を入れるとできるだけそれを提供する
 //
 // ISSUES:
 //  レイヤが消えているのにレイヤ特化UIが残っているのはまずい
@@ -49,17 +51,14 @@ var layerSpecificUI; // layerSpecificUIの要素
 function layerListOpenClose(){
 	uiOpenBtn = document.getElementById("layerListOpenButton");
 	layerTableDiv = document.getElementById("layerTableDiv");
-	var tb = document.getElementById("layerTable");
-//	console.log("layerListOpenClose:layerTable",tb);
 	if ( layerList.style.height== layerListFoldedHeight + "px" ){ // layer list is colsed
-		setLayerTable(tb);
+		updateLayerTable();
 		layerList.style.height=layerListMaxHeightStyle;
 		uiOpenBtn.value="^";
 		layerTableDiv.style.display="";
 		uiOpened = true;
 	} else { // opened
 		layerList.style.height= layerListFoldedHeight + "px";
-		removeAllLayerItems(tb);
 		uiOpenBtn.value="v";
 		layerTableDiv.style.display="none";
 		uiOpened = false;
@@ -77,6 +76,11 @@ function getGroupFoldingStatus( groupName ){ // グループ折り畳み状況�
 	return ( gfolded );
 }
 
+function updateLayerTable(){
+	var tb = document.getElementById("layerTable");
+	removeAllLayerItems(tb);
+	setLayerTable(tb);
+}
 
 function setLayerTable(tb){
 //	console.log("call setLayerTable:",tb);
@@ -122,14 +126,14 @@ function setLayerTable(tb){
 }
 
 function setLayerTableStep2(){
-	var tableHeight = document.getElementById("layerTable").clientHeight;
+	var tableHeight = document.getElementById("layerTable").offsetHeight;
 //	console.log(tableHeight, layerListMaxHeight , layerListFoldedHeight , layerListMaxHeightStyle );
 	if ( tableHeight < layerListMaxHeight - layerListFoldedHeight - 2 ){
 		layerList.style.height = (tableHeight + layerListFoldedHeight + 2) + "px";
 		console.log("reorder:",layerList.style.height);
 	} else {
 		layerList.style.height = layerListMaxHeightStyle;
-//		layerListMaxHeight = layerList.clientHeight;
+//		layerListMaxHeight = layerList.offsetHeight;
 	}
 }
 
@@ -189,7 +193,7 @@ function getLayerTR(title, id ,visible,hasLayerList,groupName){
 	btn.id = btid;
 	btn.value=">";
 //	btn.setAttribute("onClick","svgMapLayerUI.showLayerSpecificUI(event)");
-	btn.addEventListener("click",showLayerSpecificUI,false);
+	btn.addEventListener("click", showLayerSpecificUI, false);
 	if ( visible ){
 		btn.disabled=false;
 	} else {
@@ -341,9 +345,7 @@ function toggleLayer(e){
 	svgMap.setRootLayersProps(lid, e.target.checked , false );
 	
 	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
-	var tb = document.getElementById("layerTable");
-	removeAllLayerItems(tb);
-	setLayerTable(tb);
+	updateLayerTable();
 	svgMap.refreshScreen();
 }
 
@@ -368,9 +370,7 @@ function toggleBatch(e){
 	}
 	
 	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
-	var tb = document.getElementById("layerTable");
-	removeAllLayerItems(tb);
-	setLayerTable(tb);
+	updateLayerTable();
 	svgMap.refreshScreen();
 }
 
@@ -380,7 +380,7 @@ function MouseWheelListenerFunc(e){
 	e.stopPropagation();
 }
 
-var layerListMaxHeightStyle, layerListMaxHeight, layerListFoldedHeight , layerSpecificUiMaxHeightStyle , layerSpecificUiMaxHeight = 0;
+var layerListMaxHeightStyle, layerListMaxHeight, layerListFoldedHeight , layerSpecificUiDefaultStyle = {} , layerSpecificUiMaxHeight = 0;
 	
 function initLayerList(){
 	layerGroupStatus = new Object();
@@ -447,14 +447,14 @@ function initLayerList(){
 	window.setTimeout(initLayerListStep2,30, llUItop);
 }
 
-function initLayerListStep2(llUItop){
-	layerListFoldedHeight = llUItop.clientHeight;
+function initLayerListStep2(llUItop){ // レイヤリストのレイアウト待ち後サイズを決める　もうちょっとスマートな方法ないのかな・・
+	layerListFoldedHeight = llUItop.offsetHeight;
 	
-	if ( layerList.clientHeight < 60 ){
+	if ( layerList.offsetHeight < 60 ){
 		layerListMaxHeightStyle = "90%";
 	}
 	
-	layerListMaxHeight = layerList.clientHeight;
+	layerListMaxHeight = layerList.offsetHeight;
 	
 //	console.log("LL dim:",layerListMaxHeightStyle,layerListFoldedHeight);
 	
@@ -491,8 +491,13 @@ function getColgroup(){
 }
 
 function initLayerSpecificUI(){
-	layerSpecificUiMaxHeightStyle = layerSpecificUI.style.height;
-//	console.log("layerSpecificUiMaxHeightStyle:",layerSpecificUiMaxHeightStyle);
+	layerSpecificUiDefaultStyle.height = layerSpecificUI.style.height;
+	layerSpecificUiDefaultStyle.width = layerSpecificUI.style.height;
+	layerSpecificUiDefaultStyle.top = layerSpecificUI.style.top;
+	layerSpecificUiDefaultStyle.left = layerSpecificUI.style.left;
+	layerSpecificUiDefaultStyle.right = layerSpecificUI.style.right;
+	console.log("initLayerSpecificUI:",layerSpecificUI.style ,layerSpecificUI);
+	console.log("layerSpecificUiDefaultStyle:",layerSpecificUiDefaultStyle);
 	layerSpecificUI.style.zIndex="20";
 	lsUIbdy = document.createElement("div");
 	lsUIbdy.id = "layerSpecificUIbody";
@@ -511,7 +516,7 @@ function initLayerSpecificUI(){
 	lsUIbtn.addEventListener("click",layerSpecificUIhide,false);
 }
 
-svgMap.registLayerUiSetter( initLayerList );
+svgMap.registLayerUiSetter( initLayerList , updateLayerTable);
 
 function toggleGroupFold( e ){
 	var lid = (e.target.id).substring(3);
@@ -521,10 +526,7 @@ function toggleGroupFold( e ){
 	} else {
 		layerGroupStatus[lid] = true;
 	}
-	var tb = document.getElementById("layerTable");
-	removeAllLayerItems(tb);
-	setLayerTable(tb);
-	
+	updateLayerTable();
 }
 
 //window.addEventListener( 'load', function(){
@@ -542,14 +544,31 @@ function isAlreadyCreated(id,e){
 	if ( document.getElementById("layerSpecificUIframe") ){
 		var iframe = document.getElementById("layerSpecificUIframe");
 		var lid=(e.target.id).substring(3);
-		console.log("evt:",lid,"  iframe:",iframe.contentWindow.myLayerID);
-		if ( iframe.contentWindow && iframe.contentWindow.myLayerID==lid ){
+		console.log("evt:",lid,"  iframe:",iframe.contentWindow.layerID);
+		if ( iframe.contentWindow && iframe.contentWindow.layerID==lid ){
 			return ( true );
 		} else {
 			return ( false );
 		}
 	} else {
 		return ( false );
+	}
+}
+
+function getHash(url){
+	if ( url.indexOf("#")>0){
+		var lhash = url.substring(url.indexOf("#") +1 );
+		if ( lhash.indexOf("?")>0){
+			lhash = lhash.substring(0,lhash.indexOf("?"));
+		}
+		lhash = lhash.split("&");
+		for ( var i = 0 ; i < lhash.length ; i++ ){
+			lhash[i] = lhash[i].split("="); //"
+			lhash[lhash[i][0]]=lhash[i][1];
+		}
+		return ( lhash );
+	} else {
+		return ( null );
 	}
 }
 
@@ -560,10 +579,33 @@ function showLayerSpecificUI(e){
 //	console.log(lprops[lid],controllerURL,e.target.dataset.url);
 	var controllerURL = e.target.dataset.url;
 //	console.log(controllerURL);
+	
+	var reqSize = {height:-1,width:-1};
+	var lhash = getHash(controllerURL);
+	console.log("lhash:",lhash);
+	if ( lhash ){
+		if (lhash.requiredHeight ){
+			reqSize.height = Number(lhash.requiredHeight);
+		}
+		if (lhash.requiredWidth ){
+			reqSize.width = Number(lhash.requiredWidth);
+		}
+		
+	}
+	
 	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
 	layerSpecificUI.style.display = "inline";
 	
 	if ( ! isAlreadyCreated(lid,e) ){
+		console.log("isAlreadyCreated: false");
+		if ( document.getElementById("layerSpecificUIframe") ){
+			var iframe = document.getElementById("layerSpecificUIframe");
+			dispatchCutomIframeEvent("closeFrame");
+//			setTimeout( function(iframe){
+//					iframe.src = "about:blank";
+//			iframe.src = "";
+//				} , 100 , iframe);
+		}
 		for ( var i = layerSpecificUIbody.childNodes.length-1;i>=0;i--){
 			layerSpecificUIbody.removeChild(layerSpecificUIbody.childNodes[i]);
 		}
@@ -573,44 +615,105 @@ function showLayerSpecificUI(e){
 			img.setAttribute("width","100%");
 			layerSpecificUIbody.appendChild(img);
 		} else {
-			initIframe(lid,controllerURL,svgMap);
+			initIframe(lid,controllerURL,svgMap,reqSize);
 		}
+	} else {
+		console.log("isAlreadyCreated: true");
+		dispatchCutomIframeEvent("appearFrame");
+		testIframeSize( document.getElementById("layerSpecificUIframe"), reqSize);
 	}
 }
 
-function initIframe(lid,controllerURL,svgMap){
+function dispatchCutomIframeEvent(evtName){
+	// added 2016.12.21 オーサリングツール等でUIが閉じられたときにイベントを流す
+	// 今のところ、openFrame(新たに生成), closeFrame(消滅), appearFrame(隠されていたのが再度現れた), hideFrame(隠された) の４種で利用
+	if ( document.getElementById("layerSpecificUIframe") ){
+		var ifr = document.getElementById("layerSpecificUIframe");
+		var customEvent = ifr.contentWindow.document.createEvent("HTMLEvents");
+		customEvent.initEvent(evtName, true , false );
+		ifr.contentWindow.document.dispatchEvent(customEvent);
+		
+		// 本体のウィンドにも同じイベントを配信する。
+		var ce2 = document.createEvent("HTMLEvents");
+		ce2.initEvent(evtName, true , false );
+		document.dispatchEvent(ce2);
+		
+	}
+}
+
+function initIframe(lid,controllerURL,svgMap,reqSize){
 	var iframe = document.createElement("iframe");
 	iframe.id = "layerSpecificUIframe";
 	iframe.src=controllerURL;
 	iframe.setAttribute("frameborder","0");
 	iframe.style.width="100%";
 	iframe.style.height="100%";
+	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
+	console.log("layerSpecificUIbody Style:",layerSpecificUIbody.style);
 	layerSpecificUIbody.appendChild(iframe);
 	iframe.onload=function(){
+		dispatchCutomIframeEvent("openFrame");
 		if ( layerSpecificUiMaxHeight == 0 ){
-			layerSpecificUiMaxHeight = layerSpecificUI.clientHeight
+			layerSpecificUiMaxHeight = layerSpecificUI.offsetHeight
 		}
 		iframe.contentWindow.layerID=lid;
 		iframe.contentWindow.svgMap = svgMap;
 		if ( svgMapGIStool ){
+			console.log("add svgMapGIStool to iframe");
 			iframe.contentWindow.svgMapGIStool = svgMapGIStool;
 		}
+		if ( svgMapAuthoringTool ){ // added 2016.12.19 AuthoringTools
+			console.log("add svgMapAuthoringTool to iframe");
+			iframe.contentWindow.svgMapAuthoringTool = svgMapAuthoringTool;
+		}
+		
 		iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
 		iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
 //		iframe.contentWindow.testIframe("hellow from parent");
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe, false);
 		document.addEventListener("zoomPanMap", transferCustomEvent2iframe , false);
-		setTimeout( testIframeSize , 1000 , iframe );
+		setTimeout( testIframeSize , 1000 , iframe ,reqSize);
 	}
 }
 
-function testIframeSize( iframe ){
-	console.log("H:",iframe.contentWindow.document.documentElement.scrollHeight );
-	console.log("H2:",iframe.contentWindow.document.body.clientHeight , layerSpecificUI.clientHeight);
-	if ( iframe.contentWindow.document.body.clientHeight < layerSpecificUiMaxHeight ){
-		layerSpecificUI.style.height = (50 + iframe.contentWindow.document.body.clientHeight) + "px";
+function pxNumb( pxval ){
+	if ( pxval && pxval.indexOf("px")>0){
+		return ( Number(pxval.substring(0,pxval.indexOf("px") ) ));
 	} else {
-		layerSpecificUI.style.height = layerSpecificUiMaxHeightStyle;
+		return ( 0 );
+	}
+}
+	
+function testIframeSize( iframe ,reqSize){
+	console.log("H:",iframe.contentWindow.document.documentElement.scrollHeight );
+	console.log("H2:",iframe.contentWindow.document.body.offsetHeight , layerSpecificUI.offsetHeight);
+	var maxHeight = window.innerHeight - pxNumb(layerSpecificUiDefaultStyle.top) - 50;
+	var maxWidth = window.innerWidth - pxNumb(layerSpecificUiDefaultStyle.left) - pxNumb(layerSpecificUiDefaultStyle.right) - 50;
+	console.log("reqSize:",reqSize, " window:",window.innerWidth,window.innerHeight, "  available w/h",maxWidth,maxHeight) - 50;
+	
+	if ( reqSize.width>0 ){ // 強制サイジング
+		if ( reqSize.width < maxWidth ){
+			layerSpecificUI.style.width = reqSize.width+"px";
+		} else {
+			layerSpecificUI.style.width = maxWidth + "px";
+		}
+	} else {
+		// set by default css　横幅は命じない場合常にcss設定値
+		layerSpecificUI.style.width = layerSpecificUiDefaultStyle.width;
+	}
+	
+	if ( reqSize.height > 0 ){ // 強制サイジング
+		if ( reqSize.height < maxHeight ){
+			layerSpecificUI.style.height = reqSize.height+"px";
+		} else {
+			layerSpecificUI.style.height = maxHeight+"px";
+		}
+	} else { // 自動サイジング 最大値はcss設定値
+		if ( iframe.contentWindow.document.body.offsetHeight < layerSpecificUiMaxHeight ){
+			layerSpecificUI.style.height = (50 + iframe.contentWindow.document.body.offsetHeight) + "px";
+		} else {
+			layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
+		}
 	}
 }
 
@@ -629,8 +732,9 @@ function transferCustomEvent2iframe(){
 
 
 function layerSpecificUIhide(){
+	dispatchCutomIframeEvent("hideFrame");
 	layerSpecificUI.style.display = "none";
-	layerSpecificUI.style.height = layerSpecificUiMaxHeightStyle;
+	layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
 }
 
 
