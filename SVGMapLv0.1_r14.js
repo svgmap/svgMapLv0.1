@@ -114,7 +114,7 @@
 // 2017/01/17 : defs下の<g>に2Dベクタグラフィックス要素群があるものをuseできる機能と、その場合にuse側にmetadataがあってもmetadataをヒットテストで取得できる機能を実装
 // 2017/01/18 : path A, circle ellipseなどでVE non scaling効くようにした
 // 2017/01/25 : カスタムなモーダルダイアログAPI、POI&2D ObjのProp表示機能をフレームワーク化(setShowPoiProperty)し、レイヤ固有表示(しなくても良い)機能も実装可能とした。
-//
+// 2017/02/17 : 野良XMLではIDは機能しない(単なるid attrにすぎない)？。そのためgetElementByIdも機能しない。そこで、querySelectorを使用した代替物を構築。要注意なのは、単なるattrなので、idが重複していようがお構いなしになる・・
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -125,6 +125,7 @@
 // 2016/12 zoomPanMapイベントのスペックが、画面更新時(zoompan関係ないとき(レイヤ追加や単なるリフレッシュとか)も発行される状態にあるがこれで良い？ 少なくとも、scrollに応じて実施されるタイプのアプリ処理では無限ループが起きる危険がある
 // 2017/01 Authoring Tools Ext.で編集中にResumeが動かない
 // 2017/01 レイヤーがOffになっているときに、レイヤ特化UIが出たまま(これは本体の問題ではないかも)
+// 2017/02 getElementByIdNoNSの問題が再び。　plane XMLとなっている文書では、IEもgetElementById使えない。.querySelector('[id="hoge"]'));は使えるので・・・対策したが、そもそもXML:IDの機能(重複しないID)を満たした機能を提供していない
 //
 // ToDo:
 // 各要素のdisplay,visibilityがcss style属性で指定しても効かない
@@ -274,8 +275,13 @@ function getTouchDistance( evt ){
 function getMouseXY( evt ){
 	if ( !isIE ){
 		if ( isSP ){
-			mx = evt.touches[0].pageX;
-			my = evt.touches[0].pageY;
+			if ( evt.touches.length > 0 ){
+				mx = evt.touches[0].pageX;
+				my = evt.touches[0].pageY;
+			} else if ( evt.changedTouches.length > 0 ){
+				mx = evt.changedTouches[0].pageX;
+				my = evt.changedTouches[0].pageY;
+			}
 		} else {
 			mx = evt.clientX;
 			my = evt.clientY;
@@ -735,6 +741,34 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 	}
 }
 
+function repairScript( resTxt ){
+	var resScript = (resTxt.match(/<script>([\s\S]*)<\/script>/ ))[1];
+	// まず、すでにエスケープされているものをもとに戻す・・(rev11以前用に作られたコンテンツ対策)
+	resScript = resScript.replace(/&lt;/g,'<');
+	resScript = resScript.replace(/&gt;/g,'>');
+	resScript = resScript.replace(/&amp;/g,'&');
+	
+	// その後、エスケープする
+	resScript = resScript.replace(/&/g,'&amp;');
+	resScript = resScript.replace(/</g,'&lt;');
+	resScript = "<script>" + resScript.replace(/>/g,'&gt;') + "</script>";
+//	console.log("resScript:",resScript);
+//	console.log("resTxt:",resTxt);
+	return( resTxt.replace(/<script>[\s\S]*<\/script>/ , resScript) );
+}
+
+function getControllerSrc( resTxt , svgImageProps ){ // 2017.2.21
+	// data-controller-srcがある場合、そのソースをを取得して、svgImageProps.controllerに投入するとともに
+	// resTxtからdata-controller-srcを除去する
+	// 注意:やらないとは思うが、したがって、data-controller-srcをDOMで操作しても何も起きない・・
+	var controllerSrc = (resTxt.match(/data-controller-src[\s\S]*?"([\s\S]*?)"/ ))[1];
+	controllerSrc = controllerSrc.replace(/&amp;/g,'&');
+	controllerSrc = controllerSrc.replace(/&quot;/g,'"');
+	svgImageProps.controller = "src:"+controllerSrc;
+//	console.log("controllerSrc:",controllerSrc);
+	return (resTxt.replace(/data-controller-src[\s\S]*?"[\s\S]*?"/, "" ) );
+}
+
 var ns_svg = "http://www.w3.org/2000/svg";
 
 function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId ){
@@ -753,9 +787,9 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		console.log(printProperties(httpRes));
 
 // Firefox 28において、httpRes.responseやresponseTextはあるにも関わらず、responseXMLが取得できない場合に、(httpRes.responseXML != null)も評価しておかないと、データが表示されなくなる。responseXMLのみがnullの場合は、responseTextを利用して表示すればよい。
-		if ((httpRes.responseXML != null) && httpRes.responseXML.documentElement && !isIE && verIE >= 100 && isSvg( httpRes.responseXML ) && httpRes.responseText.indexOf("<script>")==0){ 
+		if ((httpRes.responseXML != null) && httpRes.responseXML.documentElement && !isIE && verIE >= 100 && isSvg( httpRes.responseXML ) && httpRes.responseText.indexOf("<script>")<0){ 
 			// 2016.11.1 動的コンテンツの場合はすべてプリプロセッサ通す処理に変更
-			console.log("parse by native parser");
+			console.log("parse by native parser...");
 			svgImages[docId] = httpRes.responseXML;
 		} else { // responseXMLが無いブラウザ用(IE用ね)
 //			console.log("NO SVG... :",docId , docPath);
@@ -763,36 +797,39 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 				
 				// IE*ではSVGネームスペースのデータの座標値が相当丸められてしまうため、仕方なくText扱いでXMLを改修した上で非SVGデータとしてDOM化して回避する・・・厳しい(2013.8.20)
 				var resTxt = httpRes.responseText.replace('xmlns="http://www.w3.org/2000/svg"','xmlns="http://www.w3.org/"'); // ネームスペースを変えるだけにとどめてもOKの模様
+				
+				// 2017.2.21 data-controller-srcを探し、あれば.controller設定＆除去
+				if ( (resTxt.match(/data-controller-src([\s\S]*)"/ )) ){
+					resTxt = getControllerSrc(resTxt,svgImagesProps[docId]);
+				}
+				
 				resTxt = resTxt.replace(/.*<!DOCTYPE html>.*</,'<'); // 2014.4.25 IE11 で怪しい挙動 <script>があると勝手にDOCTYPE htmlをつけているかんじがするぞ！！！
 //				resTxt = resTxt.replace('</svg>','</xml>');
 //				resTxt = resTxt.replace('<svg','<xml>');
 				if ( (resTxt.match(/<script>([\s\S]*)<\/script>/ )) ){ // 2015.9.11 動的コンテンツでXML特殊文字がエスケープされていないスクリプトの処理
-					var resScript = (resTxt.match(/<script>([\s\S]*)<\/script>/ ))[1];
-					resScript = resScript.replace(/&lt;/g,'<');
-					resScript = resScript.replace(/&gt;/g,'>');
-					resScript = resScript.replace(/&amp;/g,'&');
-					resScript = resScript.replace(/&/g,'&amp;');
-					resScript = resScript.replace(/</g,'&lt;');
-					resScript = "<script>" + resScript.replace(/>/g,'&gt;') + "</script>";
-//					console.log("resScript:",resScript);
-	//				console.log("resTxt:",resTxt);
-					resTxt = resTxt.replace(/<script>[\s\S]*<\/script>/ , resScript);
+					resTxt = repairScript(resTxt);
 				} else {
 //					console.log ("NO SCRIPT!!!");
 				}
-					
-				svgImages[docId] = new DOMParser().parseFromString(resTxt,"text/xml");
+//				console.log("resTxt:",resTxt);
+//				console.log("resScript:",resScript);
+//				svgImages[docId] = new DOMParser().parseFromString(resTxt,"text/xml");
+				svgImages[docId] = new DOMParser().parseFromString(resTxt,"application/xml");
 			} else {
-				svgImages[docId] = new DOMParser().parseFromString(httpRes.responseText,"text/xml");
+				svgImages[docId] = new DOMParser().parseFromString(httpRes.responseText,"application/xml");
 			}
 		}
+		
+		svgImages[docId].getElementById = getElementByIdUsingQuerySelector; // added 2017.2.3
+//		console.log( svgImages[docId].getElementById );
+		
 //		console.log("docLoc:",svgImages[docId].location);
-//		console.log("docPath:" + docPath);
+//		console.log("docPath:" ,docPath, " doc:",svgImages[docId],"   id:docRoot?:",svgImages[docId].getElementById("docRoot"));
 //		svgImagesProps[docId] = new function(){}; // move to loadSVG()  2014.5.27
 		svgImagesProps[docId].Path = docPath;
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] );
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
-		svgImagesProps[docId].controller = getController( svgImages[docId] , docPath); // 2016.10.14
+		setController( svgImages[docId] , docPath , svgImagesProps[docId] ); // 2016.10.14
 //		if ( !svgImagesProps[docId].CRS  ){
 //			// 文書は地図として成り立っていないので消去し、終了する
 //			delete (svgImagesProps[docId]);
@@ -2174,12 +2211,19 @@ function getMetaSchema( svgDoc ){
 	return ( svgDoc.documentElement.getAttribute("property"));
 }
 
-function getController( svgDoc , docPath ){
+function setController( svgDoc , docPath , svgImageProps){
+//	console.log("called setController:",svgImageProps.controller);
 	var cntPath = svgDoc.documentElement.getAttribute("data-controller");
-	if ( cntPath ){
-		return ( getImageURL(cntPath , getDocDir(docPath)));
+	if ( svgImageProps.controller ){
+		if ( cntPath ){
+			svgImageProps.controller = "hash:"+cntPath+":"+svgImageProps.controller;
+			console.log("has Src and Hash:",svgImageProps.controller);
+		}
 	} else {
-		return ( null );
+		if ( cntPath ){
+			svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
+		} else {
+		}
 	}
 }
 
@@ -4338,12 +4382,13 @@ function initModal( target ){
 // アプリ側で利用できるモーダルフレームワーク
 // メッセージ(のhtmlソース)及び、複数個のボタン、コールバック(押したボタンのインデックス入り)が使える
 function setCustomModal( messageHTML , buttonMessages , callback,callbackParam){ // added 2017/1/25
+	console.log("setCustomModal :",buttonMessages, Array.isArray(buttonMessages) );
 	var cm = initModal( "customModal" );
 	for (var i = cm.childNodes.length-1; i>=0; i--) {
 		cm.removeChild(cm.childNodes[i]);
 	}
 	if ( buttonMessages ){
-		if (buttonMessages  instanceof Array){
+		if (Array.isArray(buttonMessages)){
 		} else {
 			var bm = buttonMessages;
 			buttonMessages = new Array();
@@ -4353,7 +4398,7 @@ function setCustomModal( messageHTML , buttonMessages , callback,callbackParam){
 		buttonMessages = ["OK"];
 	}
 	
-//	console.log("setCustomModal :",buttonMessages);
+	console.log("setCustomModal :",buttonMessages);
 	
 	var message = document.createElement("div");
 	message.innerHTML = messageHTML;
@@ -5285,19 +5330,30 @@ function getObjectAtPoint( x, y ){
 	
 	var el = isEditingLayer();
 	
-	
 	if ( pathHitTest.hittedElements.length > 0 ){ // ヒットしている場合
-//		console.log(pathHitTest.hittedElements[0]);
+		console.log("hit Object:", pathHitTest.hittedElements);
 //		console.log( pathHitTest.hittedElements[0].ownerDocument.documentElement);
-		if (typeof svgMapAuthoringTool == "object" && el && el.getAttribute("iid") == getDocumentId(pathHitTest.hittedElements[0]) ){ //編集システムがあり、編集中であり、編集中のレイヤのオブジェクトが選択されている場合
+		
+		//編集システムがあり、編集中であり、編集中のレイヤのオブジェクトが選択されているかどうかの判別 (debug 2017.2.23 [0]がそうとは限らない)
+		var editingTarget = null;
+		if (typeof svgMapAuthoringTool == "object" && el ){
+			for ( var i = 0 ; i < pathHitTest.hittedElements.length ; i++ ){
+				if ( el.getAttribute("iid") == getDocumentId(pathHitTest.hittedElements[i]) ){
+					editingTarget = i;
+					break;
+				}
+			}
+		}
+		
+		if ( editingTarget ){ //編集中レイヤのオブジェクトが選択されている場合
 			svgMapAuthoringTool.setTargetObject(
 				{
-					element: pathHitTest.hittedElements[0],
-					docId: getDocumentId(pathHitTest.hittedElements[0]) 
+					element: pathHitTest.hittedElements[editingTarget],
+					docId: getDocumentId(pathHitTest.hittedElements[editingTarget]) 
 				}
 			);
 		} else { // 
-			// 本来POI同様にターゲットを選択するボックスが出てくるのが良いと思う・・・
+			// 本来はPOI同様にターゲットを選択するボックスが出てくるのが良いと思う・・・
 			for ( var i = 0 ; i < pathHitTest.hittedElements.length ; i++ ){
 				var target = pathHitTest.hittedElements[i];
 				var targetBbox = pathHitTest.hittedElementsBbox[i];
@@ -5313,13 +5369,13 @@ function getObjectAtPoint( x, y ){
 					target.setAttribute("content", usedParent.getAttribute("content"));
 				}
 				
-				// showPoiProperty()が想定しているオブジェクト形式に無理やり合わせて、呼び終わったら戻している・・・微妙
+				// showPoiPropertyWrapper()が想定しているオブジェクト形式に無理やり合わせて、呼び終わったら戻している・・・微妙
 				target.removeAttribute("d");
 				target.setAttribute("latMin",geolocMax.lat);
 				target.setAttribute("latMax",geolocMin.lat);
 				target.setAttribute("lngMin",geolocMin.lng);
 				target.setAttribute("lngMax",geolocMax.lng);
-				showPoiProperty(target);
+				showPoiPropertyWrapper(target);
 				target.setAttribute("d",d);
 				if ( contentMeta){
 					target.setAttribute("content", contentMeta);
@@ -5356,14 +5412,14 @@ function showUseProperty( target ){
 	var useY = target.getAttribute("y");
 	var useTf = target.getAttribute("transform");
 	
-	// showPoiProperty()が想定しているオブジェクト形式に無理やり合わせて、呼び終わったら戻している・・・微妙
+	// showPoiPropertyWrapper()が想定しているオブジェクト形式に無理やり合わせて、呼び終わったら戻している・・・微妙
 	target.removeAttribute("x");
 	target.removeAttribute("y");
 	target.removeAttribute("transform");
 	target.setAttribute("lat",geoloc.lat);
 	target.setAttribute("lng",geoloc.lng);
 //	console.log("showUseProperty",target , target.ownerDocument);
-	showPoiProperty(target);
+	showPoiPropertyWrapper(target);
 	target.setAttribute("x",useX);
 	target.setAttribute("y",useY);
 	target.setAttribute("transform",useTf);
@@ -5418,7 +5474,7 @@ function linkedDocOp( func , docHash , param1, param2 , param3 , param4 , param5
 }
 	
 
-// showPoiProperty: POI or vector2Dのくりっかぶるオブジェクトをクリックしたときに起動する関数
+// showPoiPropertyWrapper: POI or vector2Dのくりっかぶるオブジェクトをクリックしたときに起動する関数
 // 　ただし、アンカーの起動はこの関数呼び出し前に判断される
 // (フレームワーク化した 2017/1/25)
 // 第一引数には、該当する"SVGコンテンツ"の要素が投入されます。
@@ -5427,7 +5483,7 @@ function linkedDocOp( func , docHash , param1, param2 , param3 , param4 , param5
 
 var specificShowPoiPropFunctions = {};
 
-function showPoiProperty(target){
+function showPoiPropertyWrapper(target){
 	var docId = getDocumentId(target);
 	var layerId = svgImagesProps[docId].rootLayer;
 	
@@ -5437,11 +5493,19 @@ function showPoiProperty(target){
 	} else if (specificShowPoiPropFunctions[layerId]){ // targetDocが属する"レイヤー"に対応する　同上
 		ans = specificShowPoiPropFunctions[layerId](target);
 	} else { // それ以外は・・
-		defaultShowPoiProperty(target);
+		if ( typeof showPoiProperty == "function" ){
+			showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+		} else {
+			defaultShowPoiProperty(target);
+		}
 	}
 	
 	if ( ans == false ){ // レイヤ固有関数による呼び出しでfalseが返ってきたらデフォルト関数を呼び出す。
-		defaultShowPoiProperty(target);
+		if ( typeof showPoiProperty == "function" ){
+			showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+		} else {
+			defaultShowPoiProperty(target);
+		}
 	}
 }
 
@@ -5465,7 +5529,6 @@ function setShowPoiProperty( func , docId ){
 		
 	}
 }
-
 
 function defaultShowPoiProperty(target){
 	console.log ( "Target:" , target , "  parent:", target.parentNode );
@@ -6001,6 +6064,10 @@ function getUrlHash(url){
 	} else {
 		return ( null );
 	}
+}
+
+function getElementByIdUsingQuerySelector(qid){
+	return this.querySelector('[id="' + qid + '"]')
 }
 
 return { // svgMap. で公開する関数のリスト 2014.6.6

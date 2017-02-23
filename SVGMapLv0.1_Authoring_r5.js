@@ -24,7 +24,8 @@
 // 2016/12/16 Rev2: Start Porting from Rev11 code and Modularization
 // 2016/12/21 Base FW Rev11のオーサリングコードとほぼ同等(以上)のものを移植完了 
 // 2016/12/28 Rev3: Polygon/Polyline Tools
-// 2017/01/** Rev4: Rubber Band for Polyline/Polygon
+// 2017/01/30 Rev4: Rubber Band for Polyline/Polygon
+// 2017/02/** Rev5: Point入力UIのTextArea使用を廃止する(for Tablet devices)
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -139,9 +140,9 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 		toolsCbFunc = null;
 		toolsCbFuncParam = null;
 	}
-	for (var i =targetDiv.childNodes.length-1; i>=0; i--) {
-		targetDiv.removeChild(targetDiv.childNodes[i]);
-	}
+	
+	removeChildren(targetDiv);
+	
 	var uiDoc = targetDiv.ownerDocument;
 	uiDoc.removeEventListener("hideFrame", clearTools, false);
 	uiDoc.removeEventListener("closeFrame", clearTools, false);
@@ -242,7 +243,7 @@ function setEditConfEvents( targetDoc , poiDocId){
 		console.log("editConf event : id:",e.target.id, " editMode:",uiMapping);
 		
 		if ( uiMapping.editingMode ==="POLYLINE" || uiMapping.editingMode ==="POLYGON"){
-			document.removeEventListener("click", editPolyPoint, false);
+			removePointEvents( editPolyPoint );
 		}
 		var confStat;
 		switch ( e.target.id ){
@@ -283,6 +284,8 @@ function setEditConfEvents( targetDoc , poiDocId){
 			uiMapping.modifyTargetElement=null;
 			break;
 		}
+		uiMapping.selectedPointsIndex = -1;
+		uiMapping.insertPointsIndex = -1;
 		clearForms(targetDoc);
 		poiCursor.removeCursor();
 		polyCanvas.removeCanvas();
@@ -316,7 +319,8 @@ function clearForms(targetDoc){
 		tbl.rows[2].cells[1].childNodes[0].value="--,--";
 	} else if ( uiMapping.editingMode ==="POLYLINE" || uiMapping.editingMode ==="POLYGON"){
 		var tbl = targetDoc.getElementById("polyEditorPosition");
-		tbl.value="";
+		removeChildren(tbl);
+		tbl.innerHTML='<tr><td><input type="button" id="pointAdd" value="ADD"/></td></tr>';
 	}
 	
 	var tbl = targetDoc.getElementById("metaEditor");
@@ -376,7 +380,6 @@ function setPoiSvg(targetDoc,poiDocId){
 
 function setPolySvg(targetDoc,poiDocId){
 	console.log("setPolySvg:",targetDoc,poiDocId);
-//	document.removeEventListener("click", editPolyPoint, false);
 	var targetSvgElem = null;
 	var geoPoints = polyCanvas.getPoints();
 	if ( geoPoints.length < 2 || (uiMapping.editingMode == "POLYGON" && geoPoints.length < 3) ){
@@ -998,35 +1001,30 @@ function displayPolyProps(svgTarget){
 	
 	var me = uiDoc.getElementById("metaEditor");
 	var pep = uiDoc.getElementById("polyEditorPosition");
-//	pep.value=svgMap.numberFormat(props.position.lat) + "," + svgMap.numberFormat(props.position.lng);
-	var taVal = "";
 	console.log(props.position);
 	if ( props.position.type &&  props.position.type==="POLYGON"){
 		// geojsonとちがい最終点は閉じないことにする
 		uiMapping.editingMode ="POLYGON";
-		var points = [];
-		for ( var i = 0 ; i < props.position[0].length-1 ; i++ ){
-			taVal += svgMap.numberFormat(props.position[0][i][0]) + ","+svgMap.numberFormat(props.position[0][i][1])+"\n";
-			points.push({lat:props.position[0][i][0],lng:props.position[0][i][1]});
-		}
-		polyCanvas.setPoints(points);
+		var pointsLength = props.position[0].length-1;
 	} else {
-		for ( var i = 0 ; i < props.position[0].length ; i++ ){
-			taVal += svgMap.numberFormat(props.position[0][i][0]) + ","+svgMap.numberFormat(props.position[0][i][1])+"\n";
-		}
-		polyCanvas.setPoints(props.position[0]);
+		uiMapping.editingMode ="POLYLINE";
+		var pointsLength = props.position[0].length;
 	}
 	
+	var points = [];
+	for ( var i = 0 ; i < pointsLength ; i++ ){
+		points.push({lat:props.position[0][i][0],lng:props.position[0][i][1]});
+	}
 	
-	pep.focus();
-	pep.value=taVal;
-	uiMapping.insertPointsIndex = points.length;
-//	console.log("points:",points, points.length, uiMapping.insertPointsIndex);
-//*	uiMapping.pointsUiSelectionRange = [taVal.length,taVal.length];
-//	polyCanvas.hilightLine(uiMapping.insertPointsIndex);
+	updatePointListForm(pep, points);
+	
+	console.log("points:",points);
+	polyCanvas.setPoints(points);
+	
+	
+	
+//	uiMapping.insertPointsIndex = points.length;
 	polyCanvas.updateCanvas();
-//*	pep.setSelectionRange(taVal.length,taVal.length);
-	setPolPointUISelection();
 	if ( props.metaData && props.metaData.length){
 		for ( var i = 0 ; i < props.metaData.length ; i++ ){
 	//		console.log(props.metaData[i],me.rows[i].cells[1]);
@@ -1035,6 +1033,16 @@ function displayPolyProps(svgTarget){
 	}
 }
 
+function updatePointListForm(pep, points){
+	var taVal = "";
+	
+	for ( var i = 0 ; i < points.length ; i++ ){
+		taVal += '<tr><td><input type="button" id="pointIns' + i + '" value="INS"/></td><td><input id="point' + i + '" style="width:200px" type="button" value="' + svgMap.numberFormat(points[i].lat) + ', ' + svgMap.numberFormat(points[i].lng) + '"/></td></tr>';
+	}
+	
+	taVal +='<tr><td><input type="button" id="pointAdd" value="ADD"/></td></tr>';
+	pep.innerHTML=taVal;
+}
 
 var toolsCbFunc;
 var toolsCbFuncParam
@@ -1048,9 +1056,9 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	}
 	
 //	console.log("initPolygonTools");
-	for (var i =targetDiv.childNodes.length-1; i>=0; i--) {
-		targetDiv.removeChild(targetDiv.childNodes[i]);
-	}
+	
+	removeChildren( targetDiv );
+	
 	var uiDoc = targetDiv.ownerDocument;
 	uiDoc.removeEventListener("hideFrame", clearTools, false);
 	uiDoc.removeEventListener("closeFrame", clearTools, false);
@@ -1072,8 +1080,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	if ( svgImages[poiDocId].documentElement.getAttribute("property") && svgImages[poiDocId].documentElement.getAttribute("property").length>0 ){
 		metaSchema = svgImages[poiDocId].documentElement.getAttribute("property").split(",");
 	}
-	var ihtml = '<table id="polyEditor">';
-	ihtml += '<tr><td><input type="button" id="pointUI" value="lat/lng"/></td><td><textarea id="polyEditorPosition" value="" style="width:250px;height:100px"></textarea></td></tr></table>';
+	var ihtml = '<div id="polyEditor" style="width:300px;height:100px;overflow:auto"><table id="polyEditorPosition"><tr><td><input type="button" id="pointAdd" value="ADD"/></td></tr></table></div>';
 	
 	
 	console.log(" init metaEditor table... metaSchema:",metaSchema );
@@ -1119,14 +1126,20 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	setEditConfEvents(uiDoc, poiDocId);
 }
 
+function testTouch(e){
+	console.log("testTouch:",e, e.changedTouches[0]);
+	console.log( e.changedTouches[0].pageX, e.changedTouches[0].pageY );
+}
+
 var prevMouseXY={x:0,y:0};
 var pointAddMode = false;
 
 function editPolyPoint(e){
 	var mxy = svgMap.getMouseXY(e);
+	console.log("editPolyPoint:",mxy);
 	if ( prevMouseXY.x == mxy.x && prevMouseXY.y == mxy.y && pointAddMode == false ){
 //		document.removeEventListener("click", arguments.callee, false);
-		document.removeEventListener("click", editPolyPoint, false);
+		removePointEvents( editPolyPoint );
 	}
 	prevMouseXY = mxy;
 	var geop = svgMap.screen2Geo(mxy.x , mxy.y );
@@ -1147,12 +1160,14 @@ function editPolyPoint(e){
 		polyCanvas.setPoints(newPoints);
 		uiMapping.insertPointsIndex = uiMapping.insertPointsIndex+1;
 	} else if ( uiMapping.selectedPointsIndex >= 0 ){
+		// ポイント変更モード
 		console.log( "replace point:",uiMapping.selectedPointsIndex);
 		geoPoints[uiMapping.selectedPointsIndex] = geop;
 		polyCanvas.setPoints(geoPoints);
 //		document.removeEventListener("click", arguments.callee, false);
-		document.removeEventListener("click", editPolyPoint, false);
-		uiMapping.insertPointsIndex = geoPoints.length;
+//		document.removeEventListener("click", editPolyPoint, false);
+		removePointEvents( editPolyPoint );
+//		uiMapping.insertPointsIndex = geoPoints.length;
 	} else {
 		console.log( "add last point:",uiMapping.insertPointsIndex);
 		polyCanvas.addPoint(geop);
@@ -1167,115 +1182,87 @@ function editPolyPoint(e){
 	polyCanvas.updateCanvas();
 //*	uiMapping.pointsUiSelectionRange = null;
 	
-	var txtAval="";
-	for ( var i = 0 ; i < geoPoints.length ; i++ ){
-		txtAval += svgMap.numberFormat(geoPoints[i].lat)+","+svgMap.numberFormat(geoPoints[i].lng)+"\n";
-	}
-	uiMapping.uiDoc.getElementById("polyEditorPosition").value = txtAval;
-//	targetDoc.getElementById("polyEditorPosition").focus();
-//	targetDoc.getElementById("polyEditorPosition").setSelectionRange( txtAval.length , txtAval.length );
-	setPolPointUISelection();
+	console.log("updatePointListForm:",geoPoints);
+	updatePointListForm( uiMapping.uiDoc.getElementById("polyEditorPosition") , geoPoints );
+	
 //	document.removeEventListener("click", arguments.callee, false);
 	
 }
 
+function addPointEvents( func ){
+	document.addEventListener( "click", func, false );
+	document.addEventListener( "touchend", func, false );
+}
+function removePointEvents( func ){
+	document.removeEventListener( "click", func, false );
+	document.removeEventListener( "touchend", func, false );
+}
+
 function setPolyUiEvents( targetDoc){
-	targetDoc.getElementById("polyEditor").addEventListener("click",function(e){
+	targetDoc.getElementById("polyEditorPosition").addEventListener("click",function(e){
 		console.log("PoiUiEvent: targetId:",e.target.id);
-		switch ( e.target.id ){
-		case"pointUI": // 緯度経度のカーソル入力用
-			console.log("pointUIev");
+		if (  e.target.id.indexOf("point")==0 ){
+			// textareaのカーソル位置変更イベント
+			pointAddMode = false;
+			
+			
+			hilightEditingPoint(e.target, targetDoc.getElementById("polyEditorPosition") );
+			
 			if ( !uiMapping.editingGraphicsElement){
 				uiMapping.editingGraphicsElement = true;
 //				polyCanvas.initCanvas();
 			}
-//*			if ( uiMapping.pointsUiSelectionRange ){}
 			if ( uiMapping.selectedPointsIndex >=0 || uiMapping.insertPointsIndex >= 0 ){
 				console.log ( "FOUCUS SELECTION");
-//*				var ta = targetDoc.getElementById("polyEditorPosition");
-//*				ta.focus();
-//*				ta.setSelectionRange(uiMapping.pointsUiSelectionRange[0],uiMapping.pointsUiSelectionRange[1]);
-				setPolPointUISelection();
 			}
-			pointAddMode = true;
+			pointAddMode = true; // これはどうかな・・・
 			setTimeout(function(){
-				document.addEventListener( "click", editPolyPoint, false );
+				addPointEvents( editPolyPoint );
+//				document.addEventListener( "click", editPolyPoint, false );
+//				document.addEventListener( "touchend", testTouch, false );
 			},30);
-			break;
-		case"polyEditorPosition":
-			// textareaのカーソル位置変更イベント
-			pointAddMode = false;
-			var pep = targetDoc.getElementById("polyEditorPosition");
-			console.log( "editPoly: start:",pep.selectionStart,"  end:",pep.selectionEnd);
-			hilightEditingPoint(pep.selectionStart, pep.selectionEnd, targetDoc.getElementById("polyEditorPosition"));
-			break;
-		}
-		if ( e.target.parentNode.id =="iconselection"){
-			for ( var i = 0 ; i < e.target.parentNode.childNodes.length ; i++ ){
-				e.target.parentNode.childNodes[i].setAttribute("style","border-color:white");
-			}
-			e.target.setAttribute("style","border-color:red");
-			var selectedPoiHref = e.target.getAttribute("property");
-			console.log("selPoi:",selectedPoiHref);
+			
+		} else if (  e.target.id.indexOf("pointAdd")==0 ){
+			pointAddMode = true;
 		}
 	},false);
 }
 
-function hilightEditingPoint( sp, ep ,srcElem){
-	// カーソル位置(sp)によって編集対象を洗い出す
-	// epは使われていません。
-	var srcStr = srcElem.value;
-//	console.log(srcStr,sp,srcStr.length);
+function hilightEditingPoint( targetElem ,srcElem){
+	// ボタンIDによって編集対象を洗い出す
+	var insertBefore = false;
+	var EditPoint;
+	if ( targetElem.id.indexOf("pointAdd")==0){
+		insertBefore = true;
+		console.log(polyCanvas.getPoints().length);
+		var pl =  polyCanvas.getPoints().length; 
+		if ( pl > 0 ){
+			editPoint = pl; 
+		}
+	} else if ( targetElem.id.indexOf("pointIns")==0){
+		insertBefore = true;
+		editPoint = Number(targetElem.id.substring(8));
+	} else {
+		editPoint = Number(targetElem.id.substring(5));
+	}
 	
 	var pointC = 0;
 	var selectedIndex = -1;
 	var insertIndex = -1;
-	var varStart = 0;
-	var varEnd = -1;
-	if ( sp == 0 ){
-		insertIndex = 0;
-	}
-	for ( var i = 0 ; i < srcStr.length ; i++){
-		if ( i>1 && srcStr.charAt(i-1) == "\n" && sp == i ){
-			insertIndex = pointC;
-		}
-		if (srcStr.charAt(i) == "\n"){
-			if ( sp == i ){
-				insertIndex = pointC+1;
-			}
-			if ( selectedIndex >=0){
-				varEnd = i;
-				break;
-			}
-			varStart = i +1;
-			++ pointC;
-		}
-		if (sp == i ){
-			selectedIndex = pointC;
-		}
-	}
-	if ( sp == srcStr.length ){
-		insertIndex = pointC;
+	
+	if ( insertBefore ){
+		insertIndex = editPoint;
+	} else{
+		selectedIndex = editPoint;
 	}
 	
-//	console.log("selectedIndex:",selectedIndex,"  insertIndex:",insertIndex,"  varStart:",varStart,"  varEnd:",varEnd);
+	console.log("insertIndex:",insertIndex,"  selectedIndex:",selectedIndex);
+	
 	uiMapping.selectedPointsIndex = selectedIndex;
 	uiMapping.insertPointsIndex = insertIndex;
 	
-	if ( insertIndex == -1){
-		srcElem.focus();
-		srcElem.setSelectionRange(varStart,varEnd);
-//		polyCanvas.hilightPoint( selectedIndex );
-		polyCanvas.updateCanvas();
-	} else {
-//		polyCanvas.hilightLine( insertIndex );
-		polyCanvas.updateCanvas();
-		varStart = sp;
-		varEnd = sp;
-	}
-//*	uiMapping.pointsUiSelectionRange=[varStart,varEnd];
-//	console.log("SelectionRange Act:",varStart,varEnd, "   Cal:",getSelectionRange(selectedIndex, insertIndex, srcStr), "  Idx:",selectedIndex,insertIndex);
-//	console.log(uiMapping);
+	polyCanvas.updateCanvas();
+	
 }
 
 function getSelectionRange( selectedIndex, insertIndex ,srcStr){
@@ -1314,14 +1301,13 @@ function getSelectionRange( selectedIndex, insertIndex ,srcStr){
 	}
 }
 
-function setPolPointUISelection(){
-	var targetDoc = uiMapping.uiDoc;
-	var ta = targetDoc.getElementById("polyEditorPosition");
-	ta.focus();
-	var sr = getSelectionRange(uiMapping.selectedPointsIndex,uiMapping.insertPointsIndex,ta.value);
-	
-}
 
+function removeChildren( targetElem ){
+	for (var i =targetElem.childNodes.length-1; i>=0; i--) {
+		targetElem.removeChild(targetElem.childNodes[i]);
+	}
+
+}
 
 function isEditingGraphicsElement(){
 	if ( uiMapping.editingGraphicsElement ){

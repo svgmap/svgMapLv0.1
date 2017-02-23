@@ -5,7 +5,7 @@
 // 
 //  Programmed by Satoru Takagi
 //  
-//  Copyright (C) 2016-2016 by Satoru Takagi @ KDDI CORPORATION
+//  Copyright (C) 2016-2017 by Satoru Takagi @ KDDI CORPORATION
 //  
 // License: (GPL v3)
 //  This program is free software: you can redistribute it and/or modify
@@ -32,9 +32,14 @@
 // 2016/12/?  : GIS Tools Support
 // 2016/12/19 : Authoring Tools Support
 // 2017/01/27 : レイヤ固有UIのリサイズメカニズムを拡張。 data-controllerに、#requiredHeight=hhh&requiredWidth=www　を入れるとできるだけそれを提供する
+// 2017/02/17 : レイヤ固有UIのクローズボタン位置の微調整
+// 2017/02/21 : svg文書のdata-controller-srcに直接レイヤ固有UIのhtmlが書く機能を拡張。requiredWidth/Heightについてはdata-controllerに#から始まる記法で書くことで対応
 //
 // ISSUES:
 //  レイヤが消えているのにレイヤ特化UIが残っているのはまずい
+//  デストラクション処理をまともにできるようにすべき
+//  動かし続けたいレイヤ固有UI上のアプリもあるので、別のレイヤ固有UIが走ったチョキにそういうdocumentが消去されないようにすることも必要
+//  IE,Edgeでdata-controller-src動作しない
 
 
 ( function ( window , undefined ) { 
@@ -235,11 +240,18 @@ function checkLayerList(count){
 
 function checkController(svgImageProps, ctbtn){
 	if ( svgImageProps.controller ){
-		
+		console.log("checkController:",svgImageProps.controller);
 		if ( ctbtn ){ // グループが閉じられている場合にはボタンがないので
 			ctbtn.style.visibility="visible";
-			ctbtn.dataset.url =svgImageProps.controller ;
+			if ( svgImageProps.controller.indexOf("src:")==0 ){
+				ctbtn.dataset.url=":";
+			} else if ( svgImageProps.controller.indexOf("hash:")==0 ){
+				ctbtn.dataset.url= ":"+svgImageProps.controller.substring(5,svgImageProps.controller.indexOf("src:")-1);
+			} else {
+				ctbtn.dataset.url =svgImageProps.controller ;
+			}
 		}
+		console.log("checkController: ctbtn.dataset.url: ",ctbtn.dataset.url);
 	}
 }
 
@@ -490,14 +502,16 @@ function getColgroup(){
 	return ( llUIcolgroup );
 }
 
+var lsUIbdy, lsUIbtn;
+
 function initLayerSpecificUI(){
 	layerSpecificUiDefaultStyle.height = layerSpecificUI.style.height;
 	layerSpecificUiDefaultStyle.width = layerSpecificUI.style.height;
 	layerSpecificUiDefaultStyle.top = layerSpecificUI.style.top;
 	layerSpecificUiDefaultStyle.left = layerSpecificUI.style.left;
 	layerSpecificUiDefaultStyle.right = layerSpecificUI.style.right;
-	console.log("initLayerSpecificUI:",layerSpecificUI.style ,layerSpecificUI);
-	console.log("layerSpecificUiDefaultStyle:",layerSpecificUiDefaultStyle);
+//	console.log("initLayerSpecificUI:",layerSpecificUI.style ,layerSpecificUI);
+//	console.log("layerSpecificUiDefaultStyle:",layerSpecificUiDefaultStyle);
 	layerSpecificUI.style.zIndex="20";
 	lsUIbdy = document.createElement("div");
 	lsUIbdy.id = "layerSpecificUIbody";
@@ -505,10 +519,11 @@ function initLayerSpecificUI(){
 	lsUIbdy.style.height="100%";
 //	lsUIbdy.style.overflowY="scroll";
 	layerSpecificUI.appendChild(lsUIbdy);
-	
+//	console.log("lsUIbdy:",lsUIbdy);
 	lsUIbtn = document.createElement("input");
 	lsUIbtn.type="button";
 	lsUIbtn.value="x";
+	lsUIbtn.id="layerSpecificUIclose";
 	lsUIbtn.style.position="absolute";
 	lsUIbtn.style.right="0px";
 	lsUIbtn.style.top="0px";
@@ -614,6 +629,7 @@ function showLayerSpecificUI(e){
 			img.src=controllerURL;
 			img.setAttribute("width","100%");
 			layerSpecificUIbody.appendChild(img);
+			setTimeout(setLsUIbtnOffset,100,img);
 		} else {
 			initIframe(lid,controllerURL,svgMap,reqSize);
 		}
@@ -644,12 +660,33 @@ function dispatchCutomIframeEvent(evtName){
 function initIframe(lid,controllerURL,svgMap,reqSize){
 	var iframe = document.createElement("iframe");
 	iframe.id = "layerSpecificUIframe";
-	iframe.src=controllerURL;
+	if ( controllerURL.charAt(0) != ":" ){
+		iframe.src=controllerURL;
+	} else {
+		var controllerSrc = (svgMap.getSvgImagesProps())[lid].controller;
+		console.log("controllerSrc:",controllerSrc);
+		
+		if ( controllerSrc.indexOf("hash:") == 0 ){
+			iframe.srcdoc = controllerSrc.substring( controllerSrc.indexOf("src:")+4);
+		} else {
+			iframe.srcdoc=controllerSrc.substring(4); // IE,Edge未サポート・・
+			// 対応法はDOM操作か・・http://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q1032803595
+		}
+	}
 	iframe.setAttribute("frameborder","0");
 	iframe.style.width="100%";
 	iframe.style.height="100%";
+	
 	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
-	console.log("layerSpecificUIbody Style:",layerSpecificUIbody.style);
+	
+	// for iOS Sfari issue:
+	// http://qiita.com/Shoesk/items/9f81ef1fd7b3a0b516b7
+	iframe.style.border ="none";
+	iframe.style.display="block";
+	layerSpecificUIbody.style.overflow="auto";
+	layerSpecificUIbody.style.webkitOverflowScrolling="touch";
+	
+	console.log("initIframe:  layerSpecificUIbody Style:",layerSpecificUIbody.style,"  iframe.style",iframe.style);
 	layerSpecificUIbody.appendChild(iframe);
 	iframe.onload=function(){
 		dispatchCutomIframeEvent("openFrame");
@@ -683,13 +720,36 @@ function pxNumb( pxval ){
 		return ( 0 );
 	}
 }
+
+var btnOffset = 0;
+function setLsUIbtnOffset( targetElem ){ // 2017.2.17 レイヤ固有UIのクローズボタン位置の微調整
+//	console.log("setLsUIbtnOffset:", targetElem);
+//	console.log("targetElem.~Width:",targetElem,targetElem.clientWidth,targetElem.offsetWidth, ":::" , lsUIbdy.clientWidth, layerSpecificUI.clientWidth);
+	if ( layerSpecificUI.clientWidth - targetElem.offsetWidth != btnOffset ){
+		btnOffset = layerSpecificUI.clientWidth - targetElem.offsetWidth;
+//	console.log("btnOffset:",btnOffset);
+		if ( btnOffset ){
+			lsUIbtn.style.right=btnOffset+"px";
+		} else {
+			lsUIbtn.style.right="0px";
+		}
+	}
 	
+	if ( targetElem.offsetWidth > 0 ){
+		setTimeout(setLsUIbtnOffset , 1000 , targetElem );
+	}
+	
+}
+
 function testIframeSize( iframe ,reqSize){
-	console.log("H:",iframe.contentWindow.document.documentElement.scrollHeight );
-	console.log("H2:",iframe.contentWindow.document.body.offsetHeight , layerSpecificUI.offsetHeight);
+//	console.log("iframeDoc, width:",iframe.contentWindow.document,  iframe.contentWindow.document.documentElement.offsetWidth);
+//	console.log("H:",iframe.contentWindow.document.documentElement.scrollHeight );
+//	console.log("H2:",iframe.contentWindow.document.body.offsetHeight , layerSpecificUI.offsetHeight);
 	var maxHeight = window.innerHeight - pxNumb(layerSpecificUiDefaultStyle.top) - 50;
 	var maxWidth = window.innerWidth - pxNumb(layerSpecificUiDefaultStyle.left) - pxNumb(layerSpecificUiDefaultStyle.right) - 50;
-	console.log("reqSize:",reqSize, " window:",window.innerWidth,window.innerHeight, "  available w/h",maxWidth,maxHeight) - 50;
+//	console.log("reqSize:",reqSize, " window:",window.innerWidth,window.innerHeight, "  available w/h",maxWidth,maxHeight) - 50;
+	
+	setLsUIbtnOffset(iframe.contentWindow.document.documentElement);
 	
 	if ( reqSize.width>0 ){ // 強制サイジング
 		if ( reqSize.width < maxWidth ){
