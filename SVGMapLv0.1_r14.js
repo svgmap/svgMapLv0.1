@@ -5335,7 +5335,7 @@ function getObjectAtPoint( x, y ){
 //		console.log( pathHitTest.hittedElements[0].ownerDocument.documentElement);
 		
 		//編集システムがあり、編集中であり、編集中のレイヤのオブジェクトが選択されているかどうかの判別 (debug 2017.2.23 [0]がそうとは限らない)
-		var editingTarget = null;
+		var editingTarget = -1;
 		if (typeof svgMapAuthoringTool == "object" && el ){
 			for ( var i = 0 ; i < pathHitTest.hittedElements.length ; i++ ){
 				if ( el.getAttribute("iid") == getDocumentId(pathHitTest.hittedElements[i]) ){
@@ -5343,9 +5343,10 @@ function getObjectAtPoint( x, y ){
 					break;
 				}
 			}
+//			console.log("editingTarget:",editingTarget);
 		}
 		
-		if ( editingTarget ){ //編集中レイヤのオブジェクトが選択されている場合
+		if ( editingTarget>=0 ){ //編集中レイヤのオブジェクトが選択されている場合
 			svgMapAuthoringTool.setTargetObject(
 				{
 					element: pathHitTest.hittedElements[editingTarget],
