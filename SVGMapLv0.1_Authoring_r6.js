@@ -25,8 +25,9 @@
 // 2016/12/21 Base FW Rev11のオーサリングコードとほぼ同等(以上)のものを移植完了 
 // 2016/12/28 Rev3: Polygon/Polyline Tools
 // 2017/01/30 Rev4: Rubber Band for Polyline/Polygon
-// 2017/02/** Rev5: Point入力UIのTextArea使用を廃止する(for Tablet devices)
-// 2017/03/17 zoomPanMap -> screenRefreshed (特別対応)
+// 2017/02/03 Rev5: Point入力UIのTextArea使用を廃止する(for Tablet devices)
+// 2017/02/xx Rev6: ポリゴンUIのdelete機能を改善
+// 2017/03/17 zoomPanMap -> screenRefreshed
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -277,26 +278,60 @@ function setEditConfEvents( targetDoc , poiDocId){
 //				polyCanvas.removeCanvas();
 //			}
 			break;
-		case"pepdel": // 削除
-			confStat = "Delete";
-			uiMapping.editingGraphicsElement = false;
-			var svgElem = uiMapping.modifyTargetElement;
-			svgElem.parentNode.removeChild(svgElem);
-			uiMapping.modifyTargetElement=null;
+		case"pepdel": // 削除 2017.2.27 delにpolygonの要素ポイントの削除機能を拡張する
+			console.log("pepdel button: selP",uiMapping.selectedPointsIndex, "  insP:",uiMapping.insertPointsIndex);
+			if ( uiMapping.selectedPointsIndex == -1 ){
+				svgMap.setCustomModal("Delete Object?",["YES","Cancel"],delConfModal,{targetDoc:targetDoc,toolsCbFunc:toolsCbFunc,toolsCbFuncParam:toolsCbFuncParam});
+				/**
+				confStat = "Delete";
+				uiMapping.editingGraphicsElement = false;
+				var svgElem = uiMapping.modifyTargetElement;
+				svgElem.parentNode.removeChild(svgElem);
+				uiMapping.modifyTargetElement=null;
+				**/
+			} else {
+				console.log("remove a point not skip edit conf");
+				confStat = null;
+				var geoPoints = polyCanvas.getPoints();
+				geoPoints.splice(uiMapping.selectedPointsIndex , 1 );
+				uiMapping.selectedPointsIndex = -1;
+				polyCanvas.setPoints(geoPoints);
+				updatePointListForm( uiMapping.uiDoc.getElementById("polyEditorPosition") , geoPoints );
+			}
 			break;
 		}
-		uiMapping.selectedPointsIndex = -1;
-		uiMapping.insertPointsIndex = -1;
-		clearForms(targetDoc);
-		poiCursor.removeCursor();
-		polyCanvas.removeCanvas();
-		svgMap.refreshScreen();
-//		console.log("toolsCbFunc?:",toolsCbFunc);
-		if ( toolsCbFunc ){
-			toolsCbFunc(confStat, toolsCbFuncParam);
+		if ( confStat ){
+			editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat );
 		}
 	},false);
 }
+
+function editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat ){
+	uiMapping.selectedPointsIndex = -1;
+	uiMapping.insertPointsIndex = -1;
+	clearForms(targetDoc);
+	poiCursor.removeCursor();
+	polyCanvas.removeCanvas();
+	svgMap.refreshScreen();
+//		console.log("toolsCbFunc?:",toolsCbFunc);
+	if ( toolsCbFunc ){
+		toolsCbFunc(confStat, toolsCbFuncParam);
+	}
+}
+
+function delConfModal(index,opt){
+	if ( index == 0 ){
+		var confStat = "Delete";
+		uiMapping.editingGraphicsElement = false;
+		var svgElem = uiMapping.modifyTargetElement;
+		svgElem.parentNode.removeChild(svgElem);
+		uiMapping.modifyTargetElement=null;
+		editConfPhase2( opt.targetDoc, opt.toolsCbFunc, opt.toolsCbFuncParam, confStat );
+	} else {
+		// do nothing
+	}
+}
+
 
 function clearForms(targetDoc){
 	console.log("clearForms");
@@ -501,6 +536,8 @@ function setPoiUiEvents( targetDoc){
 var polyCanvas = (function(){
 	var enabled = false;
 	
+	var isPolygon = true;
+	
 	var cv; // canvas elem
 	var cc; // context of canvas
 	var cs; // canvasSize
@@ -555,7 +592,7 @@ var polyCanvas = (function(){
 		updateCanvas();
 	}
 	
-	function setPoints(points){
+	function setPoints(points , objIsPolygon){
 		if ( points[0].lat ){
 			geoPoints = points;
 		} else {	
@@ -563,6 +600,9 @@ var polyCanvas = (function(){
 			for ( var i = 0 ; i < points.length ; i++ ){
 				geoPoints.push({lat:points[i][0],lng:points[i][1]});
 			}
+		}
+		if ( objIsPolygon ){
+			isPolygon = objIsPolygon;
 		}
 		updateCanvas();
 	}
@@ -572,7 +612,7 @@ var polyCanvas = (function(){
 	}
 	
 	function updateCanvas(){
-		console.log("updateCanvas");
+		console.log("updateCanvas: insP:", uiMapping.insertPointsIndex , "  selP:" , uiMapping.selectedPointsIndex);
 		initCanvas();
 		cc.clearRect(0, 0, cs.width, cs.height);
 		cc.beginPath();
@@ -585,7 +625,9 @@ var polyCanvas = (function(){
 				cc.lineTo(screenPoint.x, screenPoint.y);
 			}
 		}
-//		cc.closePath();
+		if ( isPolygon ){
+			cc.closePath();
+		}
 		cc.stroke();
 		
 		if ( uiMapping.insertPointsIndex >=0 ){
@@ -628,8 +670,10 @@ var polyCanvas = (function(){
 			P1 = svgMap.geo2Screen(geoPoints[index-1].lat , geoPoints[index-1].lng);
 			P2 = svgMap.geo2Screen(geoPoints[index].lat , geoPoints[index].lng);
 		} else if ( index == 0 || index == geoPoints.length ){
-			P1 = svgMap.geo2Screen(geoPoints[geoPoints.length-1].lat , geoPoints[geoPoints.length-1].lng);
-			P2 = svgMap.geo2Screen(geoPoints[0].lat , geoPoints[0].lng);
+			if ( geoPoints.length > 0 ){
+				P1 = svgMap.geo2Screen(geoPoints[geoPoints.length-1].lat , geoPoints[geoPoints.length-1].lng);
+				P2 = svgMap.geo2Screen(geoPoints[0].lat , geoPoints[0].lng);
+			}
 		}
 		if ( P1 ){
 //			updateCanvas();
@@ -1200,14 +1244,14 @@ function removePointEvents( func ){
 }
 
 function setPolyUiEvents( targetDoc){
-	targetDoc.getElementById("polyEditorPosition").addEventListener("click",function(e){
+	targetDoc.getElementById("polyEditor").addEventListener("click",function(e){
 		console.log("PoiUiEvent: targetId:",e.target.id);
 		if (  e.target.id.indexOf("point")==0 ){
-			// textareaのカーソル位置変更イベント
+			// pointsTableのカーソル位置変更イベント
 			pointAddMode = false;
 			
 			
-			hilightEditingPoint(e.target, targetDoc.getElementById("polyEditorPosition") );
+			hilightEditingPoint( e.target , targetDoc );
 			
 			if ( !uiMapping.editingGraphicsElement){
 				uiMapping.editingGraphicsElement = true;
@@ -1223,28 +1267,35 @@ function setPolyUiEvents( targetDoc){
 //				document.addEventListener( "touchend", testTouch, false );
 			},30);
 			
-		} else if (  e.target.id.indexOf("pointAdd")==0 ){
-			pointAddMode = true;
+		} else {
+			console.log("should be clear selection");
+			pointAddMode = false;
+			uiMapping.selectedPointsIndex = -1;
+			uiMapping.insertPointsIndex = -1;
+			polyCanvas.updateCanvas();
+			targetDoc.getElementById("pepdel").disabled=false; // 全体を削除する意味でenable化
 		}
 	},false);
 }
 
-function hilightEditingPoint( targetElem ,srcElem){
+function hilightEditingPoint( targetElem , targetDoc ){
 	// ボタンIDによって編集対象を洗い出す
 	var insertBefore = false;
-	var EditPoint;
+	var editPointN;
+	targetDoc.getElementById("pepdel").disabled=true; // 削除ボタンをdisable
 	if ( targetElem.id.indexOf("pointAdd")==0){
 		insertBefore = true;
-		console.log(polyCanvas.getPoints().length);
+		console.log("hilightEditingPoint pointAdd:", polyCanvas.getPoints().length);
 		var pl =  polyCanvas.getPoints().length; 
-		if ( pl > 0 ){
-			editPoint = pl; 
+		if ( pl >= 0 ){
+			editPointN = pl; 
 		}
 	} else if ( targetElem.id.indexOf("pointIns")==0){
 		insertBefore = true;
-		editPoint = Number(targetElem.id.substring(8));
+		editPointN = Number(targetElem.id.substring(8));
 	} else {
-		editPoint = Number(targetElem.id.substring(5));
+		targetDoc.getElementById("pepdel").disabled=false; // pointのみ削除可能化
+		editPointN = Number(targetElem.id.substring(5));
 	}
 	
 	var pointC = 0;
@@ -1252,9 +1303,9 @@ function hilightEditingPoint( targetElem ,srcElem){
 	var insertIndex = -1;
 	
 	if ( insertBefore ){
-		insertIndex = editPoint;
+		insertIndex = editPointN;
 	} else{
-		selectedIndex = editPoint;
+		selectedIndex = editPointN;
 	}
 	
 	console.log("insertIndex:",insertIndex,"  selectedIndex:",selectedIndex);
