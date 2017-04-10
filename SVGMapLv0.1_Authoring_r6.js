@@ -27,7 +27,7 @@
 // 2017/01/30 Rev4: Rubber Band for Polyline/Polygon
 // 2017/02/03 Rev5: Point入力UIのTextArea使用を廃止する(for Tablet devices)
 // 2017/02/xx Rev6: ポリゴンUIのdelete機能を改善
-// 2017/03/17 zoomPanMap -> screenRefreshed
+// 2017/03/17 zoomPanMap -> screenRefreshed + zoomPanMap
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -117,16 +117,28 @@ function POIAppend( geoLocation ,  docId  ,title){
 
 
 function clearTools( e ){
-	poiCursor.removeCursor();
-	polyCanvas.removeCanvas();
-	clearForms(uiMapping.uiDoc);
+	console.log( "call clear tools");
+	
+	var targetDoc = uiMapping.uiDoc;
+	var confStat = "Cancel";
+	editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat );
+	
+	// 以下editConfPhase2で済み
+//	poiCursor.removeCursor();
+//	polyCanvas.removeCanvas();
+//	clearForms(uiMapping.uiDoc);
 	if ( uiMapping.modifyTargetElement && uiMapping.modifyTargetElement.getAttribute("iid") && document.getElementById(uiMapping.modifyTargetElement.getAttribute("iid")) ){
 		document.getElementById(uiMapping.modifyTargetElement.getAttribute("iid")).style.backgroundColor="";
 	}
+	uiMapping.modifyTargetElement=null;
+	uiMapping.editingGraphicsElement = false;
 	console.log( "get iframe close/hide event from authoring tools framework.");
-	svgMap.setRootLayersProps(uiMapping.editingDocId, true , false );
+	svgMap.setRootLayersProps(uiMapping.editingDocId, null , false );
 //	uiMapping = {};
-	svgMap.refreshScreen();
+	
+	removePointEvents( editPolyPoint );
+	
+//	svgMap.refreshScreen();
 }
 function setTools( e ){
 	console.log( "get iframe appear event from authoring tools framework.");
@@ -499,6 +511,7 @@ function readPoiUiParams(targetDoc){
 }
 
 function setPoiPosition(e){
+	var targetDoc = uiMapping.uiDoc;
 	var mxy = svgMap.getMouseXY(e);
 	var geop = svgMap.screen2Geo(mxy.x , mxy.y );
 	poiCursor.setCursorGeo(geop);
@@ -584,6 +597,7 @@ var polyCanvas = (function(){
 //		cc.closePath();
 //		cc.stroke();
 		document.addEventListener("screenRefreshed",updateCanvas);
+		document.addEventListener("zoomPanMap",updateCanvas);
 	}
 	
 	function addPoint(point){
@@ -698,6 +712,7 @@ var polyCanvas = (function(){
 		clearPoints();
 		console.log("removeCanvas");
 		document.removeEventListener("screenRefreshed", updateCanvas, false);
+		document.removeEventListener("zoomPanMap", updateCanvas, false);
 		if ( document.getElementById("PolyEditCanvas") ){
 			var cv = document.getElementById("PolyEditCanvas");
 			cv.parentNode.removeChild(cv);
@@ -729,6 +744,7 @@ var poiCursor = (function (){
 		enabled = true;
 		updateCursorGeo();
 		document.addEventListener("screenRefreshed",updateCursorGeo);
+		document.addEventListener("zoomPanMap",updateCursorGeo);
 	}
 	
 	function updateCursorGeo(){
@@ -757,8 +773,9 @@ var poiCursor = (function (){
 	
 	function removeCursor(){
 		enabled = false;
-		console.log("removeCursor");
+		console.log("removeCursor",removeCursor.caller);
 		document.removeEventListener("screenRefreshed", updateCursorGeo, false);
+		document.removeEventListener("zoomPanMap", updateCursorGeo, false);
 		if ( document.getElementById("POIeditCursor") ){
 			var cursor = document.getElementById("POIeditCursor");
 			cursor.parentNode.removeChild(cursor);
@@ -1239,6 +1256,7 @@ function addPointEvents( func ){
 	document.addEventListener( "touchend", func, false );
 }
 function removePointEvents( func ){
+	console.log("removePointEvents: ",func);
 	document.removeEventListener( "click", func, false );
 	document.removeEventListener( "touchend", func, false );
 }

@@ -42,7 +42,6 @@
 //   ただしこの機能は新たなcontextを生成する形でないと実装できないようです。
 //   See also: http://stackoverflow.com/questions/8318264/how-to-move-an-iframe-in-the-dom-without-losing-its-state
 //
-//  screenRefreshed　イベントが新設されたが、zoomPanMapイベントしか転送できていない。2017.3.16
 
 
 ( function ( window , undefined ) { 
@@ -735,10 +734,12 @@ function initIframe(lid,controllerURL,svgMap,reqSize){
 //		iframe.contentWindow.testIframe("hellow from parent");
 		if ( transferCustomEvent2iframe[lid] ){
 			document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[lid], false);
+			document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[lid], false);
 		} else {
 			transferCustomEvent2iframe[lid] = transferCustomEvent4layerUi(lid);
 		}
 		document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
+		document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
 		setTimeout( testIframeSize , 1000 , iframe ,reqSize);
 	}
 }
@@ -760,7 +761,7 @@ function setLsUIbtnOffset( targetElem ){ // 2017.2.17 レイヤ固有UIのクロ
 	} else if ( layerSpecificUI.clientWidth - targetElem.offsetWidth != btnOffset ){
 		btnOffset = layerSpecificUI.clientWidth - targetElem.offsetWidth;
 		if ( btnOffset ){
-			console.log("btnOffset:",btnOffset);
+//			console.log("btnOffset:",btnOffset);
 			lsUIbtn.style.right=btnOffset+"px";
 		} else {
 			lsUIbtn.style.right="0px";
@@ -815,14 +816,14 @@ function testIframeSize( iframe ,reqSize){
 var transferCustomEvent2iframe = [];
 	
 function transferCustomEvent4layerUi(layerId){
-	return function(){
-	//	console.log("get zoomPanMap event from root doc");
+	return function(ev){
+//		console.log("get event from root doc : type: ",ev.type);
 		// レイヤー固有UIがある場合のみイベントを転送する
 		if ( document.getElementById("layerSpecificUIframe_"+layerId) ){
 			var ifr = document.getElementById("layerSpecificUIframe_"+layerId);
 			var customEvent = ifr.contentWindow.document.createEvent("HTMLEvents");
-			customEvent.initEvent("zoomPanMap", true , false );
-			console.log("transferCustomEvent:zoomPanMap to:",layerId);
+			customEvent.initEvent(ev.type, true , false );
+			console.log("transferCustomEvent:", ev.type , " to:",layerId);
 			ifr.contentWindow.document.dispatchEvent(customEvent);
 //		} else if ( transferCustomEvent2iframe[layerId] ){
 //			document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
@@ -851,6 +852,7 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 		targetIframe= document.getElementById(targetIframeId)
 		console.log("close layer specific UI for:",layerId);
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
+		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);
 		delete transferCustomEvent2iframe[layerId];
 		dispatchCutomIframeEvent("closeFrame",targetIframeId );
 		setTimeout( function(){
