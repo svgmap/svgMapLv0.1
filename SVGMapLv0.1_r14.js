@@ -118,7 +118,7 @@
 // 2017/03/08 : URLフラグメントで、表示領域、表示レイヤ(レイヤタイトルによる)、非表示レイヤ(同)を指定可能に
 //              表示非表示レイヤはカンマ区切りで複数指定可能,またレイヤ名にハッシュをつけて文字列を入れると、そのレイヤーのsvgコンテナのlocation.hashにそれが追加される(その際"="は"%3D",&は"%26"でエンコード必要)
 //              ex:http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/developing/SVGMapper_r14.html#visibleLayer=csv textArea#hello%3D2%26good%3Dday&hiddenLayer=csv layer#hellox%3D2x%26goodx%3Ddayx&svgView(viewBox(global,135,35,1,1))
-// 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化にかかわらず　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
+// 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化しなかったとき　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
 //
 //
 // Issues:
@@ -428,12 +428,22 @@ function showPanning( evt ){
 					zoomingTransitionFactor = getTouchDistance( evt ) / initialTouchDisance;
 				}
 			} else {
-				difX = evt.clientX - mouseX0;
-				difY = evt.clientY - mouseY0;
+//				console.log("showPanning evt:",evt.buttons);
+				if ( evt.buttons == 0 ){ // 2017/4/10
+					endPan();
+				} else {
+					difX = evt.clientX - mouseX0;
+					difY = evt.clientY - mouseY0;
+				}
 			}
 		} else {
-			difX = event.clientX - mouseX0;
-			difY = event.clientY - mouseY0;
+//				console.log("showPanning event:",event.buttons);
+			if ( event.buttons == 0 ){ // 2017/4/10
+				endPan();
+			} else {
+				difX = event.clientX - mouseX0;
+				difY = event.clientY - mouseY0;
+			}
 		}
 		
 		if ( zoomingTransitionFactor > 0 ){
@@ -3676,13 +3686,27 @@ function setRootLayersProps(layerID_Numb_Title, visible , editing , hashOption )
 	var rootLayersProps = getRootLayersProps();
 //	console.log("setRootLayersProps:layer:",layer," layerId:",layerId ," rootLayersProps:",rootLayersProps);
 	var lp = rootLayersProps[layerId];
+	
+	
+	if( visible == null ){
+		visible = lp.visible;
+	}
+	if( editing == null ){
+		editing = lp.editing;
+	}
+	
+	
+//	console.log("##setRootLayersProps:caller, visible , editing , hashOption:",setRootLayersProps.caller , visible , editing , hashOption);
 //	console.log(lp);
 	// ありえないパターンを除外
 	if ( !hashOption && ( lp.visible == visible && lp.editing == editing ) ){ // 変化なし ただしhashOptionある場合を除く
+//		console.log("setRootLayersProps 変化なし ただしhashOptionある場合を除く:: hashOption", hashOption, "  lp.visible , visible , lp.editing , editing" , lp.visible , visible , lp.editing , editing);
 		return ( false );
 	} else if ( !lp.editable && editing ){ // 編集不可能で編集中はありえない :: editableは無くても破たんしないと思う・・
+//		console.log("setRootLayersProps 編集不可能で編集中はありえない");
 		return ( false );
 	} else if ( !visible && editing ){ // 非表示で編集中はありえない
+//		console.log("setRootLayersProps 非表示で編集中はありえない");
 		return ( false );
 	} 
 	
@@ -3957,15 +3981,16 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 						svgImages[key].dispatchEvent(customEvent);
 					}
 				}
-			}
+			} else {
 			// それ以外では新設のscreenRefreshed ev 出す
-			var customEvent2 = document.createEvent("HTMLEvents");
-			customEvent2.initEvent("screenRefreshed", true , false );
-//			console.log("dispatchEvent screenRefreshed");
-			document.dispatchEvent(customEvent2);
-			for ( var key in svgImagesProps ){ // 2017.3.9 scriptを持つsvg文書にもzpmイベントを送る 同じ仕組みで他のイベント的なものにも本物のイベントを送れる
-				if ( svgImagesProps[key].script ){
-					svgImages[key].dispatchEvent(customEvent2);
+				var customEvent2 = document.createEvent("HTMLEvents");
+				customEvent2.initEvent("screenRefreshed", true , false );
+	//			console.log("dispatchEvent screenRefreshed");
+				document.dispatchEvent(customEvent2);
+				for ( var key in svgImagesProps ){ // 2017.3.9 scriptを持つsvg文書にもzpmイベントを送る 同じ仕組みで他のイベント的なものにも本物のイベントを送れる
+					if ( svgImagesProps[key].script ){
+						svgImages[key].dispatchEvent(customEvent2);
+					}
 				}
 			}
 		}
@@ -4560,7 +4585,7 @@ function setSVGcirclePoints( pathNode ,  context , child2canvas , clickable , ca
 	
 	var repld = "M"+ (cx - rx) + "," + cy + "A" + rx + "," + ry + " 0 0 1 " + (cx + rx ) + "," + cy + "A" + rx + "," + ry + " 0 0 1 " + (cx - rx ) + "," + cy +"z";
 	
-	var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset);
+	var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset , GISgeometry );
 	var csize = transform( rx , ry , child2canvas , true );
 	ret.y -= csize.y;
 	ret.height = csize.y * 2;
@@ -4583,12 +4608,12 @@ function setSVGrectPoints( pathNode ,  context , child2canvas , clickable , vect
 	var repld = "M"+ rx + "," + ry + "L" + (rx+rw) + "," + ry + " " + (rx+rw) + "," + (ry+rh) + " " + rx + "," + (ry+rh) +"z";
 //	console.log("repld:"+repld);
 	
-	var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset);
+	var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset , GISgeometry );
 	return ( ret );
 
 }
 
-function setSVGpolyPoints( pathNode ,  context , child2canvas , clickable , nodeType , vectorEffectOffset ){
+function setSVGpolyPoints( pathNode ,  context , child2canvas , clickable , nodeType , vectorEffectOffset , GISgeometry ){
 	var pp = pathNode.getAttribute("points");
 	if (pp){
 		var points = (pp.replace(/,/g," ")).split(" ");
@@ -5383,6 +5408,7 @@ function getObjectAtPoint( x, y ){
 	pathHitTest.hittedElementsBbox = new Array();
 	pathHitTest.hittedElementsUsedParent = new Array();
 	if (typeof svgMapAuthoringTool == "object" && svgMapAuthoringTool.isEditingGraphicsElement() ){ // オブジェクトを編集中には、ジェネラルなヒットテストは実施しない
+		console.log("now object editing..");
 		pathHitTest.enable = false;
 		return ( pathHitTest.targetObject );
 	}
@@ -5875,12 +5901,9 @@ function checkResume(documentElement, symbols){
 		}
 		var docPath = svgImagesProps["root"].Path;
 //		console.log("docPath:",docPath);
-		if ( location.hash || docPath.indexOf("#")>0 ){
-			if ( location.hash ){
-				lhash = location.hash;
-			} else {
-				lhash = docPath.substring(docPath.indexOf("#"));
-			}
+		if ( location.href.indexOf("#")>=0 ){
+			// firefox 旧版のバグ予防のためlocation.hash不使用に切り替え
+			lhash = location.href.substring(location.href.indexOf("#"));
 			lh = getUrlHash( lhash );
 //			console.log(lh);
 		}
@@ -5953,7 +5976,7 @@ function checkResume(documentElement, symbols){
 				for ( var i = 0 ; i < hl.length ; i++ ){
 					hl[i]=getUrlOptions(hl[i]);
 					var layerId = getLayerId(hl[i].name);
-					console.log( "visible layer name:",hl[i], " is?:",layerId);
+//					console.log( "visible layer name:",hl[i], " is?:",layerId);
 					if ( layerId ){
 //						console.log("set visible:",hl[i],layerId);
 						setRootLayersProps(layerId, false, false, hl[i].hash);
@@ -5961,14 +5984,14 @@ function checkResume(documentElement, symbols){
 				}
 			}
 			if ( lh.visibleLayer ){
-				console.log("visibleLayerOpt:",lh.visibleLayer, "   lh:",lhash,lh);
+//				console.log("visibleLayerOpt:",lh.visibleLayer, "   lh:",lhash,lh);
 //				var vl = decodeURI(lh.visibleLayer).split(",");
 				var vl = decodeURIComponent(lh.visibleLayer).split(",");
 				for ( var i = 0 ; i < vl.length ; i++ ){
-					console.log( "visible layer:",vl[i]);
+//					console.log( "visible layer:",vl[i]);
 					vl[i]=getUrlOptions(vl[i]);
 					var layerId = getLayerId(vl[i].name);
-					console.log( "visible layer name:",vl[i], " is?:",layerId);
+//					console.log( "visible layer name:",vl[i], " is?:",layerId);
 					if ( layerId ){
 //						console.log("set visible:",vl[i],layerId);
 						setRootLayersProps(layerId, true, false, vl[i].hash);
@@ -6006,7 +6029,7 @@ function getUrlOptions( url ){
 	if ( hashPos > 0 ){
 		hashStr = nameStr.substring(hashPos);
 		nameStr = nameStr.substring(0,hashPos);
-		console.log("hashStr:",hashStr);
+//		console.log("hashStr:",hashStr);
 	}
 	if ( queryPos > 0 ){
 		queryStr  = nameStr.substring(queryPos);
