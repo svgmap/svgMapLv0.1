@@ -138,6 +138,9 @@ var svgMapGIStool = ( function(){
 	
 	// Javascript Clipper
 	// https://sourceforge.net/projects/jsclipper/
+
+	// weiler-athertonアルゴリズム 
+	// https://github.com/morganherlocker/weiler-atherton
 	
 	
 	
@@ -268,10 +271,10 @@ var svgMapGIStool = ( function(){
 	// 重くなることがあるので、非同期処理版を作る・・・
 	function getIncludedPointsS2a( geom , superParam ){
 		console.log("getIncludedPointsS2a called : ",geom);
-		var cdi = getChildDocsId(superParam.pointsDocTreeID, superParam.polygonsDocTreeID)
-		var pointsDocTreeIDs = cdi.childrenId1;
+//		var cdi = getChildDocsId(superParam.pointsDocTreeID, superParam.polygonsDocTreeID)
+		var pointsDocTreeIDs = getChildDocsId(superParam.pointsDocTreeID);
 		superParam.pointsDocTreeIDs = pointsDocTreeIDs;
-		var polygonsDocTreeIDs = cdi.childrenId2;
+		var polygonsDocTreeIDs = getChildDocsId(superParam.polygonsDocTreeID);
 		superParam.polygonsDocTreeIDs = polygonsDocTreeIDs;
 		var totalPoiCount = 0;
 		var ansPois = new Array();
@@ -455,7 +458,7 @@ var svgMapGIStool = ( function(){
 		return ( points );
 	}
 	
-	function getChildDocsId( layerId1 , layerId2 ){
+	function getChildDocsIdObs( layerId1 , layerId2 ){
 		var svgImagesProps = svgMap.getSvgImagesProps();
 		var childrenId1 =[];
 		var childrenId2 =[];
@@ -474,6 +477,42 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
+	function getChildDocsId( TdocId ){
+		// TdocIdがレイヤーIDだった場合はそのレイヤーに属するものをすべて
+		// 単なる文書Idだった場合はその文書と子孫文書すべて
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var childrenId =[];
+		
+		var hasChildren=false;
+		/**
+		for ( var docId in svgImagesProps ){
+			if ( TdocId === svgImagesProps[docId].rootLayer ){
+				childrenId.push( docId );
+				hasChildren = true;
+			}
+		}
+		**/
+		if ( !hasChildren ){
+			childrenId = [TdocId];
+//			console.log( svgImagesProps[TdocId] );
+			digChild( svgImagesProps[TdocId] , childrenId , svgImagesProps );
+		}
+//		console.log("getChildDocsId searchId:",TdocId,"  ans childrenId:",childrenId);
+		return (childrenId);
+	}
+	
+	
+	function digChild( svgImagesProp , ans , svgImagesProps ){
+//		console.log(svgImagesProp);
+		if ( svgImagesProp ){
+			for ( var docId in svgImagesProp.childImages ){
+	//			console.log(docId, svgImagesProps);
+				ans.push(docId);
+				digChild( svgImagesProps[docId], ans , svgImagesProps);
+			}
+		}
+	}
+	
 	
 	function buildIntersectionS2( geom, params ){
 //		console.log( "called buildIntersectionS2:",geom, params );
@@ -482,9 +521,9 @@ var svgMapGIStool = ( function(){
 //		var source1IDs = [], source2IDs = [];
 		// sourceId1,2がルートレイヤーである子レイヤーをsource1,2IDsに蓄積する
 		
-		var childrenID = getChildDocsId( params.sourceId1 , params.sourceId2 );
-		var source1IDs = childrenID.childrenId1;
-		var source2IDs = childrenID.childrenId2;
+//		var childrenID = getChildDocsId( params.sourceId1 , params.sourceId2 );
+		var source1IDs = getChildDocsId( params.sourceId1);
+		var source2IDs = getChildDocsId( params.sourceId2);
 		
 		/**
 		for ( var docId in geom ){
@@ -672,8 +711,13 @@ var svgMapGIStool = ( function(){
 		svgMap.captureGISgeometries(testCapture);
 	}
 	
+	function captureGeometries( cbFunc , opt ){
+		svgMap.captureGISgeometries( cbFunc , opt );
+	}
+	
 return { // svgMapGIStool. で公開する関数のリスト
 	testCapGISgeom : testCapGISgeom,
+	captureGeometries : captureGeometries,
 	getIncludedPoints : getIncludedPoints,
 	getExcludedPoints : getExcludedPoints,
 	buildIntersection : buildIntersection,
