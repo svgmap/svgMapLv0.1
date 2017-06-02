@@ -26,6 +26,7 @@
 // 2016/12/28 Rev3: Polygon/Polyline Tools
 // 2017/01/30 Rev4: Rubber Band for Polyline/Polygon
 // 2017/02/** Rev5: Point入力UIのTextArea使用を廃止する(for Tablet devices)
+// 2017/03/17 zoomPanMap -> screenRefreshed (特別対応)
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -545,7 +546,7 @@ var polyCanvas = (function(){
 //		cc.lineTo(100, 100);
 //		cc.closePath();
 //		cc.stroke();
-		document.addEventListener("zoomPanMap",updateCanvas);
+		document.addEventListener("screenRefreshed",updateCanvas);
 	}
 	
 	function addPoint(point){
@@ -652,7 +653,7 @@ var polyCanvas = (function(){
 		enabled = false;
 		clearPoints();
 		console.log("removeCanvas");
-		document.removeEventListener("zoomPanMap", updateCanvas, false);
+		document.removeEventListener("screenRefreshed", updateCanvas, false);
 		if ( document.getElementById("PolyEditCanvas") ){
 			var cv = document.getElementById("PolyEditCanvas");
 			cv.parentNode.removeChild(cv);
@@ -683,7 +684,7 @@ var poiCursor = (function (){
 		cursorGeoPoint = geoPoint;
 		enabled = true;
 		updateCursorGeo();
-		document.addEventListener("zoomPanMap",updateCursorGeo);
+		document.addEventListener("screenRefreshed",updateCursorGeo);
 	}
 	
 	function updateCursorGeo(){
@@ -713,7 +714,7 @@ var poiCursor = (function (){
 	function removeCursor(){
 		enabled = false;
 		console.log("removeCursor");
-		document.removeEventListener("zoomPanMap", updateCursorGeo, false);
+		document.removeEventListener("screenRefreshed", updateCursorGeo, false);
 		if ( document.getElementById("POIeditCursor") ){
 			var cursor = document.getElementById("POIeditCursor");
 			cursor.parentNode.removeChild(cursor);
