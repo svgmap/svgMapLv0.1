@@ -24,6 +24,8 @@
 // 2016.12.02 コアにGeoJSONパース機能実装、それを用いたPolygon内のPoitns包含チェック初期実装
 // 2016.12.07 JSTS implementation
 // 2016.12.16 Totally Asynchronus Proecssing　ほぼ満足する機能が入ったと思われる。＞初期リリースとする
+// 2017.06.12 Geojsonの並びが逆(基本フレームワークも)だったのを修正のうえ、こちらも修正(getSVGcoord)、drawGeoJson(geoJson->SVG変換の上描画)の完成度を高め公開関数へ
+//
 //
 // 
 // ACTIONS:
@@ -649,19 +651,66 @@ var svgMapGIStool = ( function(){
 			if ( params.progrssCallback ){
 				params.progrssCallback( 100 );
 			}
-			console.log(intersections);
-			drawGeoJson(intersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor);
+			var geoJsonIntersections = {};
+			geoJsonIntersections.type="GeometryCollection";
+			geoJsonIntersections.geometries = intersections;
+			console.log("svgmapGIS:geoJsonIntersections",geoJsonIntersections);
+			drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor);
 			svgMap.refreshScreen();
 		}
 	}
 	
 	
-	function drawGeoJson( geojson , targetId, strokeColor, strokeWidth, fillColor){
+	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata){
+		console.log("called svgMapGisTool drawGeoJson");
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
-		var svgImage = svgImages[targetId];
-		var svgImagesProp = svgImagesProps[targetId];
+		var svgImage = svgImages[targetSvgDocId];
+		var svgImagesProp = svgImagesProps[targetSvgDocId];
 		var crs = svgImagesProp.CRS;
+		
+		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
+			for ( var i = 0 ; i < geojson.length ; i++ ){
+				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+			}
+		} else if ( geojson.type == "FeatureCollection" ){
+			var features = geojson.features;
+			for ( var i = 0 ; i < features.length ; i++ ){
+				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+			}
+		} else if ( geojson.type == "Feature" ){
+			var geom = geojson.geometry;
+			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+		} else if ( geojson.type == "GeometryCollection" ){
+			var geoms = geojson.geometries;
+			for ( var i = 0 ; i < geoms.length ; i++ ){
+				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+			}
+		} else if ( geojson.type == "MultiPolygon" ){
+			// これは、pathのサブパスのほうが良いと思うが・・
+			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+				putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata)
+			}
+		} else if ( geojson.type == "Polygon" ){
+			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata)
+		} else if ( geojson.type == "MultiLineString" ){
+			// これは、pathのサブパスのほうが良いと思うが・・
+			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+				putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata);
+			}
+		} else if ( geojson.type == "LineString" ){
+			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata);
+			
+		} else if ( geojson.type == "MultiPoint" ){
+			// グループで囲んで一括でmetadataつけたほうが良いと思うが・・
+			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+				putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata);
+			}
+		} else if ( geojson.type == "Point" ){
+			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata);
+		}
+		
+		/**
 		for ( var i = 0 ; i < geojson.length ; i++ ){
 			var geom = geojson[i];
 			switch ( geom.type ){
@@ -680,7 +729,66 @@ var svgMapGIStool = ( function(){
 				break;
 			}
 		}
+		**/
 //		console.log(svgImage);
+	}
+	
+	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata){
+		var poie = svgImage.createElement("use");
+		var svgc = getSVGcoord(coordinates,crs);
+		poie.setAttribute( "x" , "0" );
+		poie.setAttribute( "y" , "0" );
+		poie.setAttribute( "transform" , "ref(svg," + svgc.x + "," + svgc.y + ")" );
+		poie.setAttribute( "xlink:href" , "#" + POIiconId );
+		if ( poiTitle ){
+			poie.setAttribute( "title", poiTitle);
+		}
+		if ( metadata ){
+			poie.setAttribute( "content", metadata);
+		}
+		svgImage.documentElement.appendChild( poie );
+	}
+	
+	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata){
+		if ( !strokeColor ){
+			strokeColor = "blue";
+		}
+		if ( !strokeWidth ){
+			strokeWidth = 3;
+		}
+		var pe = svgImage.createElement("path");
+		var pathD = getPathD( coordinates , crs );
+		pe.setAttribute("d",pathD);
+		pe.setAttribute("fill","none");
+		pe.setAttribute("stroke",strokeColor);
+		pe.setAttribute("stroke-width",strokeWidth);
+		pe.setAttribute("vector-effect","non-scaling-stroke");
+		if ( metadata ){
+			pe.setAttribute( "content", metadata);
+		}
+		svgImage.documentElement.appendChild( pe );
+	}
+	
+	function putPolygon(coordinates, svgImage, crs, fillColor, metadata){
+		if ( !fillColor ){
+			strokeColor = "orange";
+		}
+		
+		var pe = svgImage.createElement("path");
+		
+		var pathD="";
+		for ( var i = 0 ; i < coordinates.length ; i++ ){
+			pathD += getPathD( coordinates[i] , crs )+"z ";
+		}
+		
+		pe.setAttribute("d",pathD);
+		pe.setAttribute("fill",fillColor);
+		pe.setAttribute("stroke","none");
+		pe.setAttribute("fill-rule", "evenodd");
+		if ( metadata ){
+			pe.setAttribute( "content", metadata);
+		}
+		svgImage.documentElement.appendChild( pe );
 	}
 	
 	function getPathD( geoCoords , crs ){
@@ -695,9 +803,10 @@ var svgMapGIStool = ( function(){
 	}
 	
 	function getSVGcoord( geoCoord , crs ){
+		// DEBUG 2017.6.12 geojsonの座標並びが逆だった 正しくは経度,緯度並び
 		return{ 
-			x: geoCoord[1] * crs.a + geoCoord[0] * crs.c + crs.e ,
-			y: geoCoord[1] * crs.b + geoCoord[0] * crs.d + crs.f
+			x: geoCoord[0] * crs.a + geoCoord[1] * crs.c + crs.e ,
+			y: geoCoord[0] * crs.b + geoCoord[1] * crs.d + crs.f
 		}
 	}
 	
@@ -721,7 +830,8 @@ return { // svgMapGIStool. で公開する関数のリスト
 	getIncludedPoints : getIncludedPoints,
 	getExcludedPoints : getExcludedPoints,
 	buildIntersection : buildIntersection,
-	haltComputing : haltComputing
+	haltComputing : haltComputing,
+	drawGeoJson : drawGeoJson
 }
 
 })();

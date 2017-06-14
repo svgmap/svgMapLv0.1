@@ -4175,6 +4175,7 @@ function getElementByImgIdNoNS( XMLNode , searchId ){
 }
 
 function getElementByAttr( XMLNode , searchId , atName ){ // Firefox用・・（IE11でも同じことがおきる場合がある 2014.6.20)
+	// TODO: これはquerySelectorで処理すべき
 //	console.log(XMLNode , searchId,XMLNode.hasChildNodes());
 	if ( ! XMLNode.hasChildNodes() ){
 		return ( null );
@@ -5934,7 +5935,8 @@ function checkResume(documentElement, symbols){
 				if ( layerStatStr && ( layerStatStr.length == lp.length || ( layerStatStr.length == 4000 && lp.length > 4000 ) )){
 					for ( var i = 0 ; i < layerStatStr.length ; i++ ){
 						if ( layerStatStr.charAt(i) == "e" ){
-							setRootLayersProps(lp[i].id, true, true );
+//							setRootLayersProps(lp[i].id, true, true ); // editingでもレジューム後編集モードに入れるのは危ないしそもそもAPI上エラになるので、単にvisibleだけにする
+							setRootLayersProps(lp[i].id, true, false );
 						} else if ( layerStatStr.charAt(i) == "v" ){
 							setRootLayersProps(lp[i].id, true, false );
 						} else if ( layerStatStr.charAt(i) == "-" ){
@@ -5947,11 +5949,11 @@ function checkResume(documentElement, symbols){
 				}
 				
 				
-//				saveResumeData();
 //				resumeFirstTime = false; // 下(setGeoViewPort)でもう一回checkが通ってバグる・・10/27 これは5番目の引数により不要になった 2017.1.31
 				setGeoViewPort(vbLat,vbLng,vbLatSpan,vbLngSpan , true); // set geoviewport without refresh
 				
 				console.log("Resume setGeoViewPort:", vbLat,vbLng,vbLatSpan,vbLngSpan );
+				saveResumeData();
 				
 			}
 		} else { // それ以外の場合は、レジュームデータを保存する。
@@ -6010,7 +6012,8 @@ function checkResume(documentElement, symbols){
 	
 	resumeFirstTime = false;
 	
-//	console.log("END Check Resume");
+	var cook = getCookies();
+//	console.log("END Check Resume :", cook);
 }
 
 // URLのハッシュやサーチパートをパースしオブジェクトに投入する 2017.3.8
@@ -6142,6 +6145,7 @@ function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , 
 
 function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , prop6 , prop7 ){
 //	console.log("Called prepareGISgeometries   GISgeometries:", GISgeometries);
+//	DEBUG 2017.6.12 geojsonの座標並びが逆だった・・・
 	for ( var docId in GISgeometries ){
 		var layerGeoms = GISgeometries[docId];
 		if ( layerGeoms.length > 0 ){
@@ -6155,13 +6159,13 @@ function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , p
 				var geom = layerGeoms[i];
 				if ( geom.type === "Point" ){
 					geoCrd = SVG2Geo( geom.svgXY[0] , geom.svgXY[1] , null , invCrs );
-					geom.coordinates = [ geoCrd.lat , geoCrd.lng ];
+					geom.coordinates = [ geoCrd.lng , geoCrd.lat ];
 				} else {
 					geom.coordinates = new Array();
 					if ( geom.svgXY.length == 1 && geom.svgXY[0].length == 1 ){ // Vector EffectのPolygonなどはPointにこの時点で変換する。
 						geoCrd = SVG2Geo( geom.svgXY[0][0][0] , geom.svgXY[0][0][1] , null , invCrs );
 //						console.log ("conv VE Polygon to Point :", geom.svgXY[0], "  geo:",geoCrd);
-						geom.coordinates = [ geoCrd.lat , geoCrd.lng ];
+						geom.coordinates = [ geoCrd.lng , geoCrd.lat ];
 						geom.type = "Point";
 					} else {
 						for ( var j = 0 ; j < geom.svgXY.length ; j++ ){
@@ -6175,10 +6179,10 @@ function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , p
 									if ( k == 0 ){
 										var startP = geoCrd;
 									}
-									wgSubP.push([geoCrd.lat,geoCrd.lng]);
+									wgSubP.push([geoCrd.lng,geoCrd.lat]);
 								}
 								if ( geom.type === "Polygon" && (startP.lat != geoCrd.lat ||  startP.lng != geoCrd.lng) ){
-									wgSubP.push([startP.lat,startP.lng]);
+									wgSubP.push([startP.lng,startP.lat]);
 								}
 								geom.coordinates.push(wgSubP);
 							}
