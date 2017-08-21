@@ -119,7 +119,7 @@
 //              表示非表示レイヤはカンマ区切りで複数指定可能,またレイヤ名にハッシュをつけて文字列を入れると、そのレイヤーのsvgコンテナのlocation.hashにそれが追加される(その際"="は"%3D",&は"%26"でエンコード必要)
 //              ex:http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/developing/SVGMapper_r14.html#visibleLayer=csv textArea#hello%3D2%26good%3Dday&hiddenLayer=csv layer#hellox%3D2x%26goodx%3Ddayx&svgView(viewBox(global,135,35,1,1))
 // 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化しなかったとき　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
-//
+// 2017/08/21 : defaultShowPoiPropertyをリッチなUIへ変更
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -5640,22 +5640,22 @@ function setShowPoiProperty( func , docId ){
 
 function defaultShowPoiProperty(target){
 	console.log ( "Target:" , target , "  parent:", target.parentNode );
-	
+
 //	var metaSchema = target.parentNode.getAttribute("property").split(",");
 	var metaSchema = null;
 	if ( target.ownerDocument.firstChild.getAttribute("property") ){
 		metaSchema = target.ownerDocument.firstChild.getAttribute("property").split(","); // debug 2013.8.27
 	}
-	
-	
+
+
 	var message="";
 	if ( target.getAttribute("content") ){ // contentメタデータがある場合
 		var metaData = target.getAttribute("content").split(",");
+		message="<table border='1' style='word-break: break-all;table-layout:fixed;width:100%;border:solid orange;border-collapse: collapse'>"
 		for ( var j = 0 ; j < metaData.length ; j++ ){
 			metaData[j]=metaData[j].replace(/^\s+|\s+$/g,'');
 			if (metaData[j].indexOf("'")==0 || metaData[j].indexOf('"')==0){
 				var countss = 0;
-//				console.log("test:",metaData[j]," ::: ",metaData[j].substr(metaData[j].length-1,1));
 				while(metaData[j].substr(metaData[j].length-1,1) !="'" && metaData[j].substr(metaData[j].length-1,1) !='"'){
 					metaData[j]=metaData[j]+","+metaData[j+1];
 					metaData.splice(j+1,1);
@@ -5668,39 +5668,100 @@ function defaultShowPoiProperty(target){
 				metaData[j]=metaData[j].replace(/['"]/g,"");
 			}
 		}
-		
+
 		if ( metaSchema && metaSchema.length == metaData.length ){
-			message = "[name] , [value]\n";
+			message += "<tr><th style='width=25%'>name</th><th>value</th></tr>";
 			for ( var i = 0 ; i < metaSchema.length ; i++ ){
 				var data = "--";
 				if ( metaData[i]!=""){
 					data = metaData[i];
 				}
-				message += metaSchema[i] + " , " + data + "\n";
+				message += "<tr><td>"+metaSchema[i] + " </td><td> " + data + "</td></tr>";
 			}
 		} else {
-			message = "[number] , [value]\n";
-			for ( var i = 0 ; i < metaData.length ; i++ ){
-				var data = "--";
-				if ( metaData[i]!=""){
-					data = metaData[i];
-				}
-				message += i + " , " + data + "\n";
-			}
+			  message += "<tr><th style='width=25%'>name</th><th>value</th></tr>";
+			  for ( var i = 0 ; i < metaData.length ; i++ ){
+			   	var data = "--";
+				  if ( metaData[i]!=""){
+			  		data = metaData[i];
+				  }
+				message += "<tr><td>"+ i + " </td><td> " + data + "</td></tr>";			}
 		}
-		
+
 		if ( getHyperLink(target) ){
-			message += "link , " + getHyperLink(target).href + "\n";
+			message += "<tr><td>link</td> <td>" + getHyperLink(target).href + "</td></tr>";
 		}
 		if ( target.getAttribute("lat") ){
-			message += "\n"+ "緯度, " + target.getAttribute("lat") + "\n経度, " + target.getAttribute("lng");
+			message += "<tr><td>lat</td> <td>" + target.getAttribute("lat") + "</td></tr>";
+			message += "<tr><td>lng</td> <td>" + target.getAttribute("lng") + "</td></tr>";
 		}
 	} else { // 無い場合
 		message = getAttributes( target );
 	}
-	alert("POI CLICKED!\nイベント元要素のメタデータは、\n" + message + "です。");
-	
+	console.log(message);
+	showModal(message,400,600);
+
 }
+
+
+function showModal( htm , maxW, maxH ){
+	var modalDiv;
+	if ( document.getElementById("modalDiv") ){
+		modalDiv = document.getElementById("modalDiv")
+		modalDiv.parentNode.removeChild(modalDiv);
+		modalDiv=document.createElement("div");
+	} else {
+		modalDiv=document.createElement("div");
+	}
+	if ( window.innerWidth -100 < maxW ){
+		maxW = window.innerWidth -100;
+	}
+	if ( window.innerHeight -140 < maxH ){
+		maxH = window.innerHeight -100;
+	}
+	modalDiv.style.height= (maxH +36) + "px";
+	modalDiv.style.width= (maxW +10) + "px";
+	modalDiv.style.backgroundColor="rgba(180, 180, 180, 0.4)";
+	modalDiv.style.zIndex="1000";
+	modalDiv.style.position="absolute";
+	modalDiv.style.top="40px";
+	modalDiv.style.left="40px";
+	modalDiv.style.overflowY="hidden";
+	modalDiv.style.overflowX="hidden";
+	modalDiv.id="modalDiv";
+
+	var infoDiv=document.createElement("div");
+	infoDiv.style.height= maxH + "px";
+	infoDiv.style.width= maxW + "px";
+	infoDiv.style.backgroundColor="rgba(255,240,220,0.7)";
+	infoDiv.style.position="absolute";
+	infoDiv.style.top="5px";
+	infoDiv.style.left="5px";
+	infoDiv.style.overflowY="scroll";
+	infoDiv.style.overflowX="hidden";
+	infoDiv.id="infoDiv";
+	modalDiv.appendChild(infoDiv);
+
+	infoDiv.innerHTML = htm;
+
+	var btn=document.createElement("button");
+	var txt=document.createTextNode("CLOSE");
+	btn.appendChild(txt);
+	btn.onclick=function(){
+		modalDiv.parentNode.removeChild(modalDiv);
+	};
+	btn.style.position="absolute";
+	btn.style.width="30%";
+	btn.style.bottom="5px";
+	btn.style.right="40px";
+
+	modalDiv.appendChild(btn);
+
+	modalDiv.addEventListener("mousewheel" , function(e){e.stopPropagation();}, false); //chrome
+	modalDiv.addEventListener("DOMMouseScroll" , function(e){e.stopPropagation();}, false); //firefox
+	document.getElementsByTagName("body")[0].appendChild(modalDiv);
+}
+
 
 function getAttributes( domElement ){
 	var nm = domElement.attributes;
