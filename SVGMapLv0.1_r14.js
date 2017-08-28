@@ -121,6 +121,7 @@
 // 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化しなかったとき　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
 // 2017/08/21 : defaultShowPoiPropertyをリッチなUIへ変更
 // 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
+// 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -3041,8 +3042,7 @@ function putCmt( cmt ){
 // 中心緯経度書き換え
 function updateCenterPos() {
 	if ( centerPos ){
-		var cent = getCentralGeoCoorinates()
-//		console.log("centralGeo:", cent.lat , cent.lng);
+		var cent = getCentralGeoCoorinates();
 		centerPos.innerHTML = round(cent.lat,6) + " , " + round(cent.lng,6);
 	}
 	if ( vScale ){ // 50pxのたてスケールに相当する長さをKmで表示
@@ -3050,6 +3050,13 @@ function updateCenterPos() {
 	}
 }
 
+// ユーザ定義を可能とする中心座標書き換え
+function setUpdateCenterPos(func){
+	if ( func ){
+		updateCenterPos = func;
+	}
+	
+}
 // 小数点以下の丸め関数です
 function round(num, n) {
   var tmp = Math.pow(10, n);
@@ -6408,7 +6415,8 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getMouseXY : getMouseXY,
 	getElementByImageId : getElementByImgIdNoNS,
 	escape : escape,
-	setCustomModal : setCustomModal
+	setCustomModal : setCustomModal,
+	setUpdateCenterPos : setUpdateCenterPos
 }
 
 })();
