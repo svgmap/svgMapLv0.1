@@ -122,7 +122,8 @@
 // 2017/08/21 : defaultShowPoiPropertyをリッチなUIへ変更
 // 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
 // 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
-//　2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更
+// 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
+
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
 // 2016/12 ほとんどすべてのケースでtransformが使えない実装です (transform matrix(ref))とか特殊なものとCRSのみ
@@ -6373,6 +6374,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 			isSP: isSP
 		}
 	},
+	getVerticalScreenScale : getVerticalScreenScale
 	getViewBox : getViewBox,
 	gps : gps,
 	handleResult : handleResult,
