@@ -546,6 +546,23 @@ var additionalZoom = 0;
 
 var smoothZoomInterval = 20;
 
+//ズームイン／アウト時の遷移時間
+function setSmoothZoomTransitionTime(zoomTransitionTime){
+	if(Number(zoomTransitionTime) > 0){
+		smoothZoomTransitionTime = Number(zoomTransitionTime);
+	}else{
+		smoothZoomTransitionTime = 300;
+	}
+}
+
+//ズームイン／アウト後のタイル読み込み開始タイマー(ms)
+function setSmoothZoomInterval(zoomInterval){
+	if(Number(zoomInterval) > 0){
+		smoothZoomInterval = Number(zoomInterval);
+	}else{
+		smoothZoomInterval = 20;
+	}
+}
 
 function smoothZoom(zoomFactor , startDate , doFinish , startZoom ){ // 2013.9.4 外部呼び出し時は、zoomFactorだけでOK
 //	console.log("called smoothZoom:",zoomFactor,startDate,doFinish,startZoom);
