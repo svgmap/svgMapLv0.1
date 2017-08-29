@@ -120,7 +120,10 @@
 //              ex:http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/developing/SVGMapper_r14.html#visibleLayer=csv textArea#hello%3D2%26good%3Dday&hiddenLayer=csv layer#hellox%3D2x%26goodx%3Ddayx&svgView(viewBox(global,135,35,1,1))
 // 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化しなかったとき　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
 // 2017/08/21 : defaultShowPoiPropertyをリッチなUIへ変更
-//
+// 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
+// 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
+// 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
+
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
 // 2016/12 ほとんどすべてのケースでtransformが使えない実装です (transform matrix(ref))とか特殊なものとCRSのみ
@@ -544,6 +547,23 @@ var additionalZoom = 0;
 
 var smoothZoomInterval = 20;
 
+//ズームイン／アウト時の遷移時間
+function setSmoothZoomTransitionTime(zoomTransitionTime){
+	if(Number(zoomTransitionTime) > 0){
+		smoothZoomTransitionTime = Number(zoomTransitionTime);
+	}else{
+		smoothZoomTransitionTime = 300;
+	}
+}
+
+//ズームイン／アウト後のタイル読み込み開始タイマー(ms)
+function setSmoothZoomInterval(zoomInterval){
+	if(Number(zoomInterval) > 0){
+		smoothZoomInterval = Number(zoomInterval);
+	}else{
+		smoothZoomInterval = 20;
+	}
+}
 
 function smoothZoom(zoomFactor , startDate , doFinish , startZoom ){ // 2013.9.4 外部呼び出し時は、zoomFactorだけでOK
 //	console.log("called smoothZoom:",zoomFactor,startDate,doFinish,startZoom);
@@ -2812,10 +2832,12 @@ function initNavigationButtons( isSP ){
 		document.getElementById("zoomdownButton").height = "60";
 		document.getElementById("zoomdownButton").style.top = "70px";
 	}
-	
-	document.getElementById("zoomupButton").style.cursor = "pointer";
-	document.getElementById("zoomdownButton").style.cursor = "pointer";
-	
+	if( document.getElementById("zoomupButton") ){
+		document.getElementById("zoomupButton").style.cursor = "pointer";
+	}
+	if( document.getElementById("zoomdownButton") ){
+		document.getElementById("zoomdownButton").style.cursor = "pointer";
+	}
 }
 
 
@@ -3038,8 +3060,7 @@ function putCmt( cmt ){
 // 中心緯経度書き換え
 function updateCenterPos() {
 	if ( centerPos ){
-		var cent = getCentralGeoCoorinates()
-//		console.log("centralGeo:", cent.lat , cent.lng);
+		var cent = getCentralGeoCoorinates();
 		centerPos.innerHTML = round(cent.lat,6) + " , " + round(cent.lng,6);
 	}
 	if ( vScale ){ // 50pxのたてスケールに相当する長さをKmで表示
@@ -3047,6 +3068,13 @@ function updateCenterPos() {
 	}
 }
 
+// ユーザ定義を可能とする中心座標書き換え
+function setUpdateCenterPos(func){
+	if ( func ){
+		updateCenterPos = func;
+	}
+	
+}
 // 小数点以下の丸め関数です
 function round(num, n) {
   var tmp = Math.pow(10, n);
@@ -6293,74 +6321,11 @@ function getElementByIdUsingQuerySelector(qid){
 return { // svgMap. で公開する関数のリスト 2014.6.6
 	// まだ足りないかも？
 	// http://d.hatena.ne.jp/pbgreen/20120108/1326038899
-	zoomup : zoomup,
-	zoomdown : zoomdown,
-	gps : gps,
-	getLayers : getLayers,
-	getLayer : getLayer,
-	getLayerId : getLayerId,
-	getSwLayers : getSwLayers,
-//	layerControl : layerControl,
-//	contColorSet : contColorSet,
-	linkedDocOp : linkedDocOp,
-	childDocOp : childDocOp,
-	dynamicLoad : dynamicLoad,
-//	mapCanvas : mapCanvas,
-	getMapCanvas : function(){ return (mapCanvas) },
-	setMapCanvas : function( mc ){ mapCanvas = mc },
-//	mapCanvasSize : mapCanvasSize,
-	getMapCanvasSize : function( ){ return (mapCanvasSize) },
-	setMapCanvasSize : function( mcs ){ mapCanvasSize = mcs },
-//	rootViewBox : rootViewBox,
-	getRootViewBox : function( ){ return (rootViewBox) },
-	setRootViewBox : function( rvb ){ rootViewBox = rvb },
-//	geoViewBox : geoViewBox,
-	getGeoViewBox : function( ){ return (geoViewBox) },
-//	rootCrs : rootCrs,
-	getRootCrs : function( ){ return (rootCrs) },
-//	root2Geo : root2Geo,
-	getRoot2Geo : function( ){ return (root2Geo) },
-	getHashByDocPath : getHashByDocPath,
-	getViewBox : getViewBox,
-//	svgImages : svgImages,
-	getSvgImages : function( ){ return (svgImages) },
-//	svgImagesProps : svgImagesProps,
-	getSvgImagesProps : function( ){ return (svgImagesProps) },
-	getSvgTarget : getSvgTarget,
-	getHyperLink : getHyperLink,
-	showPage : showPage,
-	POIviewSelection : POIviewSelection,
-	showUseProperty : showUseProperty,
-	testClick : testClick,
-	setTestClicked : function( ck ) { testClicked = ck},
+	
 	Geo2SVG : Geo2SVG,
+	POIviewSelection : POIviewSelection,
 	SVG2Geo : SVG2Geo,
-	transform : transform,
-	getConversionMatrixViaGCS : getConversionMatrixViaGCS,
-	getTransformedBox : getTransformedBox,
-//	zoomRatio : zoomRatio,
-	setZoomRatio : function( ratio ){ zoomRatio = ratio },
-//	summarizeCanvas : summarizeCanvas,
-	setSummarizeCanvas : function( val ){ summarizeCanvas = val },
-//	loadingTransitionTimeout : loadingTransitionTimeout,
-	setMapCanvasCSS : setMapCanvasCSS,
-	getBBox : getBBox,
-	loadSVG : loadSVG,
-	setGeoCenter : setGeoCenter,
-	setGeoViewPort : setGeoViewPort,
-	handleResult : handleResult,
-	ignoreMapAspect : function(){ ignoreMapAspect = true; },
-	getCentralGeoCoorinates : getCentralGeoCoorinates,
 	addEvent : addEvent,
-	setShowPoiProperty : setShowPoiProperty, 
-	override : function ( mname , mval ){
-//		console.log("override " + mname );
-		eval( mname + " = mval; "); // もっと良い方法はないのでしょうか？
-//		console.log("override " + mname + " : " , this[mname] , showPoiProperty , this.showPoiProperty , this);
-	},
-	getObject : function ( oname ){
-		return ( eval ( oname ) );
-	},
 	callFunction : function ( fname ,p1,p2,p3,p4,p5){
 //		console.log("call callFunc:",fname , p1,p2,p3,p4,p5);
 		eval( "var vFunc = " + fname); // "
@@ -6369,43 +6334,100 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 //		eval( fname  ).bind(null,p1,p2,p3,p4,p5);
 		return ( ans );
 	},
+	captureGISgeometries: captureGISgeometries,
+	childDocOp : childDocOp,
+	dynamicLoad : dynamicLoad,
+	escape : escape,
+	geo2Screen : geo2Screen,
+	getBBox : getBBox,
+	getCentralGeoCoorinates : getCentralGeoCoorinates,
+	getCentralGeoCoorinates : getCentralGeoCoorinates,
+	getConversionMatrixViaGCS : getConversionMatrixViaGCS,
+	getElementByImageId : getElementByImgIdNoNS,
+	getGeoViewBox : function( ){ return (geoViewBox) },
+	getHashByDocPath : getHashByDocPath,
 	getHyperLink : getHyperLink,
-	setDevicePixelRatio : setDevicePixelRatio,
-	refreshScreen : refreshScreen,
-	updateLayerListUI : function (){
-		if ( typeof updateLayseListUI == "function" ){
-			updateLayseListUI();
-		}
+	getHyperLink : getHyperLink,
+	getLayer : getLayer,
+	getLayerId : getLayerId,
+	getLayers : getLayers,
+	getMapCanvas : function(){ return (mapCanvas) },
+	getMapCanvasSize : function( ){ return (mapCanvasSize) },
+	getMouseXY : getMouseXY,
+	getObject : function ( oname ){
+		return ( eval ( oname ) );
 	},
+	getPoiPos : getPoiPos,
+	getRoot2Geo : function( ){ return (root2Geo) },
+	getRootCrs : function( ){ return (rootCrs) },
 	getRootLayersProps : getRootLayersProps,
-	setRootLayersProps : setRootLayersProps,
-	setLayerVisibility : setLayerVisibility,
-	registLayerUiSetter : function ( layerUIinitFunc, layerUIupdateFunc ){
-		setLayerUI = layerUIinitFunc;
-		updateLayseListUI = layerUIupdateFunc;
-	},
+	getRootViewBox : function( ){ return (rootViewBox) },
+	getSvgImages : function( ){ return (svgImages) },
+	getSvgImagesProps : function( ){ return (svgImagesProps) },
+	getSvgTarget : getSvgTarget,
+	getSwLayers : getSwLayers,
+	getSymbols : getSymbols,
+	getTransformedBox : getTransformedBox,
 	getUaProp : function (){
 		return {
 			isIE: isIE,
 			isSP: isSP
 		}
 	},
+	getVerticalScreenScale : getVerticalScreenScale
+	getViewBox : getViewBox,
+	gps : gps,
+	handleResult : handleResult,
+	ignoreMapAspect : function(){ ignoreMapAspect = true; },
+	linkedDocOp : linkedDocOp,
+	loadSVG : loadSVG,
+	numberFormat : numberFormat,
+	override : function ( mname , mval ){
+//		console.log("override " + mname );
+		eval( mname + " = mval; "); // もっと良い方法はないのでしょうか？
+//		console.log("override " + mname + " : " , this[mname] , showPoiProperty , this.showPoiProperty , this);
+	},
+	refreshScreen : refreshScreen,
+	registLayerUiSetter : function ( layerUIinitFunc, layerUIupdateFunc ){
+		setLayerUI = layerUIinitFunc;
+		updateLayseListUI = layerUIupdateFunc;
+	},
+	resumeToggle : resumeToggle,
+	screen2Geo : screen2Geo,
+	setCustomModal : setCustomModal,
+	setDevicePixelRatio : setDevicePixelRatio,
+	setGeoCenter : setGeoCenter,
+	setGeoViewPort : setGeoViewPort,
+	setLayerVisibility : setLayerVisibility,
+	setMapCanvas : function( mc ){ mapCanvas = mc },
+	setMapCanvasCSS : setMapCanvasCSS,
+	setMapCanvasSize : function( mcs ){ mapCanvasSize = mcs },
+	setSmoothZoomInterval : setSmoothZoomInterval,
+	setSmoothZoomTransitionTime : setSmoothZoomTransitionTime,
 	setResume : function( stat ){
 		resume = stat;
 		saveResumeData();
 	},
-	resumeToggle : resumeToggle,
-	captureGISgeometries: captureGISgeometries,
+	setRootLayersProps : setRootLayersProps,
+	setRootViewBox : function( rvb ){ rootViewBox = rvb },
+	setShowPoiProperty : setShowPoiProperty, 
+	setSummarizeCanvas : function( val ){ summarizeCanvas = val },
+	setTestClicked : function( ck ) { testClicked = ck},
+	setUpdateCenterPos : setUpdateCenterPos,
+	setZoomRatio : function( ratio ){ zoomRatio = ratio },
+	showPage : showPage,
+	showUseProperty : showUseProperty,
+	testClick : testClick,
+	transform : transform,
+	updateLayerListUI : function (){
+		if ( typeof updateLayseListUI == "function" ){
+			updateLayseListUI();
+		}
+	},
+	zoomdown : zoomdown,
+	zoomup : zoomup
+
 	
-	getSymbols : getSymbols,
-	numberFormat : numberFormat,
-	getPoiPos : getPoiPos,
-	screen2Geo : screen2Geo,
-	geo2Screen : geo2Screen,
-	getMouseXY : getMouseXY,
-	getElementByImageId : getElementByImgIdNoNS,
-	escape : escape,
-	setCustomModal : setCustomModal
 }
 
 })();
