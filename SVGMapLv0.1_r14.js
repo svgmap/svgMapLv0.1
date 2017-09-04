@@ -120,6 +120,7 @@
 //              ex:http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/developing/SVGMapper_r14.html#visibleLayer=csv textArea#hello%3D2%26good%3Dday&hiddenLayer=csv layer#hellox%3D2x%26goodx%3Ddayx&svgView(viewBox(global,135,35,1,1))
 // 2017/03/16 : イベントを精密化 zoomPanMapはviewPort変化時のみ、 screenRefreshedを新設しこちらはvp変化しなかったとき　これでrefreshScreen()に纏わる無限ループリスクを抑制した。
 // 2017/08/21 : defaultShowPoiPropertyをリッチなUIへ変更
+// 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -2812,10 +2813,12 @@ function initNavigationButtons( isSP ){
 		document.getElementById("zoomdownButton").height = "60";
 		document.getElementById("zoomdownButton").style.top = "70px";
 	}
-	
-	document.getElementById("zoomupButton").style.cursor = "pointer";
-	document.getElementById("zoomdownButton").style.cursor = "pointer";
-	
+	if( document.getElementById("zoomupButton") ){
+		document.getElementById("zoomupButton").style.cursor = "pointer";
+	}
+	if( document.getElementById("zoomdownButton") ){
+		document.getElementById("zoomdownButton").style.cursor = "pointer";
+	}
 }
 
 
