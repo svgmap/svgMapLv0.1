@@ -25,7 +25,7 @@
 // 2016.12.07 JSTS implementation
 // 2016.12.16 Totally Asynchronus Proecssing　ほぼ満足する機能が入ったと思われる。＞初期リリースとする
 // 2017.06.12 Geojsonの並びが逆(基本フレームワークも)だったのを修正のうえ、こちらも修正(getSVGcoord)、drawGeoJson(geoJson->SVG変換の上描画)の完成度を高め公開関数へ
-//
+// 2018.01.04 Geojsonファイル内にプロパティが含まれている場合、埋め込むよう実装
 //
 // 
 // ACTIONS:
@@ -680,6 +680,16 @@ var svgMapGIStool = ( function(){
 			}
 		} else if ( geojson.type == "Feature" ){
 			var geom = geojson.geometry;
+			if(geojson.properties){
+				metadata = "";
+				postMeta = Object.keys(geojson.properties).map(function(key){return geojson.properties[key]});
+				for(var i=0; i<postMeta.length; i++){
+					metadata = metadata + postMeta[i];
+					if(i != postMeta.length - 1){
+						metadata = metadata + ",";
+					}
+				}
+			}
 			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
 		} else if ( geojson.type == "GeometryCollection" ){
 			var geoms = geojson.geometries;
