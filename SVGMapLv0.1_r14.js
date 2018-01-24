@@ -123,6 +123,7 @@
 // 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
 // 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
 // 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
+// 2018/01/16 : レイヤーのパスを指定する際ドメインなしのフルパスで指定できるよう変更
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -1668,6 +1669,8 @@ function getImageURL(href , docDir ){
 	if ( href.lastIndexOf("http://", 0) == 0 || href.lastIndexOf("https://", 0) == 0 ){ // 2016.5.10 debug
 //	if ( href.indexOf("http://") == 0  ){}
 		imageURL = href;
+	}else if (href.indexOf("/") === 0) {	//2018.01.16 root path 
+		imageURL = location.protocol + "//" + document.domain + href;
 	} else {
 		imageURL = docDir + href;
 	}
