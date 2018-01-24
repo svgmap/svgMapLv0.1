@@ -123,6 +123,7 @@
 // 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
 // 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
 // 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
+// 2018/01/23 : data-controllerをルートコンテナから指定できるよう機能追加
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -870,7 +871,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 		svgImagesProps[docId].Path = docPath;
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] );
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
-		setController( svgImages[docId] , docPath , svgImagesProps[docId] ); // 2016.10.14
+
 //		if ( !svgImagesProps[docId].CRS  ){
 //			// 文書は地図として成り立っていないので消去し、終了する
 //			delete (svgImagesProps[docId]);
@@ -889,6 +890,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].isClickable = true;
 		}
 		
+		setController( svgImages[docId] , docPath , svgImagesProps[docId] ); // 2016.10.14
 		// ルートコンテナSVGのロード時専用の処理です・・・ 以下は基本的に起動直後一回しか通らないでしょう
 		if ( docId =="root"){
 			rootCrs = svgImagesProps[docId].CRS;
@@ -2273,6 +2275,14 @@ function setController( svgDoc , docPath , svgImageProps){
 		if ( cntPath ){
 			svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
 		} else {
+			//ルートコンテナにdata-controllerが指定されていた場合、該当のレイヤーにコントローラを設定する
+			//コントローラの強さは右記の通り：レイヤーの最上位コンテナ > ルートコンテナ
+			if(svgImageProps['parentDocId'] == 'root'){
+				cntPath = getLayer(svgImageProps['rootLayer']).getAttribute('data-controller');
+				if(!(cntPath === null || cntPath === undefined || cntPath === "")) {
+					svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
+				}
+			}
 		}
 	}
 }
