@@ -1676,7 +1676,8 @@ function getImageURL(href , docDir ){
 //	if ( href.indexOf("http://") == 0  ){}
 		imageURL = href;
 	}else if (href.indexOf("/") === 0) {	//2018.01.16 root path 
-		imageURL = location.protocol + "//" + document.domain + href;
+		imageURL = href;
+//		imageURL = location.protocol + "//" + document.domain + href; // doain書いてあるとCORS規制掛けるブラウザあった気もするので、それを確認してからですかね・・・
 	} else {
 		imageURL = docDir + href;
 	}
