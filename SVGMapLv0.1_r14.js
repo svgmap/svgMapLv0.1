@@ -138,6 +138,7 @@
 // 2017/01 Authoring Tools Ext.で編集中にResumeが動かない
 // 2017/01 レイヤーがOffになっているときに、レイヤ特化UIが出たまま(これは本体の問題ではないかも)
 // 2017/02 getElementByIdNoNSの問題が再び。　plane XMLとなっている文書では、IEもgetElementById使えない。.querySelector('[id="hoge"]'));は使えるので・・・対策したが、そもそもXML:IDの機能(重複しないID)を満たした機能を提供していない
+// 2018/01 ERR404のレイヤーがあると、レイヤ追加変更に対して再描画のイベントが出なくなる。
 //
 // ToDo:
 // 各要素のdisplay,visibilityがcss style属性で指定しても効かない
