@@ -123,7 +123,8 @@
 // 2017/08/25 : Bug Fixed. ZoomUp/ZoomDownボタンが未定義の際、エラーで停止しない様変更
 // 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
 // 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
-// 2018/01/23 : data-controllerをルートコンテナから指定できるよう機能追加
+// 2018/01/16 : レイヤーのパスを指定する際ドメインなしのフルパスで指定できるよう変更
+// 2018/01/23 : data-controllerをルートコンテナのレイヤー要素から指定できるよう機能追加
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -1670,6 +1671,8 @@ function getImageURL(href , docDir ){
 	if ( href.lastIndexOf("http://", 0) == 0 || href.lastIndexOf("https://", 0) == 0 ){ // 2016.5.10 debug
 //	if ( href.indexOf("http://") == 0  ){}
 		imageURL = href;
+	}else if (href.indexOf("/") === 0) {	//2018.01.16 root path 
+		imageURL = location.protocol + "//" + document.domain + href;
 	} else {
 		imageURL = docDir + href;
 	}
@@ -2275,7 +2278,7 @@ function setController( svgDoc , docPath , svgImageProps){
 		if ( cntPath ){
 			svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
 		} else {
-			//ルートコンテナにdata-controllerが指定されていた場合、該当のレイヤーにコントローラを設定する
+			//ルートコンテナの該当レイヤ要素にdata-controllerが指定されていた場合、該当のレイヤーにコントローラを設定する
 			//コントローラの強さは右記の通り：レイヤーの最上位コンテナ > ルートコンテナ
 			if(svgImageProps['parentDocId'] == 'root'){
 				cntPath = getLayer(svgImageProps['rootLayer']).getAttribute('data-controller');
