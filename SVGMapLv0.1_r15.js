@@ -145,6 +145,7 @@
 // 2018/01/29 : from rev14 update: data-controllerをルートコンテナのレイヤー要素から指定できるよう機能追加
 // 2018/02/02 : オブジェクトクリック機能のリファクタリング：testClickの機能とgetObjectAtPointをrev15で大幅拡張したtestTickerに統合 testClick, POItargetSelectionはこれにより不要となったので廃止、これに伴いPOI(img要素)に設置していた testClick EventListenerを全撤去
 // 2018/02/05 : Rev15 Release クリーンナップ
+// 2018/02/23 : <text>の改善
 //
 //
 // Issues:
@@ -1786,9 +1787,9 @@ function checkDeletedNodes( parentNode ){
 		var oneNode = parentNode.childNodes.item(i);
 		if ( oneNode.nodeType == 1 ){
 //			console.log(oneNode.id , existNodes[oneNode.id] , oneNode.nodeName);
-			if ( oneNode.nodeName == "IMG" && oneNode.id && oneNode.id.indexOf("toBeDel") == -1){
+			if ( (oneNode.nodeName == "IMG" || oneNode.nodeName == "SPAN") && oneNode.id && oneNode.id.indexOf("toBeDel") == -1){ // 2018.2.23 text(はspanに入ってる)もimg同様にする
 //				console.log("id:", oneNode.id, existNodes[oneNode.id]);
-				if ( ( ! existNodes[oneNode.id] ) ){ // img要素に対してのみ
+				if ( ( ! existNodes[oneNode.id] ) ){ // img||text要素に対してのみ
 //					console.log("dynamicDel:",oneNode);
 //					console.log("remove:", oneNode);
 					toBeDelNodes.push(oneNode);
@@ -2750,11 +2751,14 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			x = Number(imgE.getAttribute("x"));
 			y = Number(imgE.getAttribute("y"));
 		}
-		height = 16; // きめうちです　最近のブラウザは全部これ？
+		height = 16; // きめうちです　最近のブラウザは全部これ？ 
 		if (imgE.getAttribute("font-size")){
 			height = Number(imgE.getAttribute("font-size"));
 		}
-		width = height; // 適当・・
+		if (nonScaling){
+			height = 0; // 2018.2.23 上の決め打ちはnon-scalingの場合まずい・・・ 拡大すると常にビューポートに入ってしまうと誤解する。これならたぶん0にした方がベター
+		}
+		width = height; // 適当・・ 実際は文字列の長さに応じた幅になるはずだが・・・ ISSUE
 		text = imgE.textContent;
 //		console.log("txtProp:",x,y,cdx,cdy,height,nonScaling);
 	}
@@ -6823,7 +6827,6 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	},
 	getHashByDocPath : getHashByDocPath,
 	getHyperLink : getHyperLink,
-	getHyperLink : getHyperLink,
 	getLayer : getLayer,
 	getLayerId : getLayerId,
 	getLayers : getLayers,
@@ -6898,6 +6901,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 //	setTestClicked : function( ck ) { testClicked = ck}, // Obsolute 2018.2.2
 	setUpdateCenterPos : setUpdateCenterPos,
 	setZoomRatio : function( ratio ){ zoomRatio = ratio },
+	showModal : showModal,
 	showPage : showPage,
 	showUseProperty : showUseProperty,
 //	testClick : testClick, // Obsolute 2018.2.2
