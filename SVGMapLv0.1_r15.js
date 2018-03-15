@@ -132,7 +132,7 @@
 // 2017/08/17 : 動的レイヤーのF/Wの大BUGを改修(svgMapの内部関数が露出していた・・・)
 // 2017/08/22 : Property表示パネルにタイトル表示可能に
 // 2017/08/?? : ページのhashが変更された場合、それに追従する。
-// 2017/08/?? : svgImagesProps[].metaschema, .script.transform,getCanvaSize,geoViewBox,location
+// 2017/08/?? : svgImagesProps[].metaSchema, .script.transform,getCanvaSize,geoViewBox,location
 // 2017/08/?? : レイヤーリストUIのサイズが収まるようにする
 // 2017/09/29 : ルートにあるレイヤー限定だが、anim要素にdata-nocache（常に更新）属性での処理追加
 // 2018/01/18 : checkTicker()での二重パース防止処理　これでようやくまともな路線に復帰したと思う　そろそろrev15正規リリース近いか？
@@ -146,9 +146,15 @@
 // 2018/02/02 : オブジェクトクリック機能のリファクタリング：testClickの機能とgetObjectAtPointをrev15で大幅拡張したtestTickerに統合 testClick, POItargetSelectionはこれにより不要となったので廃止、これに伴いPOI(img要素)に設置していた testClick EventListenerを全撤去
 // 2018/02/05 : Rev15 Release クリーンナップ
 // 2018/02/23 : <text>の改善
+// 2018/02/26 : captureGISgeometriesでビットイメージタイルも取得可能とした　ただし、captureGISgeometriesOptionで設定した場合
+// 2018/03/02 : useではなく直接imageで設置したnonScaling bitImageもPOIとして扱うようにした　結構大きい影響のある改修
+// 
 //
 //
 // Issues:
+// 2018/3/9 メタデータのないPOIが単にクリッカブルになる。またvectorPOIはclickableクラスを設定しないとクリッカブルでないなどちょっとキレイでない。
+// 2018/3/5 FIXED Vector2DのcircleがcaptureGISで正しい値が取れてない？
+// 2018/3/5 visibility hiddenのVector2Dがヒットテストにかかってしまうらしい？imageも要確認
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
 // 2016/12 ほとんどすべてのケースでtransformが使えない実装です (transform matrix(ref))とか特殊なものとCRSのみ
 // 2016/12 EdgeでOpacityが機能してない(たぶんIE専用Opacity処理が影響してると思う・・・)
@@ -944,12 +950,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 		svgImagesProps[docId].Path = docPath;
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] );
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
-		var metaSchema = getMetaSchema(svgImages[docId]); // added 2017.8.10 
-		if ( metaSchema ){
-			svgImagesProps[docId].metaSchema = metaSchema;
-		} else {
-			svgImagesProps[docId].metaSchema = "";
-		}
+		updateMetaSchema(docId); // added 2017.8.10  2018.2.26 関数化
 //		if ( !svgImagesProps[docId].CRS  ){
 //			// 文書は地図として成り立っていないので消去し、終了する
 //			delete (svgImagesProps[docId]);
@@ -1127,7 +1128,7 @@ function viewBoxChanged(){
 // for childCategory
 var EMBEDSVG = 0 , BITIMAGE = 1 , POI = 2 , VECTOR2D = 3 , GROUP = 4 , TEXT = 5 , NONE = -1;
 // for childSubCategory
-var PATH = 0 , POLYLINE = 1 , POLYGON = 2 , RECT = 3 , CIRCLE = 4 , ELLIPSE = 5 , HYPERLINK = 10 , SYMBOL = 11 , SVG2EMBED = 100;
+var PATH = 0 , POLYLINE = 1 , POLYGON = 2 , RECT = 3 , CIRCLE = 4 , ELLIPSE = 5 , HYPERLINK = 10 , SYMBOL = 11 , USEDPOI = 12 , DIRECTPOI = 13 , SVG2EMBED = 100;
 
 // for layerCategory
 var EXIST = 1 , CLICKABLE = 2;
@@ -1139,6 +1140,15 @@ function getDocDir( docPath ){  // 2016.10.14 関数化
 	docDir = pathWoQF.substring(0,pathWoQF.lastIndexOf("/")+1);
 //	docDir = docPath.substring(0,docPath.lastIndexOf("/")+1);
 	return ( docDir );
+}
+
+function updateMetaSchema(docId){
+	var metaSchema = getMetaSchema(svgImages[docId]);
+	if ( metaSchema ){
+		svgImagesProps[docId].metaSchema = metaSchema;
+	} else {
+		svgImagesProps[docId].metaSchema = "";
+	}
 }
 
 function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas , pStyle , dontChildResLoading ){ 
@@ -1154,6 +1164,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	
 	var clickable = svgImagesProps[docId].isClickable;
 	
+	if ( svgElem.nodeName=="svg"){
+		updateMetaSchema(docId); // 2018.2.28 metaSchemaがDOM操作で変更されることがある・・・
+	}
 	
 	var beforeElem = null;
 	var s2c = getRootSvg2Canvas( rootViewBox , mapCanvasSize ); // ルートSVG⇒画面変換マトリクス
@@ -1213,7 +1226,12 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			}
 			break;
 		case "image":
-			childCategory = BITIMAGE;
+			if ( getNonScalingOffset(svgNode).nonScaling ){ // 2018.3.2 imageでもnonScalingのものをPOIとする。getNonScalingOffsetをstyleパース時と都合二回呼んでるのがね。最初に読んでstyleのほうに受け渡したほうがキレイかと・・
+				childCategory = POI;
+				childSubCategory = DIRECTPOI;
+			} else {
+				childCategory = BITIMAGE;
+			}
 			break;
 		case "use": // use要素の場合 2012/10
 			useHref = svgNode.getAttribute("xlink:href"); // グループタイプのシンボルを拡張 2017.1.17
@@ -1221,11 +1239,12 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 				useHref = svgNode.getAttribute("href");
 			}
 			if ( symbols[useHref] ){
-				if (symbols[useHref].type == "group"){
+				if (symbols[useHref].type == "group"){ // 2DベクタのシンボルはgetGraphicsGroupSymbolでGROUP扱いしている
 					childCategory = GROUP;
 					childSubCategory = SYMBOL;
 				} else {
 					childCategory = POI;
+					childSubCategory = USEDPOI;
 				}
 			} else { // リンク切れ
 			}
@@ -1296,6 +1315,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			
 			var ip = getImageProps( svgNode , childCategory , pStyle , childSubCategory , GISgeometry); // x,y,w,h,href等読み込み
 			var imageRect = transformRect(ip , child2root ); // root座標系における、図形のbbox
+			if ( ip.nonScaling ){
+				imageRect.nonScaling = true;
+			}
 //			console.log( "c2rs:" + imageRect.c2rScale );
 			/**
 			console.log("--  " + docId);
@@ -1342,7 +1364,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 				} else { // ないとき
 				
 					var imgBox = getTransformedBox( imageRect , s2c ); // canvas座標系における bbox(transformが無い場合はこれが使える)
-					if ( childCategory == POI ){ // ICON表示
+					if ( childCategory == POI && childSubCategory == USEDPOI){ // ICON表示
 						var symb = symbols[ip.href];
 						if( symb.d ){
 							// ベクタ図形のシンボル... toDo 2015.3.31
@@ -1505,7 +1527,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					beforeElem = imgElem;
 				}
 				
-				if ( childCategory == POI ){
+				if ( childCategory == POI ){ // 2018.3.2 変更はないが、use使わないがnonScalingのもの(DIRECTPOI)も追加
 //					visiblePOIs.push({id:imageId, x: xd.p0, y: yd.p0, width: xd.span, height: yd.span });
 					visiblePOIs[imageId] = { x: xd.p0, y: yd.p0, width: xd.span, height: yd.span };
 				}
@@ -1652,11 +1674,17 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			
 			var cStyle = getStyle(  svgNode , pStyle );
 //			console.log("thisObj's style:",cStyle, "   parent's style:",pStyle);
-			if ( GISgeometry && GISgeometry.type ==="TBD"){ // 2016.12.1 for GIS: TBD要素は塗りがあるならPolygonにする
-				if ( cStyle["fill"] && cStyle["fill"]!="none"){
-					GISgeometry.type = "Polygon";
-				} else {
-					GISgeometry.type = "MultiLineString";
+			if ( GISgeometry ){
+				if (GISgeometry.type ==="TBD"){ // 2016.12.1 for GIS: TBD要素は塗りがあるならPolygonにする
+					if ( cStyle["fill"] && cStyle["fill"]!="none"){
+						GISgeometry.type = "Polygon";
+					} else {
+						GISgeometry.type = "MultiLineString";
+					}
+				}
+				if (cStyle.usedParent ){ // 2018.3.5 useによって2D Vectorを使用した場合、そのuse要素の値が欲しいでしょう
+					GISgeometry.usedParent = cStyle.usedParent;
+					GISgeometry.type = "Point"; // transform(svg,,)のときのみの気はするが・・
 				}
 			}
 //			console.log(cStyle);
@@ -1724,7 +1752,15 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 		}
 		
 		if ( GISgeometry && onViewport ){ // ひとまずviewportにあるオブジェクトだけを収集する機能を検証2016.12.7
-			GISgeometries[docId].push(GISgeometry);
+			if (GISgeometry.href){ // 2018/2/27 debug
+				GISgeometry.href = getImageURL(GISgeometry.href,docDir);
+				if ( imgElem.naturalHeight > 0 ){ // ロードできてないイメージは外す。 cesiumのimageryではerr404imgで動作が停止する・・　何とかしてよねぇ‥
+					// ただし、ロード済みでないとこの値はセットされないので・・　ロード中にgisgeomを呼ぶパターンでは使えないはず・・ 2018.2.27
+					GISgeometries[docId].push(GISgeometry);
+				}
+			} else {
+				GISgeometries[docId].push(GISgeometry);
+			}
 //			console.log("GISgeometry::",GISgeometry);
 //			console.log("GISgeometries_::",GISgeometries);
 		}
@@ -2137,7 +2173,7 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	}
 	
 	if ( category == POI ){ // POI (set Event Handler)
-		img.style.zIndex = "10"; // POIがcanvasより下だとクリックできない問題への対策(POIの重ね順が間違ったことになる場当たり対策だが・・ 2013.9.12)
+		img.style.zIndex = "10"; // POIがcanvasより下だとクリックできない問題への対策(POIの重ね順が間違ったことになる場当たり対策だが・・ 2013.9.12) 　ヒットテストを独自実装したので、2018.3.2コメント マウスオーバー時のticker表示がないがクリックできるようにはなりました
 		
 //		addEvent(img,"mousedown",testClick); // このイベントハンドラは廃止(かなり大きな変更) 2018.2.2
 		
@@ -2617,13 +2653,17 @@ function setDevicePixelRatio( dpr ){
 	}
 }
 
-// POI,タイル(use,image要素)のプロパティを得る
+// POI,タイル(use,image要素)のプロパティを得る DIRECTPOI,USEDPOIの処理に変更2018.3.2
 function getImageProps( imgE , category , parentProps , subCategory , GISgeometry){
 	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment ;
 	var nonScaling = false;
 	cdx = 0;
 	cdy = 0;
-	if ( category == EMBEDSVG || category == BITIMAGE ){
+	if ( !subCategory && category == POI){ // subCategory無しで呼び出しているものに対するバックワードコンパチビリティ・・・ 2018.3.2
+//		console.log("called no subCategory  imgE:",imgE);
+		subCategory = USEDPOI;
+	}
+	if ( category == EMBEDSVG || category == BITIMAGE || subCategory == DIRECTPOI ){
 		if ( category == EMBEDSVG && subCategory == SVG2EMBED ){ // svg2のsvgインポート
 //			console.log(imgE);
 			href = imgE.getAttribute("src");
@@ -2658,9 +2698,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 				height= 60000;
 			}
 //			console.log("clip:" , clip ,x,y,width,height,href);
-		} else { // svg1のsvgインポート及び svg1,svg2のビットイメージインポート
-			var tf = getPoiPos(imgE);
-			if ( tf.x && tf.y ){
+		} else { // svg1のsvgインポート及び svg1,svg2のビットイメージ(含DIRECTPOI)インポート
+			var tf = getNonScalingOffset(imgE);
+			if ( tf.nonScaling ){
 				nonScaling = true;
 				x = tf.x;
 				y = tf.y;
@@ -2685,8 +2725,10 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 						f : Number(trv[5])
 					}
 				}
+				
+				
 			}
-			width = Number(imgE.getAttribute("width"));
+			width = Number(imgE.getAttribute("width")); // nonScalingではwidth,heightの値はisIntersectでは0とみなして計算するようにします
 			height = Number(imgE.getAttribute("height"));
 			href = imgE.getAttribute("xlink:href");
 			if ( ! href ){
@@ -2700,6 +2742,26 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 				href = href.substring(0,href.indexOf("#")); // ブラウザが#以下があるとキャッシュ無視するのを抑止
 			}
 			
+			if ( GISgeometry){
+				if ( category == BITIMAGE && !nonScaling ){ // 2018.2.26
+					// transformのあるものはまだうまく処理できてないです・・　まぁこの最初のユースケースのcesiumでも非対角ありtransformのあるイメージはうまく処理できないので・・
+					// さらに、 nonScalingはPOIとして処理して良いと思うが・・ 2018.3.2 まず、parse*側でnonScalingなimageをPOIに改修
+					GISgeometry.svgXY = [];
+					GISgeometry.svgXY[0] = [x,y];
+					GISgeometry.svgXY[1] = [x+width,y+height];
+					GISgeometry.transform = transform; 
+					GISgeometry.href = href; 
+					//				console.log("Set Coverage geometry",GISgeometry);
+				} else if ( subCategory == DIRECTPOI ){ // 2018.3.2 上の話を改修した部分
+					GISgeometry.svgXY = [x,y];
+				}
+			}
+			
+			if ( subCategory == DIRECTPOI){ // 2018.3.2
+				meta = imgE.getAttribute("content");
+				title = imgE.getAttribute("xlink:title");
+			}
+			
 			// このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
 //			if ( typeof getUrlViaProxy == "function" ){
 				//Proxyサーバ経由でアクセス
@@ -2707,9 +2769,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 //			}
 		}
 		elemClass = imgE.getAttribute("class");
-	} else if ( category == POI ){ // POI
-		var tf = getPoiPos(imgE);
-		if ( tf.x && tf.y ){ // non scaling POI
+	} else if ( subCategory == USEDPOI ){ // USEDによるPOI
+		var tf = getNonScalingOffset(imgE);
+		if ( tf.nonScaling ){ // non scaling POI
 			nonScaling = true;
 			x = tf.x;
 			y = tf.y;
@@ -2725,7 +2787,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			x = Number(imgE.getAttribute("x"));
 			y = Number(imgE.getAttribute("y"));
 		}
-		width = 0; // ??? そうなの？ 2014.7.25
+		width = 0; // ??? そうなの？ 2014.7.25  nonScalingのときのみの気がする・・
 		height = 0;
 		meta = imgE.getAttribute("content");
 		title = imgE.getAttribute("xlink:title");
@@ -2735,8 +2797,8 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			GISgeometry.svgXY = [x,y];
 		}
 	} else if ( category == TEXT ){
-		var tf = getPoiPos(imgE);
-		if ( tf.x && tf.y ){
+		var tf = getNonScalingOffset(imgE);
+		if ( tf.nonScaling ){
 			nonScaling = true;
 			x = tf.x;
 			y = tf.y;
@@ -2879,8 +2941,20 @@ function getCanvasSize(){ // 画面サイズを得る
 	}
 }
 
-function isIntersect( sec1 , sec2 ){
-//	console.log( sec1 , sec2 );
+function isIntersect( rect1 , rect2 ){
+//	console.log( rect1 , rect2 );
+	var sec1, sec2;
+	if ( rect1.nonScaling ){ // nonScaling設定の時はサイズ０として判断するようにする 2018.3.2
+		sec1 = { x:rect1.x,y:rect1.y,width:0,height:0 }
+	} else {
+		sec1 = rect1;
+	}
+	if ( rect2.nonScaling ){
+		sec2 = { x:rect2.x,y:rect2.y,width:0,height:0 }
+	} else {
+		sec2 = rect2;
+	}
+	
 	var ans = false;
 	if ( sec1.x > sec2.x + sec2.width || sec2.x > sec1.x + sec1.width 
 	 || sec1.y > sec2.y + sec2.height || sec2.y > sec1.y + sec1.height ){
@@ -4414,30 +4488,38 @@ function numberFormat( number , digits ){
 	return ( Math.round(number * base)/base);
 }
 
-function getPoiPos( svgPoiNode ){
+function getNonScalingOffset( svgPoiNode ){ // getPoiPosから改称 2018.3.2
 	// vectorEffect,transform(ref ノンスケールのための基点座標取得
 	try {
-//		console.log("getPoiPos:",svgPoiNode,svgPoiNode.getAttribute("transform"));
+//		console.log("getNonScalingOffset:",svgPoiNode,svgPoiNode.getAttribute("transform"));
 		var pos = svgPoiNode.getAttribute("transform").replace("ref(svg,","").replace(")","").split(",");
-//		console.log(svgPoiNode, pos);
-		return {
-			x : Number ( pos[0] ),
-			y : Number ( pos[1] )
+		var x = Number ( pos[0] );
+		var y = Number ( pos[1] );
+		if ( !isNaN(x) && !isNaN(y) ){
+			return {
+				x : Number ( pos[0] ),
+				y : Number ( pos[1] ),
+				nonScaling : true
+			}
+		} else {
+			return{
+				x : null,
+				y : null,
+				nonScaling : false
+			}
 		}
+//		console.log(svgPoiNode, pos);
 	} catch (e){
 		return{
 			x : null,
-			y : null
+			y : null,
+			nonScaling : false
 		}
 	}
 }
 
-function getNonScalingOffset ( svgGroupNode ){ // 上と同じもの・・・ 2014.5.12
-	return ( getPoiPos( svgGroupNode ) );
-}
 
-
-function showSerialize( poi ){
+function showSerialize( poi ){ // 使われていない 2018.3.2確認
 //	console.log(xml2Str(poi.ownerDocument.documentElement));
 //	console.log(svgPoi2csv(poi.ownerDocument.documentElement));
 //	console.log("parent",poi.parentNode);
@@ -4817,7 +4899,7 @@ function xml2Str(xmlNode) {
 	return false;
 }
 
-function svgPoi2csv(svgDocElement){
+function svgPoi2csv(svgDocElement){ // 使われていないshowSerializeからしか呼ばれていないので使われていない(2018.3.2確認)
 	var ans ="";
 	var docId = getDocumentId(svgDocElement);
 	var schema = getMetaSchema(svgDocElement.ownerDocument);
@@ -4825,7 +4907,7 @@ function svgPoi2csv(svgDocElement){
 	ans += "latitude,longitude,iconClass,iconTitle,"+schema+"\n";
 	var pois = svgDocElement.getElementsByTagName("use");
 	for ( var i = 0 ; i < pois.length ; i++ ){
-		var poiProp = getImageProps( pois[i] , 2 );
+		var poiProp = getImageProps( pois[i] , POI );
 		var geoPos=SVG2Geo(poiProp.x ,poiProp.y , crs );
 		ans += numberFormat(geoPos.lat) + "," + numberFormat(geoPos.lng) + "," + poiProp.href + "," + poiProp.title + "," + poiProp.metadata+"\n";
 	}
@@ -4864,9 +4946,14 @@ function setSVGcirclePoints( pathNode ,  context , child2canvas , clickable , ca
 	var repld = "M"+ (cx - rx) + "," + cy + "A" + rx + "," + ry + " 0 0 1 " + (cx + rx ) + "," + cy + "A" + rx + "," + ry + " 0 0 1 " + (cx - rx ) + "," + cy +"z";
 	
 	var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset , GISgeometry );
-	var csize = transform( rx , ry , child2canvas , true );
-	ret.y -= csize.y;
-	ret.height = csize.y * 2;
+	if ( vectorEffectOffset ){ // non scaling circle support 2018.3.6
+		ret.y -= ry;
+		ret.height = ry * 2;
+	} else {
+		var csize = transform( rx , ry , child2canvas , true );
+		ret.y -= csize.y;
+		ret.height = csize.y * 2;
+	}
 //	console.log("repld:"+repld,  " ret:",ret , " csize:" , csize);
 	
 	return ( ret );
@@ -4983,10 +5070,11 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 		GISgeometry.svgXY = new Array();// PolygonもMultiLineStringもsvgXYに[[x,y],[x,y],[x,y]],[[x,y],[x,y],[x,y]]というのが入る ただし、vectorEffectOffsetがあったら、それは全体で一個のPoint化するので注意
 	}
 	
-	if ( GISgeometry && vectorEffectOffset ){
+	if ( GISgeometry && vectorEffectOffset ){ // vectorEffectOffsetがあったら、それは全体で一個のPoint化
 		var svgP = [vectorEffectOffset.x,vectorEffectOffset.y];
-		var svgPs = [svgP];
-		GISgeometry.svgXY.push( svgPs );
+		GISgeometry.svgXY = svgP; // bug fix 2018.3.5
+//		var svgPs = [svgP];
+//		GISgeometry.svgXY.push( svgPs );
 	}
 	
 //	console.log(d);
@@ -5295,6 +5383,10 @@ function initGISgeometry( cat, subCat , svgNode ){
 		break;
 	case BITIMAGE:
 		// nothing
+		if ( BitImageGeometriesCaptureFlag ){
+			GISgeometry = new Object();
+			GISgeometry.type = "Coverage"; 
+		}
 		break;
 	case POI:
 		GISgeometry = new Object();
@@ -6667,6 +6759,7 @@ function getFragmentView( URLfragment ){
 var setLayerUI, updateLayerListUIint;
 
 var GISgeometriesCaptureFlag = false; // for GIS 2016.12.1
+var BitImageGeometriesCaptureFlag = false; // for GIS 2018.2.26
 
 var GISgeometries;
 
@@ -6701,6 +6794,14 @@ function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , p
 				if ( geom.type === "Point" ){
 					geoCrd = SVG2Geo( geom.svgXY[0] , geom.svgXY[1] , null , invCrs );
 					geom.coordinates = [ geoCrd.lng , geoCrd.lat ];
+				} else if ( geom.type === "Coverage" ){
+					geom.coordinates = new Array();
+					geoCrd = SVG2Geo( geom.svgXY[0][0] , geom.svgXY[0][1] , null , invCrs );
+					var geoCrd2 = SVG2Geo( geom.svgXY[1][0] , geom.svgXY[1][1] , null , invCrs );
+					geom.coordinates.push({lat:Math.min(geoCrd.lat,geoCrd2.lat), lng:Math.min(geoCrd.lng,geoCrd2.lng)});
+					geom.coordinates.push({lat:Math.max(geoCrd.lat,geoCrd2.lat), lng:Math.max(geoCrd.lng,geoCrd2.lng)});
+					delete geom.transform; // TBDです・・・
+					
 				} else {
 					geom.coordinates = new Array();
 					if ( geom.svgXY.length == 1 && geom.svgXY[0].length == 1 ){ // Vector EffectのPolygonなどはPointにこの時点で変換する。
@@ -6806,6 +6907,10 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 		return ( ans );
 	},
 	captureGISgeometries: captureGISgeometries,
+	captureGISgeometriesOption: function ( BitImageGeometriesCaptureFlg ){ // 2018.2.26
+		// TBD : ロードできてないイメージは外すかどうか, onViewportのもののみにするかどうか のオプションもね
+		BitImageGeometriesCaptureFlag = BitImageGeometriesCaptureFlg; // ビットイメージをキャプチャするかどうか
+	},
 	checkSmartphone : checkSmartphone, // added on rev15
 	childDocOp : childDocOp,
 	dynamicLoad : dynamicLoad,
@@ -6833,10 +6938,11 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getMapCanvas : function(){ return (mapCanvas) },
 	getMapCanvasSize : function( ){ return (mapCanvasSize) },
 	getMouseXY : getMouseXY,
+	getNonScalingOffset : getNonScalingOffset,
 	getObject : function ( oname ){
 		return ( eval ( oname ) );
 	},
-	getPoiPos : getPoiPos,
+	getPoiPos : getNonScalingOffset, // for backwards comatibility
 	getRoot2Geo : function( ){ return (root2Geo) },
 	getRootCrs : function( ){ return (rootCrs) },
 	getRootLayersProps : getRootLayersProps,
