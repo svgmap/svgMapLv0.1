@@ -31,6 +31,7 @@
 // 2017/06/09 Rev7: add POIregistTool
 // 2018/02/01 minor bug fix
 // 2018/02/02 cursor.style.zIndexを設定するようにした(toBeDel on rev15対策)
+// 2018/03/05 polylineを編集できる機能をおおよそ実装
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -575,7 +576,11 @@ function setPolySvg(targetDoc,poiDocId){
 			var poiDoc = svgImages[poiDocId];
 			targetSvgElem = poiDoc.createElement("path");
 			targetSvgElem.setAttribute("vector-effect","non-scaling-stroke");
-			targetSvgElem.setAttribute("fill","yellow");
+			if ( uiMapping.editingMode == "POLYGON" ){
+				targetSvgElem.setAttribute("fill","yellow");
+			} else {
+				targetSvgElem.setAttribute("fill","none");
+			}
 			targetSvgElem.setAttribute("stroke","red");
 			targetSvgElem.setAttribute("stroke-width","3");
 			poiDoc.documentElement.appendChild(targetSvgElem);
@@ -872,7 +877,7 @@ var polyCanvas = (function(){
 	}
 	
 	function updateCanvas(){
-		console.log("updateCanvas: insP:", uiMapping.insertPointsIndex , "  selP:" , uiMapping.selectedPointsIndex);
+		console.log("updateCanvas: insP:", uiMapping.insertPointsIndex , "  selP:" , uiMapping.selectedPointsIndex, "   isPolygon:",isPolygon);
 		initCanvas();
 		cc.clearRect(0, 0, cs.width, cs.height);
 		cc.beginPath();
@@ -965,6 +970,10 @@ var polyCanvas = (function(){
 		}
 	}
 	
+	function setPolygonMode( polygonMode ){
+		isPolygon = polygonMode;
+	}
+	
 	return{
 //		initCanvas: initCanvas,
 		clearPoints: clearPoints,
@@ -973,6 +982,7 @@ var polyCanvas = (function(){
 		getPoints: getPoints,
 		removeCanvas: removeCanvas,
 		updateCanvas: updateCanvas,
+		setPolygonMode : setPolygonMode,
 //		hilightLine: hilightLine,
 //		hilightPoint: hilightPoint
 	}
@@ -1249,7 +1259,7 @@ function setTargetObject(svgTarget){
 		if ( svgNode.nodeName =="use" && uiMapping.editingMode=="POI"){
 			hilightPOI(svgNode.getAttribute("iid"));
 			displayPOIprops(svgTarget);
-		} else if (( svgNode.nodeName =="path" || svgNode.nodeName =="polygon" || svgNode.nodeName =="polyline" )&& uiMapping.editingMode=="POLYGON"){
+		} else if (( svgNode.nodeName =="path" || svgNode.nodeName =="polygon" || svgNode.nodeName =="polyline" )&& (uiMapping.editingMode=="POLYGON" || uiMapping.editingMode=="POLYLINE")){
 			displayPolyProps(svgTarget);
 		}
 	}
@@ -1359,7 +1369,7 @@ function updatePointListForm(pep, points){
 // POLYGONオブジェクトの"編集"ツール 新規追加、削除、変更などが可能　ただし一個しか設置できない
 var toolsCbFunc;
 var toolsCbFuncParam
-function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
+function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 	if ( cbFunc ){
 		toolsCbFunc = cbFunc;
 		toolsCbFuncParam = cbFuncParam;
@@ -1368,7 +1378,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 		toolsCbFuncParam = null;
 	}
 	
-//	console.log("initPolygonTools");
+//	console.log("initPolygonTools : isPolylineMode:",isPolylineMode);
 	
 	removeChildren( targetDiv );
 	
@@ -1418,11 +1428,19 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	ihtml+='</table><div id="editConf"><input type="button" id="pepok" value="決定"/><input type="button" id="pepng" value="キャンセル"/><input type="button" id="pepdel" disabled value="削除"/><span id="editMode">newObject</span></div>';
 	targetDiv.innerHTML = ihtml;
 	
+	var polyMode = "POLYGON";
+	if ( isPolylineMode ){
+		polyMode = "POLYLINE"; // TBD...
+		polyCanvas.setPolygonMode(false);
+		console.log("polyMode:",polyMode);
+	} else {
+		polyCanvas.setPolygonMode(true);
+	}
+	
 	uiMapping = {
 		uiPanel : targetDiv,
 		editingDocId : poiDocId,
-//		editingMode : "POLYLINE",
-		editingMode : "POLYGON",
+		editingMode : polyMode,
 		uiDoc: uiDoc,
 		editingGraphicsElement: false,
 		modifyTargetElement: null,
