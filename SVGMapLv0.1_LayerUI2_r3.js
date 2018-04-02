@@ -37,6 +37,7 @@
 // 2017/03/02 : Rev.3: レイヤーのOffに連動して、レイヤ固有UIのインスタンスが消滅する処理など、レイヤ固有UIのインスタンス管理に矛盾が生じないようにする。レイヤ固有UIインスタンスはレイヤーがvisibleである限り存続する(他のレイヤの固有UIが出現しても隠れるだけで消えない。消えるタイミングはレイヤがinvisibleになった時。またこの時はcloseFrameイベントが発行され、100ms後にインスタンスが消滅する。
 // 2017/08/25 : 凡例（画像）表示時においてサイズ未指定の場合は元画像のサイズでフレームをリサイズする様追加
 // 2017/09/08 : data-controllerに、#exec=appearOnLayerLoad,hiddenOnLayerLoad,onClick(default)
+// 2018/04/02 : layerListmessage に選択レイヤ名称をtextで設定する処理を追加
 //
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
@@ -99,6 +100,8 @@ function setLayerTable(tb){
 	var lps = svgMap.getRootLayersProps();
 //	console.log(lps);
 	var visibleLayers=0;
+	var visibleLayersNameArray=[];
+	const visibleNum=5;  // 表示レイヤ名称数
 	for ( var i = lps.length -1 ; i >=0  ; i-- ){
 		var tr = getLayerTR(lps[i].title, lps[i].id, lps[i].visible , false , lps[i].groupName);
 		syncLayerSpecificUiExistence( lps[i].id, lps[i].visible );
@@ -130,9 +133,14 @@ function setLayerTable(tb){
 		} else { // グループに属さない場合、単に項目追加
 			tb.appendChild(tr);
 		}
-		if (lps[i].visible){++visibleLayers;}
+		if (lps[i].visible){
+			++visibleLayers;
+			if ( visibleLayers <= visibleNum ){ visibleLayersNameArray.push(lps[i].title); }
+			else if ( visibleLayers == visibleNum+1 ){ visibleLayersNameArray.push("..."); }
+		}
 	}
 	document.getElementById("layerListmessage").innerHTML = layerListmessageHead + visibleLayers + layerListmessageFoot;
+	document.getElementById("layerListmessage").title = visibleLayersNameArray;
 	checkLayerList();
 	window.setTimeout(setLayerTableStep2,30);
 }
@@ -463,8 +471,14 @@ function initLayerList(){
 	layerSpecificUI = document.getElementById("layerSpecificUI");
 	var lps = svgMap.getRootLayersProps();
 	var visibleLayers=0;
+	var visibleLayersNameArray=[];
+	const visibleNum=5;  // 表示レイヤ名称数
 	for ( var i = lps.length -1 ; i >=0  ; i-- ){
-		if (lps[i].visible){++visibleLayers;}
+		if (lps[i].visible){
+			++visibleLayers;
+			if ( visibleLayers <= visibleNum ){ visibleLayersNameArray.push(lps[i].title); }
+			else if ( visibleLayers == visibleNum+1 ){ visibleLayersNameArray.push("..."); }
+		}
 	}
 	
 	var llUItop = document.createElement("div");
@@ -472,6 +486,7 @@ function initLayerList(){
 	var llUIlabel = document.createElement("label");
 	llUIlabel.id="layerListmessage";
 	llUIlabel.setAttribute("for","layerListOpenButton");
+	llUIlabel.setAttribute("title", visibleLayersNameArray);
 //	layerList.appendChild(llUIlabel);
 	llUItop.appendChild(llUIlabel);
 	
