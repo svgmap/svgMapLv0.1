@@ -757,6 +757,7 @@ var svgMapGIStool = ( function(){
 			poie.setAttribute( "content", metadata);
 		}
 		svgImage.documentElement.appendChild( poie );
+		return ( poie );
 	}
 	
 	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata){
@@ -777,6 +778,7 @@ var svgMapGIStool = ( function(){
 			pe.setAttribute( "content", metadata);
 		}
 		svgImage.documentElement.appendChild( pe );
+		return (pe);
 	}
 	
 	function putPolygon(coordinates, svgImage, crs, fillColor, metadata){
@@ -799,6 +801,7 @@ var svgMapGIStool = ( function(){
 			pe.setAttribute( "content", metadata);
 		}
 		svgImage.documentElement.appendChild( pe );
+		return ( pe);
 	}
 	
 	function getPathD( geoCoords , crs ){
