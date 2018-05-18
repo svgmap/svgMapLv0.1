@@ -148,6 +148,7 @@
 // 2018/02/23 : <text>の改善
 // 2018/02/26 : captureGISgeometriesでビットイメージタイルも取得可能とした　ただし、captureGISgeometriesOptionで設定した場合
 // 2018/03/02 : useではなく直接imageで設置したnonScaling bitImageもPOIとして扱うようにした　結構大きい影響のある改修
+// 2018/04/06 : Edge対応ほぼ完了したかな これに伴いuaProp新設　今後isIE,verIE,isSPをこれに統合したうえで、IE10以下のサポートを完全に切る予定
 // 
 //
 //
@@ -157,7 +158,7 @@
 // 2018/3/5 visibility hiddenのVector2Dがヒットテストにかかってしまうらしい？imageも要確認
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
 // 2016/12 ほとんどすべてのケースでtransformが使えない実装です (transform matrix(ref))とか特殊なものとCRSのみ
-// 2016/12 EdgeでOpacityが機能してない(たぶんIE専用Opacity処理が影響してると思う・・・)
+// 2016/12 FIXED EdgeでOpacityが機能してない(たぶんIE専用Opacity処理が影響してると思う・・・)
 // (probably FIXED) 2016/12 Resumeのレイヤ選択レジュームが遅い回線で動かない(非同期の問題か)
 // (probably FIXED) 2016/12 初回ロード時のhtml DOMクリーンナップができていない
 // 2017/01 FIXED? Authoring Tools Ext.で編集中にResumeが動かない
@@ -207,8 +208,12 @@ var mapx=138;
 var mapy=37;
 var mapCanvas; // 地図キャンバスとなる、おおもとのdiv要素
 var mapCanvasSize; // そのサイズ
+
 var isIE = false; // IE11で互換性があがったので、ロジックにいろいろと無理が出ています・・
-var isSP = false;
+var isSP = false; // スマホの場合設定される
+var verIE = 100; // IEの場合にそのバージョンが設定される。それ以外は100...　そろそろ IE10以下をObsoluteする予定
+var uaProp; // 上の三つのパラメータをそろそろ整理統合しようと思っています Edge対応に際して導入 2018/4/6
+	
 var loadingTransitionTimeout = 7000; // LODの読み込み遷移中のホワイトアウト防止処理のタイムアウト[msec]
 
 var resume = false; // 2016/10/26 resume機能
@@ -253,25 +258,21 @@ addEvent(window,"hashchange",function(){
 });
 
 function initLoad(){
-// load時に一回だけ呼ばれる
+// load時に"一回だけ"呼ばれる
 //	console.log("fragment:" , location.hash, "\n" ,getFragmentView(location.hash));
 //	console.log("url:     " , document.URL);
 //	console.log("location:" , document.location);
 //	console.log("loc.href:" , document.location.href);
 	
-//	console.log("AppName:",navigator.appName,"  UAname:",navigator.userAgent);
-//	if ( navigator.appName == 'Microsoft Internet Explorer' && window.createPopup )
-	if ( navigator.appName == 'Microsoft Internet Explorer' || navigator.userAgent.indexOf("Trident")>=0 ){ //2013.12
-		isIE = true;
-		configIE();
+	if ( uaProp){
+		console.log( "Already initialized. Exit...");
 	}
-	isSP = checkSmartphone();
 	
 	mapCanvas=document.getElementById("mapcanvas");
 	if ( !mapCanvas ){
+		console.log("NO id:mapcanvas div exit..");
 		return;
 	}
-	
 	var rootSVGpath;
 	if ( mapCanvas.dataset.src ){
 		// data-src属性に読み込むべきSVGの相対リンクがある 2017.3.6
@@ -279,7 +280,23 @@ function initLoad(){
 	} else if ( mapCanvas.title ){
 		// title属性に読み込むべきSVGの相対リンクがあると仮定(微妙な・・) 最初期からの仕様
 		rootSVGpath = mapCanvas.title;
+	} else{
+		console.log("NO id:mapcanvas data-src for root svg container exit..");
+		return;
 	}
+	
+	
+	console.log("AppName:",navigator.appName,"  UAname:",navigator.userAgent);
+//	if ( navigator.appName == 'Microsoft Internet Explorer' && window.createPopup )
+	if ( navigator.appName == 'Microsoft Internet Explorer' || navigator.userAgent.indexOf("Trident")>=0 ){ //2013.12
+		isIE = true;
+		configIE();
+	}
+	isSP = checkSmartphone();
+	uaProp = checkBrowserName();
+	console.log("isIE,verIE,isSP,uaProp:",isIE,verIE,isSP,uaProp);
+	
+	
 	mapCanvas.title = ""; // titleにあると表示されてしまうので消す
 //	console.log(mapCanvas);
 	
@@ -288,6 +305,7 @@ function initLoad(){
 	mapCanvasSize = getCanvasSize();
 	if (!mapCanvasSize){
 		console.log("retry init....");
+		uaProp = null; 
 		setTimeout(initLoad,50);
 		return; // どうもwindow.openで作ったときに時々失敗するので、少し(30ms)ディレイさせ再挑戦する
 	}
@@ -908,8 +926,9 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		console.log(printProperties(httpRes));
 
 // Firefox 28において、httpRes.responseやresponseTextはあるにも関わらず、responseXMLが取得できない場合に、(httpRes.responseXML != null)も評価しておかないと、データが表示されなくなる。responseXMLのみがnullの場合は、responseTextを利用して表示すればよい。
-		if ((httpRes.responseXML != null) && httpRes.responseXML.documentElement && !isIE && verIE >= 100 && isSvg( httpRes.responseXML ) && httpRes.responseText.indexOf("<script>")<0){ 
+		if ((httpRes.responseXML != null) && httpRes.responseXML.documentElement && !uaProp.MS && verIE >= 100 && isSvg( httpRes.responseXML ) && httpRes.responseText.indexOf("<script>")<0){
 			// 2016.11.1 動的コンテンツの場合はすべてプリプロセッサ通す処理に変更
+			// 2018.4.6 Edge対応のため !isIEを!uaProp.MSに変更した(Edgeでもsvgネームスペース時、SVGベクタデータの数値丸め誤差甚大の被害が出る・・)
 //			console.log("parse by native parser...");
 			svgImages[docId] = httpRes.responseXML;
 		} else { // responseXMLが無いブラウザ用(IE用ね)
@@ -988,6 +1007,9 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		console.log("call getScript");
 		svgImagesProps[docId].script = getScript( svgImages[docId] ); 
 		if ( svgImagesProps[docId].script ){
+			var zoom = getZoom(getRootSvg2Canvas( rootViewBox , mapCanvasSize )); 
+			var child2root = getConversionMatrixViaGCS( svgImagesProps[docId].CRS, rootCrs );
+			svgImagesProps[docId].script.scale =  zoom * child2root.scale; // patch 2018.5.18 なんか汚い・・・
 			svgImagesProps[docId].script.CRS = svgImagesProps[docId].CRS;
 			svgImagesProps[docId].script.location = getSvgLocation( svgImagesProps[docId].Path );
 			svgImagesProps[docId].script.verIE = verIE;
@@ -1088,6 +1110,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 function handleScript( docId , zoom , child2root ){
 	svgImagesProps[docId].script.location = getSvgLocation( svgImagesProps[docId].Path ); // added 2017.9.5 ハッシュが書き換わる可能性を加味
 	svgImagesProps[docId].script.scale = zoom * child2root.scale;
+//	console.log("set scale:",svgImagesProps[docId].script.scale,"  docId:",docId,"   svgImageProps:",svgImagesProps[docId]);
 	svgImagesProps[docId].script.actualViewBox = getTransformedBox( rootViewBox , getInverseMatrix( child2root ) ); // *ViewBoxは間違い・viewportが正しい・・互換のために残す・・・
 	svgImagesProps[docId].script.geoViewBox = geoViewBox;
 	svgImagesProps[docId].script.viewport = svgImagesProps[docId].script.actualViewBox; // debug 2014.08.06
@@ -1101,7 +1124,7 @@ function handleScript( docId , zoom , child2root ){
 		if ( svgImagesProps[docId].script.onzoom ){
 			svgImagesProps[docId].script.onzoom();
 		}
-	} else { // scrollもzoomもしてないonrefreshscreenみたいなものがあるのではないかと思うが・・・ 2017.3.16
+	} else if ( vc=="scroll") { // scrollもzoomもしてないreshscreenを捉えて、イベントを抑制 2018/05
 		if ( svgImagesProps[docId].script.onscroll ){
 			svgImagesProps[docId].script.onscroll();
 		}
@@ -1330,6 +1353,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			}
 //				console.log( "c2rs:" + imageRect.c2rScale );
 			if ( !eraseAll && isIntersect( imageRect , rootViewBox ) && inZoomRange( ip , zoom ,  imageRect.c2rScale ) && isVisible(ip ) ){ // ロードすべきイメージの場合
+				
+//				console.log(svgNode.nodeName," intersect?: imageRect:",imageRect,"   rootViewBox:",rootViewBox,"   ip:",ip);
+				
 //			console.log("opa:" + ip.opacity);
 //				if ( docId == "root" ){			console.log ( svgNode );		}
 				
@@ -1421,7 +1447,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 						if ( ip.opacity ){
 //							console.log( "opacity: isIE,verIE", isIE,verIE);
 //							console.log("set div opacity: ","Filter: Alpha(Opacity=" + ip.opacity * 100 + ");");
-							if ( !isIE){
+							if ( !uaProp.MS){ // if ( !isIE)からチェンジ (Edge対策)
 								img.setAttribute("style" , "Filter: Alpha(Opacity=" + ip.opacity * 100 + ");opacity:" + ip.opacity + ";"); // IEではこれでは設定できない
 							} else {
 //								console.log("verIE:" + verIE);
@@ -3185,7 +3211,6 @@ function testWheel( evt ){
 }
 
 
-var verIE = 100;
 function configIE(){
 	var apv = navigator.appVersion.toLowerCase();
 	if ( apv.indexOf('msie')>-1 ){
@@ -3265,6 +3290,46 @@ function checkSmartphone(){ // Mobile Firefox & Firefox OS 2012/12
 	}
 }
 
+function checkBrowserName(){
+	var name;
+	var MS = false;
+	var IE = false;
+	var Blink = false;
+	var old = false;
+	var smartPhone = checkSmartphone();
+	if ( navigator.userAgent.indexOf("Trident")>=0 ){
+		name = "IE";
+		MS = true;
+		IE = true;
+	} else if ( navigator.userAgent.indexOf("MSIE")>=0 ){
+		name = "IE";
+		MS = true;
+		IE = true;
+		old = true;
+	} else if ( navigator.userAgent.indexOf("Edge")>=0 ){
+		name = "Edge";
+		MS = true;
+	} else if ( navigator.userAgent.indexOf("Firefox")>=0 ){
+		name = "Firefox";
+	} else if ( navigator.userAgent.indexOf("Opera")>=0 ){
+		name = "Opera";
+		Blink = true;
+	} else if ( navigator.userAgent.indexOf("Safari")>=0 && navigator.userAgent.indexOf("Chrome")<0){ // これも要注意・・
+		name = "Safari";
+	} else if ( navigator.userAgent.indexOf("Chrome")>=0 ){ // ChromeはEdgeにも文字列含まれてるので要注意・・
+		name = "Chrome";
+		Blink = true;
+	}
+	
+	return{
+		name: name,
+		MS: MS,
+		IE: IE,
+		Blink: Blink,
+		smartPhone: smartPhone,
+		old : old,
+	}
+}
 
 // 中心座標を提供するUIのオプション(2012/12/7)
 function setCenterUI(){
@@ -4955,6 +5020,7 @@ function setSVGcirclePoints( pathNode ,  context , child2canvas , clickable , ca
 		ret.height = csize.y * 2;
 	}
 //	console.log("repld:"+repld,  " ret:",ret , " csize:" , csize);
+//	console.log("circle ret:",ret , " csize:" , csize);
 	
 	return ( ret );
 
@@ -5821,7 +5887,7 @@ function getHittedObjects(){ // 2018.1.17 setCentralVectorObjectsGetter用にget
 }
 
 function getVectorObjectsAtPoint( x, y ){
-	console.log("called getVectorObjectsAtPoint:",x,y," caller:",getVectorObjectsAtPoint.caller);
+//	console.log("called getVectorObjectsAtPoint:",x,y," caller:",getVectorObjectsAtPoint.caller);
 	pathHitTest.enable = true;
 	pathHitTest.centralGetter = false; // 2018.1.18
 	pathHitTest.x = x;
@@ -6018,7 +6084,7 @@ function vectorDataWrapperForShowPoiProperty(targetElement , targetBbox , usedPa
 
 // 2D Vector及び、ラスターのPOI(html img要素)のための、クリックなどによるオブジェクト検索機能。 関数名を除き、すべての機能をcheckTickerに集約した 2018.1.31
 function getObjectAtPoint( x, y ){
-	console.log("called getObjectAtPoint:",x,y," caller:",getObjectAtPoint.caller);
+//	console.log("called getObjectAtPoint:",x,y," caller:",getObjectAtPoint.caller);
 	checkTicker( x, y );
 	
 	/**
@@ -6932,6 +6998,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	},
 	getHashByDocPath : getHashByDocPath,
 	getHyperLink : getHyperLink,
+	getInverseMatrix : getInverseMatrix,
 	getLayer : getLayer,
 	getLayerId : getLayerId,
 	getLayers : getLayers,
@@ -6957,7 +7024,8 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getUaProp : function (){
 		return {
 			isIE: isIE,
-			isSP: isSP
+			isSP: isSP,
+			uaProp: uaProp
 		}
 	},
 	getVerticalScreenScale : getVerticalScreenScale,
@@ -6966,6 +7034,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	gpsCallback : gpsSuccess, // added on rev15
 	handleResult : handleResult,
 	ignoreMapAspect : function(){ ignoreMapAspect = true; },
+	initLoad : initLoad,
 	linkedDocOp : linkedDocOp,
 	loadSVG : loadSVG,
 	numberFormat : numberFormat,
