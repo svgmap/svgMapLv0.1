@@ -149,8 +149,8 @@
 // 2018/02/26 : captureGISgeometriesでビットイメージタイルも取得可能とした　ただし、captureGISgeometriesOptionで設定した場合
 // 2018/03/02 : useではなく直接imageで設置したnonScaling bitImageもPOIとして扱うようにした　結構大きい影響のある改修
 // 2018/04/06 : Edge対応ほぼ完了したかな これに伴いuaProp新設　今後isIE,verIE,isSPをこれに統合したうえで、IE10以下のサポートを完全に切る予定
+// 2018/06/01 : script実行ルーチンのデバッグ
 // 
-//
 //
 // Issues:
 // 2018/3/9 メタデータのないPOIが単にクリッカブルになる。またvectorPOIはclickableクラスを設定しないとクリッカブルでないなどちょっとキレイでない。
@@ -286,7 +286,7 @@ function initLoad(){
 	}
 	
 	
-	console.log("AppName:",navigator.appName,"  UAname:",navigator.userAgent);
+//	console.log("AppName:",navigator.appName,"  UAname:",navigator.userAgent);
 //	if ( navigator.appName == 'Microsoft Internet Explorer' && window.createPopup )
 	if ( navigator.appName == 'Microsoft Internet Explorer' || navigator.userAgent.indexOf("Trident")>=0 ){ //2013.12
 		isIE = true;
@@ -294,7 +294,7 @@ function initLoad(){
 	}
 	isSP = checkSmartphone();
 	uaProp = checkBrowserName();
-	console.log("isIE,verIE,isSP,uaProp:",isIE,verIE,isSP,uaProp);
+//	console.log("isIE,verIE,isSP,uaProp:",isIE,verIE,isSP,uaProp);
 	
 	
 	mapCanvas.title = ""; // titleにあると表示されてしまうので消す
@@ -1021,6 +1021,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].script.transform = transform;
 			svgImagesProps[docId].script.getCanvasSize = getCanvasSize;
 			svgImagesProps[docId].script.geoViewBox = geoViewBox;
+			svgImagesProps[docId].script.initialLoad = true;  // レイヤのロード時はonzoomを発動させるという過去の仕様を継承するためのフラグ・・あまり筋が良くないと思うが互換性を考え 2018.6.1
 			svgImagesProps[docId].script.initObject();
 			if ( svgImagesProps[docId].script.onload ){
 //				console.log("call First onload() for dynamic content");
@@ -1120,11 +1121,12 @@ function handleScript( docId , zoom , child2root ){
 //	console.log(svgImagesProps[docId].script.CRS);
 	var vc = viewBoxChanged();
 	svgImagesProps[docId].script.handleScriptCf(); // ここで、上記の値をグローバル変数にセットしているので、追加したらhandleScriptCfにも追加が必要です！ 2017.8.17
-	if ( vc =="zoom" ){ // zooming
+	if ( vc =="zoom" || svgImagesProps[docId].script.initialLoad ){ // zooming
+		svgImagesProps[docId].script.initialLoad  = false;
 		if ( svgImagesProps[docId].script.onzoom ){
 			svgImagesProps[docId].script.onzoom();
 		}
-	} else if ( vc=="scroll") { // scrollもzoomもしてないreshscreenを捉えて、イベントを抑制 2018/05
+	} else if ( vc=="scroll") { // scrollもzoomもしてないonrefreshscreenみたいなものがあるのではないかと思うが・・・ 2017.3.16
 		if ( svgImagesProps[docId].script.onscroll ){
 			svgImagesProps[docId].script.onscroll();
 		}
@@ -1959,7 +1961,7 @@ function getScript( svgDoc ){
 			"	var svgMap = null; " +
 			"	var window = null; " +
 			// 以下のように追加してinitObject()すればthisなしで利用できるようになりました
-			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;}" +
+			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale;}" +
 			"	function handleScriptCf(){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport; }" +
 				scriptTxt + 
 			"	return{ " + 
