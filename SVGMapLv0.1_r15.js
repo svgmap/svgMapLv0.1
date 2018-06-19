@@ -150,6 +150,8 @@
 // 2018/03/02 : useではなく直接imageで設置したnonScaling bitImageもPOIとして扱うようにした　結構大きい影響のある改修
 // 2018/04/06 : Edge対応ほぼ完了したかな これに伴いuaProp新設　今後isIE,verIE,isSPをこれに統合したうえで、IE10以下のサポートを完全に切る予定
 // 2018/06/01 : script実行ルーチンのデバッグ
+// 2018/06/15 : script実行ルーチンのデバッグ
+// 2018/06/19 : script実行ルーチンのデバッグ
 // 
 //
 // Issues:
@@ -224,7 +226,6 @@ var rootCrs; // ルートSVGのCRS ( geo->rootのsvg )
 var root2Geo; //上の逆 ( rootのsvg - > geo )
 var geoViewBox = { x:0, y:0, width:1, height:1}; // と、それを使って出したgeoのviewBox
 
-var prevGeoViewBox; // ワンステップ前のgeoViewBox(dynamicLoad("root")で設定。今のところ専らhandleScript()専用) : added 2016.10.7 for deleting action val  ++  2017.3.16 viewbox変化によって出るイベントが変わる処理のために追加使用 ::  viewBoxChanged()関数
 
 
 var svgImages = new Array(); // svg文書群(XML) arrayのハッシュキーはimageId("root"以外は"i"+連番)
@@ -1003,7 +1004,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			}
 		}
 		
-		// 動的レイヤーを導入～～add 2013/1
+		// 動的レイヤーを導入～～add 2013/1 (これはドキュメントの読み込み時最初の一回だけの方)
 //		console.log("call getScript");
 		svgImagesProps[docId].script = getScript( svgImages[docId] ); 
 		if ( svgImagesProps[docId].script ){
@@ -1060,7 +1061,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 		}
 		hideTicker();
 		updateCenterPos();
-		prevGeoViewBox = { x: geoViewBox.x , y: geoViewBox.y , width: geoViewBox.width , height: geoViewBox.height }; // 2016.10.7
+//		prevGeoViewBox = { x: geoViewBox.x , y: geoViewBox.y , width: geoViewBox.width , height: geoViewBox.height }; // 2016.10.7  2018.6.19 onzoom()でrefreshscreen()すると破綻するのでレイヤ個別化＆移動
 		geoViewBox = getTransformedBox( rootViewBox , root2Geo );
 //		console.log("set geoViewBox:",geoViewBox);
 		if ( !pathHitTest.enable ){
@@ -1119,7 +1120,7 @@ function handleScript( docId , zoom , child2root ){
 //	console.log(docId + " : scale:" + svgImagesProps[docId].script.scale + " actualViewBox:" );
 //	console.log(svgImagesProps[docId].script.actualViewBox);
 //	console.log(svgImagesProps[docId].script.CRS);
-	var vc = viewBoxChanged();
+	var vc = viewBoxChanged(docId);
 	svgImagesProps[docId].script.handleScriptCf(); // ここで、上記の値をグローバル変数にセットしているので、追加したらhandleScriptCfにも追加が必要です！ 2017.8.17
 	if ( vc =="zoom" || svgImagesProps[docId].script.initialLoad ){ // zooming
 		svgImagesProps[docId].script.initialLoad  = false;
@@ -1139,14 +1140,23 @@ function handleScript( docId , zoom , child2root ){
 }
 
 // check viewBoxChange
-function viewBoxChanged(){
-	if ( prevGeoViewBox.width != geoViewBox.width || prevGeoViewBox.height != geoViewBox.height ){
-		return ( "zoom" );
-	} else if ( prevGeoViewBox.x != geoViewBox.x || prevGeoViewBox.y != geoViewBox.y ){
-		return ( "scroll");
-	} else {
-		return ( false );
+var prevGeoViewBox={}; // ワンステップ前のgeoViewBoxが設定される。viewBoxChanged()用変数 handleScript()専用 : added 2016.10.7 for deleting action val  ++  2017.3.16 viewbox変化によって出るイベントが変わる処理のために追加使用 ::  2018.6.19 onzoom()でrefreshscreen()すると破綻するのでレイヤ個別化＆設定場所を移動
+		
+function viewBoxChanged(docId){
+	if ( !docId ){
+		docId = "allMaps";
 	}
+	var ans;
+	if ( !prevGeoViewBox[docId] || prevGeoViewBox[docId].width != geoViewBox.width || prevGeoViewBox[docId].height != geoViewBox.height ){
+		ans = "zoom";
+	} else if ( prevGeoViewBox[docId].x != geoViewBox.x || prevGeoViewBox[docId].y != geoViewBox.y ){
+		ans = "scroll";
+	} else {
+		ans = false
+	}
+	prevGeoViewBox[docId] = { x: geoViewBox.x , y: geoViewBox.y , width: geoViewBox.width , height: geoViewBox.height };
+//	console.log("viewBoxChanged: docId:",docId,"  ans:",ans);
+	return ( ans );
 }
 
 
@@ -1961,6 +1971,7 @@ function getScript( svgDoc ){
 			"	var svgMap = null; " +
 			"	var window = null; " +
 			// 以下のように追加してinitObject()すればthisなしで利用できるようになりました
+			"	var transform,docId,CRS,verIE,geoViewBox,scale; " +  // debug 2018/6/15 宣言してなかったのでグローバル変数が露出してた・・
 			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale;}" +
 			"	function handleScriptCf(){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport; }" +
 				scriptTxt + 
@@ -4171,8 +4182,8 @@ function fixTickerSize(){
 	ticker.style.height="";
 	var th = ticker.offsetHeight;
 	var tw = ticker.offsetWidth;
-	console.log( "fixTickerSize:", ticker, ticker.offsetHeight , ticker.offsetWidth);
-	console.log("tickerSize: w:",tw," h:",th);
+//	console.log( "fixTickerSize:", ticker, ticker.offsetHeight , ticker.offsetWidth);
+//	console.log("tickerSize: w:",tw," h:",th);
 	if ( mapCanvasSize.height - py< th ){
 //		ticker.style.height="100px";
 		ticker.style.height=mapCanvasSize.height - py -8 +"px";
@@ -4304,7 +4315,7 @@ function checkTicker(px,py){
 			setTickerPosition(px,py);
 			showTicker();
 		}
-		console.log ( " TickerElem;",ticker, "   tickerTableMetadata:",tickerTableMetadata,"  tickerDisplay:",ticker.style.display);
+//		console.log ( " TickerElem;",ticker, "   tickerTableMetadata:",tickerTableMetadata,"  tickerDisplay:",ticker.style.display);
 	} else {
 		hideTicker();
 	}
@@ -4377,8 +4388,8 @@ function timeoutLoadingImg(obj){ // ロード失敗した画像を強制的に�
 	if ( obj.id ){
 		target = obj;
 	} else { // added 2016.10.28 ( for err403,404 imgs )
-//		console.log ("probably err403,404");
 		target = obj.target || obj.srcElement;
+//		console.log ("probably err403,404 :",target);
 	}
 	if ( loadingImgs[target.id] ){
 //		console.log("LoadImg TimeOut!!!!!");
@@ -4680,7 +4691,7 @@ function getDocumentId( svgelement ){
 
 function poiSelectProcess( obj ){ // html:img要素によるPOI(from use要素)を１個だけの選択まで決定したあとに実行するプロセス
 // testClick()に元々あった機能を切り分け　今はtestClick()を代替したcheckTicker()から呼ばれている
-	console.log("poiSelectProcess",obj,"  typeof svgMapAuthoringTool:",typeof svgMapAuthoringTool, "  typeOf origin:",typeof obj);
+//	console.log("poiSelectProcess",obj,"  typeof svgMapAuthoringTool:",typeof svgMapAuthoringTool, "  typeOf origin:",typeof obj);
 	var target = obj.target || obj.srcElement || obj; 
 //	console.log("testClick:",target.parentNode.getAttribute("id"),target, obj.button);
 	var el = isEditingLayer();
@@ -6161,6 +6172,7 @@ function linkedDocOp( func , docHash , param1, param2 , param3 , param4 , param5
 		
 		// child Docs再帰処理
 		var childDocs = targetDocProps.childImages;
+//		console.log("linkedDocOp childDocs:",childDocs,"  docHash:",docHash);
 		for ( var i in childDocs ){
 			if ( childDocs[i] == CLICKABLE || childDocs[i] == EXIST ){
 				// existなのに実存しない？(unloadしているのにexistのままだな)
@@ -6257,7 +6269,7 @@ function setShowPoiProperty( func , docId ){
 
 function defaultShowPoiProperty(target){
 	// 何も設定されていない場合のデフォルトパネル
-	console.log ( "Target:" , target , "  parent:", target.parentNode );
+//	console.log ( "Target:" , target , "  parent:", target.parentNode );
 
 //	var metaSchema = target.parentNode.getAttribute("property").split(",");
 	var metaSchema = null;
@@ -6317,7 +6329,7 @@ function defaultShowPoiProperty(target){
 	}
 	
 	message += "</table>";
-	console.log(message);
+//	console.log(message);
 	showModal(message,400,600);
 
 }
