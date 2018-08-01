@@ -152,9 +152,12 @@
 // 2018/06/01 : script実行ルーチンのデバッグ
 // 2018/06/15 : script実行ルーチンのデバッグ
 // 2018/06/19 : script実行ルーチンのデバッグ
+// 2018/08/01 : TreatRectAsPolygonFlag
 // 
 //
 // Issues:
+// 2018/6/21 SvgImagesProps　もしくは　rootLayersProps?にそのレイヤのデータの特性(POI,Coverage,Line etc)があると便利かも
+// 2018/6/21 もはやXHRでsvgを取得するとき、XMLとして取得しないほうが良いと思われる(独自の編集後にwell formed XMLとして扱っているので)
 // 2018/3/9 メタデータのないPOIが単にクリッカブルになる。またvectorPOIはclickableクラスを設定しないとクリッカブルでないなどちょっとキレイでない。
 // 2018/3/5 FIXED Vector2DのcircleがcaptureGISで正しい値が取れてない？
 // 2018/3/5 visibility hiddenのVector2Dがヒットテストにかかってしまうらしい？imageも要確認
@@ -1018,10 +1021,14 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //			console.log( "isObj?:" , refreshScreen );
 			svgImagesProps[docId].script.refreshScreen = refreshScreen; // 2015.5.26 add utility function for asynchronous software picture refreshing
 			svgImagesProps[docId].script.linkedDocOp = linkedDocOp; // 2017.3.9 子文書に対しての操作を許可してみる・・・
+			svgImagesProps[docId].script.isIntersect = isIntersect; // 2018.6.29 よく使うので・・
 			svgImagesProps[docId].script.childDocOp = childDocOp; // 2017.3.9 子文書に対しての操作を許可してみる・・・
 			svgImagesProps[docId].script.transform = transform;
 			svgImagesProps[docId].script.getCanvasSize = getCanvasSize;
 			svgImagesProps[docId].script.geoViewBox = geoViewBox;
+			if ( svgMapGIStool ){
+				svgImagesProps[docId].script.drawGeoJson = svgMapGIStool.drawGeoJson;
+			}
 			svgImagesProps[docId].script.initialLoad = true;  // レイヤのロード時はonzoomを発動させるという過去の仕様を継承するためのフラグ・・あまり筋が良くないと思うが互換性を考え 2018.6.1
 			svgImagesProps[docId].script.initObject();
 			if ( svgImagesProps[docId].script.onload ){
@@ -1972,7 +1979,7 @@ function getScript( svgDoc ){
 			"	var window = null; " +
 			// 以下のように追加してinitObject()すればthisなしで利用できるようになりました
 			"	var transform,docId,CRS,verIE,geoViewBox,scale; " +  // debug 2018/6/15 宣言してなかったのでグローバル変数が露出してた・・
-			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale;}" +
+			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; isIntersect = this.isIntersect; drawGeoJson = this.drawGeoJson; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale; svglocation = this.location;}" +
 			"	function handleScriptCf(){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport; }" +
 				scriptTxt + 
 			"	return{ " + 
@@ -5045,7 +5052,7 @@ function setSVGrectPoints( pathNode ,  context , child2canvas , clickable , vect
 	var rw = Number(pathNode.getAttribute("width"));
 	var rh = Number(pathNode.getAttribute("height"));
 	
-	if ( GISgeometry ){
+	if ( GISgeometry && !TreatRectAsPolygonFlag ){
 		GISgeometry.svgXY = [ (rx + rw / 2.0) , (ry + rh / 2.0) ];
 	}
 	
@@ -5484,7 +5491,11 @@ function initGISgeometry( cat, subCat , svgNode ){
 			GISgeometry.type = "Polygon";
 			break;
 		case RECT:
-			GISgeometry.type = "Point"; 
+			if ( TreatRectAsPolygonFlag ){
+				GISgeometry.type = "Polygon"; 
+			} else {
+				GISgeometry.type = "Point"; 
+			}
 			break;
 		case CIRCLE:
 			GISgeometry.type = "Point"; 
@@ -6840,6 +6851,7 @@ var setLayerUI, updateLayerListUIint;
 
 var GISgeometriesCaptureFlag = false; // for GIS 2016.12.1
 var BitImageGeometriesCaptureFlag = false; // for GIS 2018.2.26
+var TreatRectAsPolygonFlag = false; // for GIS 2018.8.1
 
 var GISgeometries;
 
@@ -6987,9 +6999,12 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 		return ( ans );
 	},
 	captureGISgeometries: captureGISgeometries,
-	captureGISgeometriesOption: function ( BitImageGeometriesCaptureFlg ){ // 2018.2.26
+	captureGISgeometriesOption: function ( BitImageGeometriesCaptureFlg , TreatRectAsPolygonFlg ){ // 2018.2.26
 		// TBD : ロードできてないイメージは外すかどうか, onViewportのもののみにするかどうか のオプションもね
 		BitImageGeometriesCaptureFlag = BitImageGeometriesCaptureFlg; // ビットイメージをキャプチャするかどうか
+		if ( TreatRectAsPolygonFlg ){
+			TreatRectAsPolygonFlag = TreatRectAsPolygonFlg; // rect要素をPoint扱いにするかPolygon扱いにするか
+		}
 	},
 	checkSmartphone : checkSmartphone, // added on rev15
 	childDocOp : childDocOp,
@@ -7049,6 +7064,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	handleResult : handleResult,
 	ignoreMapAspect : function(){ ignoreMapAspect = true; },
 	initLoad : initLoad,
+	isIntersect : isIntersect,
 	linkedDocOp : linkedDocOp,
 	loadSVG : loadSVG,
 	numberFormat : numberFormat,
