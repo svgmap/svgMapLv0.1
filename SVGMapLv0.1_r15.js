@@ -153,6 +153,7 @@
 // 2018/06/15 : script実行ルーチンのデバッグ
 // 2018/06/19 : script実行ルーチンのデバッグ
 // 2018/08/01 : TreatRectAsPolygonFlag
+// 2018/09/04 : ビットイメージ(image要素)にstyle.imageRendering pixelated実装 ヒートマップなどを最小ファイルサイズ構築するためのもの(一応Edgeも対応*4Edge　今後このルーチンはEdge対応次第で廃止する)
 // 
 //
 // Issues:
@@ -1445,7 +1446,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					var img;
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -1907,12 +1908,14 @@ function resetSummarizedCanvas(){
 	var cv = mapCanvas.getElementsByTagName("canvas");
 	for ( var i = cv.length - 1 ; i >= 0 ; i-- ){
 		var ocv = cv.item(i);
-		ocv.setAttribute("hasdrawing","false");
-		ocv.style.left = "0px";
-		ocv.style.top = "0px";
-		ocv.width = mapCanvasSize.width;
-		ocv.height = mapCanvasSize.height;
-		ocv.getContext('2d').clearRect(0,0,ocv.width,ocv.height);
+		if ( !ocv.dataset.pixelate4Edge){
+			ocv.setAttribute("hasdrawing","false");
+			ocv.style.left = "0px";
+			ocv.style.top = "0px";
+			ocv.width = mapCanvasSize.width;
+			ocv.height = mapCanvasSize.height;
+			ocv.getContext('2d').clearRect(0,0,ocv.width,ocv.height);
+		}
 	}
 }
 
@@ -2180,8 +2183,17 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment ){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated ){
 	var img = document.createElement("img");
+	
+	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
+		img.style.imageRendering="pixelated";
+//		img.style.imageRendering="crisp-edges";
+		img.style.imageRendering="-moz-crisp-edges";
+		img.style.msInterpolationMode="nearest-neighbor";
+		img.style.imageRendering="optimize-contrast";
+		img.dataset.pixelated="true";
+	}
 	
 	if ( href_fragment ){ // 2015.7.3 spatial fragment
 		img.setAttribute("href_fragment",href_fragment);
@@ -2705,6 +2717,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	var nonScaling = false;
 	cdx = 0;
 	cdy = 0;
+	var pixelated = false;
 	if ( !subCategory && category == POI){ // subCategory無しで呼び出しているものに対するバックワードコンパチビリティ・・・ 2018.3.2
 //		console.log("called no subCategory  imgE:",imgE);
 		subCategory = USEDPOI;
@@ -2815,6 +2828,12 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 //			}
 		}
 		elemClass = imgE.getAttribute("class");
+		
+		if ( category == BITIMAGE  && ( (imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("imageRendering:pixelated")>=0) || (parentProps && parentProps.imageRendering  && parentProps.imageRendering == "pixelated") ) ){
+//			console.log("pixelated");
+			pixelated = true;
+		}
+		
 	} else if ( subCategory == USEDPOI ){ // USEDによるPOI
 		var tf = getNonScalingOffset(imgE);
 		if ( tf.nonScaling ){ // non scaling POI
@@ -2925,7 +2944,8 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		cdx : cdx ,
 		cdy : cdy ,
 		nonScaling : nonScaling , 
-		href_fragment : href_fragment
+		href_fragment : href_fragment,
+		pixelated : pixelated
 	}
 }
 
@@ -4440,6 +4460,39 @@ function requestRemoveTransition( imgElem , parentElem2 ){ // 2013.7.31 debug �
 	delContainer.appendChild(imgElem);
 }
 
+function buildPixelatedImages4Edge(){ // pixelatedimgに対する、MS Edgeの問題に、無理やりなパッチを試みてみます・・・ 2018.9.3
+	// see http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/
+	// and https://www.wizforest.com/tech/bigdot/
+	
+	// debug: https://developer.mozilla.org/ja/docs/Web/API/MutationObserver
+	if (navigator.userAgent.indexOf("Edge")>0){
+		var imgs = mapCanvas.getElementsByTagName("img");
+		if ( imgs.length > 0 ){
+			for ( var i = 0 ; i < imgs.length ; i++ ){
+				if ( imgs[i].dataset.pixelated){
+					var parentDiv = imgs[i].parentNode;
+					console.log("should be pixelated img : ",imgs[i].id, "  style:",imgs[i].style.top,imgs[i].style.left);
+					imgs[i].style.visibility="hidden";
+					var canvas = document.createElement("canvas");
+					canvas.dataset.pixelate4Edge="true";
+					canvas.width=imgs[i].width;
+					canvas.height=imgs[i].height;
+					canvas.style.position="absolute";
+					canvas.style.top=imgs[i].style.top;
+					canvas.style.left=imgs[i].style.left;
+					parentDiv.insertBefore(canvas,imgs[i]);
+					var ctx = canvas.getContext('2d');
+					ctx.imageSmoothingEnabled=false;
+					ctx.msImageSmoothingEnabled=false; 
+					var cimg = new Image();
+					cimg.src = imgs[i].src;
+					ctx.drawImage(cimg, 0, 0, canvas.width, canvas.height);
+				}
+			}
+		}
+	}
+}
+
 var loadCompleted = true;
 function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし、必要な処理を起動する。
 // 具体的には、読み込み中のドキュメントをチェックし、もうなければ遅延img削除処理を実行、読み込み完了イベントを発行
@@ -4459,6 +4512,8 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 		}
 		delContainerId = 0;
 		removeEmptyTiles(  mapCanvas ); // added 2013.9.12
+		
+		buildPixelatedImages4Edge();
 		
 		// zoomPanMap||screenRefreshed イベントを発行する
 //		if ( !forceDel &&  !loadCompleted ){} // forceDelの時もイベントだすべきでは？
@@ -5535,7 +5590,7 @@ function matMul( m1 , m2 ){
 	}
 }
 
-var styleCatalog = new Array("stroke" , "stroke-width" , "stroke-linejoin" , "stroke-linecap" , "fill" , "fill-rule" , "fill-opacity" , "opacity" , "vector-effect" , "display" , "font-size" , "stroke-dasharray" , "marker-end" , "visibility" ); 
+var styleCatalog = new Array("stroke" , "stroke-width" , "stroke-linejoin" , "stroke-linecap" , "fill" , "fill-rule" , "fill-opacity" , "opacity" , "vector-effect" , "display" , "font-size" , "stroke-dasharray" , "marker-end" , "visibility" ,"imageRendering"); 
 	
 function getStyle( svgNode , defaultStyle , hasHyperLink ){
 	// 親のスタイルを継承して該当要素のスタイルを生成する
