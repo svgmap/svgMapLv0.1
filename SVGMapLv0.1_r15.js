@@ -157,6 +157,7 @@
 // 
 //
 // Issues:
+// 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
 // 2018/6/21 SvgImagesProps　もしくは　rootLayersProps?にそのレイヤのデータの特性(POI,Coverage,Line etc)があると便利かも
 // 2018/6/21 もはやXHRでsvgを取得するとき、XMLとして取得しないほうが良いと思われる(独自の編集後にwell formed XMLとして扱っているので)
 // 2018/3/9 メタデータのないPOIが単にクリッカブルになる。またvectorPOIはclickableクラスを設定しないとクリッカブルでないなどちょっとキレイでない。
@@ -1027,7 +1028,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].script.transform = transform;
 			svgImagesProps[docId].script.getCanvasSize = getCanvasSize;
 			svgImagesProps[docId].script.geoViewBox = geoViewBox;
-			if ( svgMapGIStool ){
+			if ( typeof svgMapGIStool == "object" ){
 				svgImagesProps[docId].script.drawGeoJson = svgMapGIStool.drawGeoJson;
 			}
 			svgImagesProps[docId].script.initialLoad = true;  // レイヤのロード時はonzoomを発動させるという過去の仕様を継承するためのフラグ・・あまり筋が良くないと思うが互換性を考え 2018.6.1
@@ -1983,7 +1984,7 @@ function getScript( svgDoc ){
 			// 以下のように追加してinitObject()すればthisなしで利用できるようになりました
 			"	var transform,docId,CRS,verIE,geoViewBox,scale; " +  // debug 2018/6/15 宣言してなかったのでグローバル変数が露出してた・・
 			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; isIntersect = this.isIntersect; drawGeoJson = this.drawGeoJson; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale; svglocation = this.location;}" +
-			"	function handleScriptCf(){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport; }" +
+			"	function handleScriptCf( clear ){ if ( ! clear){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport;}else{document=null;docId=null; }}" +
 				scriptTxt + 
 			"	return{ " + 
 			"		initObject : initObject , " + 
@@ -3048,6 +3049,9 @@ function removeChildDocs( imageId ){
 			removeChildDocs( anims[i].getAttribute("iid") );
 		}
 //		console.log("delete",svgImage[imageId]);
+		if ( svgImagesProps[imageId].script ){
+			svgImagesProps[imageId].script.handleScriptCf(true); // やはりこの仕組みは一度見直しが必要・・・ 2018.9.7
+		}
 		delete svgImages[imageId];
 		delete svgImagesProps[imageId];
 	}
