@@ -2267,17 +2267,25 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	if ( style.fill ){
 		img.style.color=style.fill;
 	}
+	var fontS=0;
 	if ( style["font-size"] && nonScaling ){
-		img.style.fontSize = style["font-size"] +"px";
+		fontS = Number(style["font-size"] );
 	} else if ( nonScaling ){
-		// do nothing
+		fontS = 16; // default size but not set..? 
+		// do nothing?
 	} else {
-		img.style.fontSize = areaHeight +"px";
+		fontS = areaHeight;
 	}
+	img.style.fontSize = fontS+"px";
+	
 	img.innerHTML = text;
 	img.style.left = (x + cdx ) + "px";
 //	img.style.top = y + "px";
-	img.style.bottom = ( mapCanvasSize.height - ( y + cdy ) ) + "px";
+	if (!uaProp.MS){
+		img.style.bottom = ( mapCanvasSize.height - ( y + cdy ) ) + "px";
+	} else {
+		img.style.top = (y +cdy - fontS)+ "px"; 
+	}
 	img.style.position = "absolute";
 //	img.width = width;
 //	img.height = height;
@@ -2304,9 +2312,15 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 	
 	img.style.left = (cdx + x) + "px";
 	if ( txtFlg ){
-		img.style.bottom = ( mapCanvasSize.height - (cdy + y) ) + "px";
 		if ( !txtNonScaling ){
 			img.style.fontSize = height + "px";
+		}
+		if ( !uaProp.MS){
+			img.style.bottom = ( mapCanvasSize.height - (cdy + y) ) + "px";
+		} else {
+			var fontS = parseInt(img.style.fontSize);
+			console.log(fontS, img.innerHTML,img);
+			img.style.top = (y +cdy-fontS)+ "px"; 
 		}
 	} else {
 		img.style.top = (cdy + y) + "px";
@@ -3339,6 +3353,7 @@ function checkBrowserName(){
 	var MS = false;
 	var IE = false;
 	var Blink = false;
+	var Edge = false;
 	var old = false;
 	var smartPhone = checkSmartphone();
 	if ( navigator.userAgent.indexOf("Trident")>=0 ){
@@ -3353,6 +3368,7 @@ function checkBrowserName(){
 	} else if ( navigator.userAgent.indexOf("Edge")>=0 ){
 		name = "Edge";
 		MS = true;
+		Edge = true;
 	} else if ( navigator.userAgent.indexOf("Firefox")>=0 ){
 		name = "Firefox";
 	} else if ( navigator.userAgent.indexOf("Opera")>=0 ){
@@ -3369,6 +3385,7 @@ function checkBrowserName(){
 		name: name,
 		MS: MS,
 		IE: IE,
+		Edge: Edge,
 		Blink: Blink,
 		smartPhone: smartPhone,
 		old : old,
@@ -4469,29 +4486,27 @@ function buildPixelatedImages4Edge(){ // pixelatedimgに対する、MS Edgeの�
 	// and https://www.wizforest.com/tech/bigdot/
 	
 	// debug: https://developer.mozilla.org/ja/docs/Web/API/MutationObserver
-	if (navigator.userAgent.indexOf("Edge")>0){
-		var imgs = mapCanvas.getElementsByTagName("img");
-		if ( imgs.length > 0 ){
-			for ( var i = 0 ; i < imgs.length ; i++ ){
-				if ( imgs[i].dataset.pixelated){
-					var parentDiv = imgs[i].parentNode;
-					console.log("should be pixelated img : ",imgs[i].id, "  style:",imgs[i].style.top,imgs[i].style.left);
-					imgs[i].style.visibility="hidden";
-					var canvas = document.createElement("canvas");
-					canvas.dataset.pixelate4Edge="true";
-					canvas.width=imgs[i].width;
-					canvas.height=imgs[i].height;
-					canvas.style.position="absolute";
-					canvas.style.top=imgs[i].style.top;
-					canvas.style.left=imgs[i].style.left;
-					parentDiv.insertBefore(canvas,imgs[i]);
-					var ctx = canvas.getContext('2d');
-					ctx.imageSmoothingEnabled=false;
-					ctx.msImageSmoothingEnabled=false; 
-					var cimg = new Image();
-					cimg.src = imgs[i].src;
-					ctx.drawImage(cimg, 0, 0, canvas.width, canvas.height);
-				}
+	var imgs = mapCanvas.getElementsByTagName("img");
+	if ( imgs.length > 0 ){
+		for ( var i = 0 ; i < imgs.length ; i++ ){
+			if ( imgs[i].dataset.pixelated){
+				var parentDiv = imgs[i].parentNode;
+				console.log("should be pixelated img : ",imgs[i].id, "  style:",imgs[i].style.top,imgs[i].style.left);
+				imgs[i].style.visibility="hidden";
+				var canvas = document.createElement("canvas");
+				canvas.dataset.pixelate4Edge="true";
+				canvas.width=imgs[i].width;
+				canvas.height=imgs[i].height;
+				canvas.style.position="absolute";
+				canvas.style.top=imgs[i].style.top;
+				canvas.style.left=imgs[i].style.left;
+				parentDiv.insertBefore(canvas,imgs[i]);
+				var ctx = canvas.getContext('2d');
+				ctx.imageSmoothingEnabled=false;
+				ctx.msImageSmoothingEnabled=false; 
+				var cimg = new Image();
+				cimg.src = imgs[i].src;
+				ctx.drawImage(cimg, 0, 0, canvas.width, canvas.height);
 			}
 		}
 	}
@@ -4517,7 +4532,9 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 		delContainerId = 0;
 		removeEmptyTiles(  mapCanvas ); // added 2013.9.12
 		
-		buildPixelatedImages4Edge();
+		if ( uaProp.Edge ){
+			buildPixelatedImages4Edge();
+		}
 		
 		// zoomPanMap||screenRefreshed イベントを発行する
 //		if ( !forceDel &&  !loadCompleted ){} // forceDelの時もイベントだすべきでは？
