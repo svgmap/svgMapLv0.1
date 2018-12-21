@@ -29,12 +29,17 @@
 // 2017/02/xx Rev6: ポリゴンUIのdelete機能を改善
 // 2017/03/17 zoomPanMap -> screenRefreshed + zoomPanMap
 // 2017/06/09 Rev7: add POIregistTool
+// 2018/02/01 minor bug fix
+// 2018/02/02 cursor.style.zIndexを設定するようにした(toBeDel on rev15対策)
+// 2018/03/05 polylineを編集できる機能をおおよそ実装
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
 //  編集UIを出した状態で、TypeError: svgImagesProps[layerId] is undefined[詳細]  SVGMapLv0.1_r14.js:3667:3
 // POIToolsとPolytoolsが排他処理が完全ではない
-        
+
+// Notes:
+//  root containerでclass=editableの設定がないと、再編集や、レイヤ消去後の再表示での編集結果の保持はできない 2018.2.5
 
 ( function ( window , undefined ) { 
 var document = window.document;
@@ -80,7 +85,7 @@ function POIAppend( geoLocation ,  docId  ,title){
 	var layerSVGDOM = svgImages[docId];
 	var layerCRS = svgImagesProps[docId].CRS;
 	var symbols = getSymbols(svgImages[docId]);
-	var metaSchema = layerSVGDOM.ownerDocument.documentElement.getAttribute("property").split(",");
+//	var metaSchema = layerSVGDOM.ownerDocument.documentElement.getAttribute("property").split(",");
 	
 	if ( layerCRS && layerSVGDOM && symbols ){
 		var symbd = layerSVGDOM.getElementsByTagName("defs");
@@ -207,10 +212,7 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 	svgImages = svgMap.getSvgImages();
 	svgImagesProps = svgMap.getSvgImagesProps();
 	var symbols = svgMap.getSymbols(svgImages[poiDocId]);
-	var metaSchema
-	if ( svgImages[poiDocId].documentElement.getAttribute("property") ){
-		metaSchema = svgImages[poiDocId].documentElement.getAttribute("property").split(",");
-	}
+	var metaSchema = getMetaSchema(poiDocId);
 	
 	var centerRegButton=uiDoc.createElement("input");
 	centerRegButton.setAttribute("type","button");
@@ -264,10 +266,7 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly){
 	svgImages = svgMap.getSvgImages();
 	svgImagesProps = svgMap.getSvgImagesProps();
 	var symbols = svgMap.getSymbols(svgImages[poiDocId]);
-	var metaSchema
-	if ( svgImages[poiDocId].documentElement.getAttribute("property") ){
-		metaSchema = svgImages[poiDocId].documentElement.getAttribute("property").split(",");
-	}
+	var metaSchema = getMetaSchema(poiDocId);
 	
 	var ihtml = '<table id="poiEditor"><tr><td colspan="2" id="iconselection" >';
 	firstSymbol = true;
@@ -577,7 +576,11 @@ function setPolySvg(targetDoc,poiDocId){
 			var poiDoc = svgImages[poiDocId];
 			targetSvgElem = poiDoc.createElement("path");
 			targetSvgElem.setAttribute("vector-effect","non-scaling-stroke");
-			targetSvgElem.setAttribute("fill","yellow");
+			if ( uiMapping.editingMode == "POLYGON" ){
+				targetSvgElem.setAttribute("fill","yellow");
+			} else {
+				targetSvgElem.setAttribute("fill","none");
+			}
 			targetSvgElem.setAttribute("stroke","red");
 			targetSvgElem.setAttribute("stroke-width","3");
 			poiDoc.documentElement.appendChild(targetSvgElem);
@@ -874,7 +877,7 @@ var polyCanvas = (function(){
 	}
 	
 	function updateCanvas(){
-		console.log("updateCanvas: insP:", uiMapping.insertPointsIndex , "  selP:" , uiMapping.selectedPointsIndex);
+		console.log("updateCanvas: insP:", uiMapping.insertPointsIndex , "  selP:" , uiMapping.selectedPointsIndex, "   isPolygon:",isPolygon);
 		initCanvas();
 		cc.clearRect(0, 0, cs.width, cs.height);
 		cc.beginPath();
@@ -967,6 +970,10 @@ var polyCanvas = (function(){
 		}
 	}
 	
+	function setPolygonMode( polygonMode ){
+		isPolygon = polygonMode;
+	}
+	
 	return{
 //		initCanvas: initCanvas,
 		clearPoints: clearPoints,
@@ -975,6 +982,7 @@ var polyCanvas = (function(){
 		getPoints: getPoints,
 		removeCanvas: removeCanvas,
 		updateCanvas: updateCanvas,
+		setPolygonMode : setPolygonMode,
 //		hilightLine: hilightLine,
 //		hilightPoint: hilightPoint
 	}
@@ -988,6 +996,7 @@ var poiCursor = (function (){
 	var cursorGeoPoint;
 	
 	function setCursorGeo(geoPoint){
+		console.log("setCursorGeo :", cursorGeoPoint,geoPoint);
 		cursorGeoPoint = geoPoint;
 		enabled = true;
 		updateCursorGeo();
@@ -995,8 +1004,8 @@ var poiCursor = (function (){
 		document.addEventListener("zoomPanMap",updateCursorGeo);
 	}
 	
-	function updateCursorGeo(){
-		console.log("updateCursor:",cursorGeoPoint);
+	function updateCursorGeo(event){
+		console.log("updateCursor:",cursorGeoPoint, "  ev:",event, " caller",updateCursorGeo.caller);
 		if ( document.getElementById("centerSight") ){
 			var screenPoint = svgMap.geo2Screen( cursorGeoPoint.lat , cursorGeoPoint.lng );
 			if ( ! document.getElementById("POIeditCursor") ){
@@ -1014,6 +1023,7 @@ var poiCursor = (function (){
 			} else {
 				cursor = document.getElementById("POIeditCursor");
 			}
+			cursor.style.zIndex="100"; // rev15では、checkLoadCompletedがpathHitTest時には走らず、toBeDel部にcenterSightが入るため、zIndexを上げてパッチすることにする。rev14でも影響はない。
 			cursor.style.left = (screenPoint.x - 6) + "px";
 			cursor.style.top = (screenPoint.y - 6)+ "px";
 		}
@@ -1249,7 +1259,7 @@ function setTargetObject(svgTarget){
 		if ( svgNode.nodeName =="use" && uiMapping.editingMode=="POI"){
 			hilightPOI(svgNode.getAttribute("iid"));
 			displayPOIprops(svgTarget);
-		} else if (( svgNode.nodeName =="path" || svgNode.nodeName =="polygon" || svgNode.nodeName =="polyline" )&& uiMapping.editingMode=="POLYGON"){
+		} else if (( svgNode.nodeName =="path" || svgNode.nodeName =="polygon" || svgNode.nodeName =="polyline" )&& (uiMapping.editingMode=="POLYGON" || uiMapping.editingMode=="POLYLINE")){
 			displayPolyProps(svgTarget);
 		}
 	}
@@ -1313,7 +1323,7 @@ function displayPolyProps(svgTarget){
 	
 	var me = uiDoc.getElementById("metaEditor");
 	var pep = uiDoc.getElementById("polyEditorPosition");
-	console.log(props.position);
+	console.log(props.position, "  props:",props , "   svgTarget:", svgTarget);
 	if ( props.position.type &&  props.position.type==="POLYGON"){
 		// geojsonとちがい最終点は閉じないことにする
 		uiMapping.editingMode ="POLYGON";
@@ -1330,14 +1340,14 @@ function displayPolyProps(svgTarget){
 	
 	updatePointListForm(pep, points);
 	
-	console.log("points:",points);
+	console.log("points:",points, "  docId:",svgTarget.docId,"  metaSchema:",getMetaSchema(svgTarget.docId));
 	polyCanvas.setPoints(points);
 	
 	
 	
 //	uiMapping.insertPointsIndex = points.length;
 	polyCanvas.updateCanvas();
-	if ( props.metaData && props.metaData.length){
+	if ( props.metaData && props.metaData.length && getMetaSchema(svgTarget.docId)){ // メタデータがあってもスキーマがない場合は表示できないのでパスさせる 2018.2.1
 		for ( var i = 0 ; i < props.metaData.length ; i++ ){
 	//		console.log(props.metaData[i],me.rows[i].cells[1]);
 			uiDoc.getElementById("meta"+i).value = props.metaData[i];
@@ -1359,7 +1369,7 @@ function updatePointListForm(pep, points){
 // POLYGONオブジェクトの"編集"ツール 新規追加、削除、変更などが可能　ただし一個しか設置できない
 var toolsCbFunc;
 var toolsCbFuncParam
-function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
+function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 	if ( cbFunc ){
 		toolsCbFunc = cbFunc;
 		toolsCbFuncParam = cbFuncParam;
@@ -1368,7 +1378,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 		toolsCbFuncParam = null;
 	}
 	
-//	console.log("initPolygonTools");
+//	console.log("initPolygonTools : isPolylineMode:",isPolylineMode);
 	
 	removeChildren( targetDiv );
 	
@@ -1389,10 +1399,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	svgImages = svgMap.getSvgImages();
 	svgImagesProps = svgMap.getSvgImagesProps();
 	var symbols = svgMap.getSymbols(svgImages[poiDocId]);
-	var metaSchema = null;
-	if ( svgImages[poiDocId].documentElement.getAttribute("property") && svgImages[poiDocId].documentElement.getAttribute("property").length>0 ){
-		metaSchema = svgImages[poiDocId].documentElement.getAttribute("property").split(",");
-	}
+	var metaSchema = getMetaSchema(poiDocId);
 	var ihtml = '<div id="polyEditor" style="width:300px;height:100px;overflow:auto"><table id="polyEditorPosition"><tr><td><input type="button" id="pointAdd" value="ADD"/></td></tr></table></div>';
 	
 	
@@ -1421,11 +1428,19 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam){
 	ihtml+='</table><div id="editConf"><input type="button" id="pepok" value="決定"/><input type="button" id="pepng" value="キャンセル"/><input type="button" id="pepdel" disabled value="削除"/><span id="editMode">newObject</span></div>';
 	targetDiv.innerHTML = ihtml;
 	
+	var polyMode = "POLYGON";
+	if ( isPolylineMode ){
+		polyMode = "POLYLINE"; // TBD...
+		polyCanvas.setPolygonMode(false);
+		console.log("polyMode:",polyMode);
+	} else {
+		polyCanvas.setPolygonMode(true);
+	}
+	
 	uiMapping = {
 		uiPanel : targetDiv,
 		editingDocId : poiDocId,
-//		editingMode : "POLYLINE",
-		editingMode : "POLYGON",
+		editingMode : polyMode,
 		uiDoc: uiDoc,
 		editingGraphicsElement: false,
 		modifyTargetElement: null,
@@ -1636,6 +1651,14 @@ function isEditingGraphicsElement(){
 	} else {
 		return ( false );
 	}
+}
+
+function getMetaSchema(docId){ // 同じ文が大量にあるので関数化 2018.2.1
+	var metaSchema = null;
+	if ( svgImages[docId].documentElement.getAttribute("property") && svgImages[docId].documentElement.getAttribute("property").length>0 ){
+		metaSchema = svgImages[docId].documentElement.getAttribute("property").split(",");
+	}
+	return ( metaSchema)
 }
 	
 return { // svgMapGIStool. で公開する関数のリスト

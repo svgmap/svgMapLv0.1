@@ -26,6 +26,8 @@
 // 2016.12.16 Totally Asynchronus Proecssing　ほぼ満足する機能が入ったと思われる。＞初期リリースとする
 // 2017.06.12 Geojsonの並びが逆(基本フレームワークも)だったのを修正のうえ、こちらも修正(getSVGcoord)、drawGeoJson(geoJson->SVG変換の上描画)の完成度を高め公開関数へ
 // 2018.01.04 Geojsonファイル内にプロパティが含まれている場合、埋め込むよう実装
+// 2018/06/21 Rev2 : ラスターGIS＝ビットイメージのimageをcanvasに読み込み、bitImage(画像処理)を用いたGIS機能～～　Web上で公開されている主題情報の多くがラスターなので・・
+// 2018/08/01 Add pointOnly option / get(Included/Excluded)Points
 //
 // 
 // ACTIONS:
@@ -33,6 +35,7 @@
 // ・ポイント（マウスポインタ―）と、ポイント、ポリライン、ポリゴンヒットテスト（既存のクリッカブルオブジェクト同等動作）：　ただし、ポイント、ポリラインはバッファが必要なので後回しか？
 // ・ラインと、ライン、ポリゴンのヒットテスト
 // ・ポリゴンと、ポイント、ライン、ポリゴンのヒットテスト
+// ・カラーピッカーになりえるもの
 //
 // ・入力：
 // 　・マウスポインタ―ベースの対話的に生成されたオブジェクトと指定したレイヤー
@@ -147,14 +150,15 @@ var svgMapGIStool = ( function(){
 	
 	
 	// poiID（およびその子供の文書）が、
-	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse ){
+	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse , pointOnly ){
 		var superParam = {
 			pointsDocTreeID: poiID,
 			polygonsDocTreeID: polyID,
 			cbFunc: cbFunc,
 			param: param,
 			progrssCallback: progrssCallback,
-			inverse: inverse
+			inverse: inverse,
+			pointOnly : pointOnly
 		}
 		var pointsDocTreeID = poiID;
 		var polygonsDocTreeID = polyID;
@@ -163,8 +167,8 @@ var svgMapGIStool = ( function(){
 		svgMap.captureGISgeometries(getIncludedPointsS2a , superParam );
 	}
 	
-	function getExcludedPoints(poiID, polyID, cbFunc, param , progrssCallback ){
-		getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , true);
+	function getExcludedPoints(poiID, polyID, cbFunc, param , progrssCallback , pointOnly ){
+		getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , true , pointOnly );
 	}
 	
 	
@@ -328,7 +332,7 @@ var svgMapGIStool = ( function(){
 			var point;
 			if ( poiDoc[pic].type === "Point" ){
 				point = poiDoc[pic].coordinates;
-			} else if (poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString"){
+			} else if (!superParam.pointOnly && ( poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString" ) ){
 //				console.log(poiDoc[pic]);
 				point = getCenterPoint(poiDoc[pic].coordinates);
 			} else {
@@ -660,8 +664,413 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
+	// imageタグのビットイメージ(coverage)によるGIS
+	// 2018/6/8 S.Takagi
+	// range: [hueRangemin,hueRangemax] or [[hueRange1min,hueRange1max],[...]] or {hue:[[range1min,range1max],[...]],satulation:[[range1min,range1max],[...]],value:[[range1min,range1max],[...]],alpha:[[range1min,range1max],[...]]}
+	// poiID_or_pointsには、POINTジオメトリが入ってるレイヤIDもしくは、直接POINTジオメトリの配列を入れる
+	function getInRangePoints(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback ){
+		halt = false;
+		var superParam = {
+			coverageDocTreeID: coverID,
+			cbFunc: cbFunc,
+			param: param,
+			progrssCallback: progrssCallback,
+			range: getRangeParam(rangeData)
+		}
+		if ( Array.isArray(poiID_or_points)){
+			superParam.points= poiID_or_points;
+		} else {
+			superParam.pointsDocTreeID= poiID_or_points;
+		}
+		console.log( "called getInRangePoints: poi,cover:", poiID_or_points, coverID,"  range:", superParam.range);
+		svgMap.captureGISgeometriesOption(true); // カバレッジが必要
+		// captureGISgeometriesはviewportにあるオブジェクトのみ取ってくる仕様
+		svgMap.captureGISgeometries(getInRangePointsS2 , superParam );
+	}
 	
-	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata){
+	function getRangeParam(rangeData){
+		console.log("getRangeParam:",rangeData);
+		var nRange = {};
+		// デフォルトは透明でないもの
+		var nRange={
+			hue:        [[0,360]],
+			satulation: [[10,100]],
+			value:      [[10,100]],
+			alpha:      [[10,100]]
+		}
+		
+		if ( rangeData){
+			if ( rangeData.hue ){
+				nRange.hue = getRangeVal(rangeData.hue );
+				if ( rangeData.satulation ){
+					nRange.satulation = getRangeVal(rangeData.satulation );
+				}
+				if ( rangeData.value ){
+					nRange.value = getRangeVal(rangeData.value );
+				}
+				if ( rangeData.alpha ){
+					nRange.alpha = getRangeVal(rangeData.alpha );
+				}
+			} else if ( rangeData.length && rangeData.length > 0){
+				nRange.hue =  getRangeVal(rangeData);
+			}
+		}
+		return ( nRange);
+	}
+	
+	function getRangeVal( rangeVal ){
+		var nRangeVal=[];
+		if ( rangeVal[0][0]){
+			nRangeVal = rangeVal;
+		} else {
+			nRangeVal[0] = rangeVal;
+		}
+		return (nRangeVal);
+	}
+	
+	function getTargetPoisBbox( poiGeoms ){
+		var xmin=1e30;
+		var xmax=-1e30;
+		var ymin=1e30;
+		var ymax=-1e30;
+		
+		for ( var i = 0 ; i < poiGeoms.length ; i++ ){
+			if ( poiGeoms[i].coordinates[0] > xmax ){
+				xmax = poiGeoms[i].coordinates[0];
+			}
+			if ( poiGeoms[i].coordinates[0] < xmin ){
+				xmin = poiGeoms[i].coordinates[0];
+			}
+			
+			if ( poiGeoms[i].coordinates[1] > ymax ){
+				ymax = poiGeoms[i].coordinates[1];
+			}
+			if ( poiGeoms[i].coordinates[1] < ymin ){
+				ymin = poiGeoms[i].coordinates[1];
+			}
+		}
+		
+		return {
+			xmin:xmin,
+			ymin:ymin,
+			xmax:xmax,
+			ymax:ymax
+		}
+	}
+	
+	function getInRangePointsS2( geom , superParam ){
+//		var geoViewBox = svgMap.getGeoViewBox();
+		var targetPois = [];
+		var targetCoverages = [];
+		// ここでcanvasに入れたimageとpoisで、いろいろやる感じ
+		console.log("getInRangePointsS2  geom:",geom);
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		if ( superParam.points ){
+			targetPois = superParam.points;
+		}
+		for ( var layerId in geom ){
+			if ( superParam.pointsDocTreeID && svgImagesProps[layerId].rootLayer == superParam.pointsDocTreeID ){
+				for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+					if ( geom[layerId][i].type =="Point" ){
+						targetPois.push( geom[layerId][i] );
+					}
+				}
+			} else if ( svgImagesProps[layerId].rootLayer == superParam.coverageDocTreeID ){
+				for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+					if ( geom[layerId][i].type =="Coverage" ){
+						targetCoverages.push( geom[layerId][i] );
+					}
+				}
+			}
+		}
+		
+		// viewportにある対象オブジェクトが取れているはず
+		console.log("targetCoverages:",targetCoverages,"  targetPois:",targetPois);
+		superParam.targetPoisBbox = getTargetPoisBbox(targetPois);
+//		console.log("targetPoisBbox:",superParam.targetPoisBbox);
+		superParam.targetPois = targetPois;
+		superParam.targetCoverages = targetCoverages;
+		superParam.coverageIndex = getNextIntersectedCoverage(superParam.targetCoverages, superParam.targetPoisBbox, -1);
+		superParam.ans = [];
+		
+		if ( superParam.progrssCallback ){
+			superParam.progrssCallback(0);
+		}
+		
+		// computeInRangePoints経由で再帰実行されるgetImagePixDataを呼び出し処理を進める
+		var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+		if ( targetCoverage && targetCoverage.href ){
+			var targetCoverageURL = targetCoverage.href;
+			getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
+		} else {
+			halt = false;
+			superParam.cbFunc(superParam.ans, superParam.param);
+		}
+	}
+	
+	function getNextIntersectedCoverage(targetCov, targetPoisBbox, currentIndex){
+		var cindex = currentIndex+1;
+		var intersects = false;
+		while ( intersects == false ){
+			if ( cindex == targetCov.length ){
+				return ( cindex);
+			} else {
+				// lng:x lat:y
+				var cLatMin = Math.min( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
+				var cLatMax = Math.max( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
+				var cLngMin = Math.min( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
+				var cLngMax = Math.max( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
+				if ( cLatMin <= targetPoisBbox.ymax && 
+					targetPoisBbox.ymin <= cLatMax && 
+					cLngMin <= targetPoisBbox.xmax && 
+					targetPoisBbox.xmin <= cLngMax ){
+					intersects = true;
+				} else {
+					intersects = false;
+					++ cindex;
+				}
+			}
+		}
+		return ( cindex );
+	}
+	
+	
+	function computeInRangePoints( pixData , pixWidth , pixHeight , superParam ){
+		console.log("computeInRangePoints: coverageData:",pixData.length , pixWidth, pixHeight,"  targetPois.length:",superParam.targetPois.length);
+		var extent = superParam.targetCoverages[superParam.coverageIndex].coordinates;
+		
+		for ( var i = 0 ; i < superParam.targetPois.length ; i++ ){
+			var pointCrd = superParam.targetPois[i].coordinates;
+			var latMin = Math.min(extent[0].lat, extent[1].lat);
+			var latMax = Math.max(extent[0].lat, extent[1].lat);
+			var lngMin = Math.min(extent[0].lng, extent[1].lng);
+			var lngMax = Math.max(extent[0].lng, extent[1].lng);
+//			console.log("cover:",latMin,latMax,lngMin,lngMax,"  poi:",pointCrd[1],pointCrd[0]);
+			if ( lngMin <= pointCrd[0] && lngMax > pointCrd[0] && latMin <= pointCrd[1] && latMax > pointCrd[1] ){
+				var px = Math.floor(pixWidth  * (pointCrd[0] - lngMin)/(lngMax - lngMin));
+				var py = pixHeight - Math.floor(pixHeight * (pointCrd[1] - latMin)/(latMax - latMin)) - 1;
+				
+				var addr = ( px + py * pixWidth ) * 4;
+				var R = pixData[ addr ];
+				var G = pixData[ addr + 1 ];
+				var B = pixData[ addr + 2 ];
+				var A = pixData[ addr + 3 ];
+				if ( judgeVal(100*A/255,superParam.range.alpha)){
+					var hsv = rgb2hsv( R , G , B );
+//					console.log(px,py,hsv,A);
+//					console.log("Judge:",superParam.range.hue);
+					if ( judgeVal(hsv.h,superParam.range.hue,true) && judgeVal(hsv.s,superParam.range.satulation) && judgeVal(hsv.v,superParam.range.value)){
+						hsv.a = A;
+						hsv.r = R;
+						hsv.g = G;
+						hsv.b = B;
+						superParam.targetPois[i].hsv = hsv;
+						superParam.ans.push(superParam.targetPois[i]);
+					}
+				}
+			}
+		}
+		
+		
+		// for next coverage computation
+		
+//		superParam.coverageIndex = superParam.coverageIndex + 1;
+		superParam.coverageIndex = getNextIntersectedCoverage(superParam.targetCoverages, superParam.targetPoisBbox, superParam.coverageIndex);
+
+		if ( superParam.progrssCallback ){
+			superParam.progrssCallback( Math.ceil(100 * (superParam.coverageIndex/superParam.targetCoverages.length)) );
+		}
+		
+		if ( halt == true || superParam.coverageIndex == superParam.targetCoverages.length ){
+			// complete computation
+			halt = false;
+			superParam.cbFunc(superParam.ans, superParam.param);
+		} else {
+			// compute next coverage
+			var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+			if ( targetCoverage && targetCoverage.href ){
+				var targetCoverageURL = targetCoverage.href;
+				getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
+			} else {
+				halt = false;
+				superParam.cbFunc(superParam.ans, superParam.param);
+			}
+		}
+	}
+	
+	function normalizeHue( hue ){
+		var ans = hue % 360;
+		if ( ans < 0 ){
+			ans += 360;
+		}
+		return ( ans );
+	}
+	
+	function judgeVal( val, rangeVal , isHue ){
+//		console.log("judgeVal:",val,rangeVal);
+		if ( !rangeVal ){
+			return ( true );
+		}
+		
+		for ( var i = 0 ; i < rangeVal.length ; i++ ){
+			
+			if ( isHue ){
+				if(rangeVal[i][0] <=0 && rangeVal[i][1]>=360){ // hue全域指定の場合はtrue
+					return ( true );
+				}
+				var hmin = normalizeHue(rangeVal[i][0]);
+				var hmax = normalizeHue(rangeVal[i][1]);
+				
+//				console.log( "hueRange:min:",hmin," max:",hmax,"  val:",val);
+				if( hmin > hmax ){ // 360を跨いでる場合
+					if (( hmin <= val && val <= 360 )||( 0 <= val && val <= hmax )){
+						return( true );
+					}
+				} else if( hmin <= val && val <= hmax) {
+					return ( true );
+				}
+			} else {
+				if ( rangeVal[i][0] <= val && val <= rangeVal[i][1] ){
+					return ( true );
+				}
+			}
+		}
+		return ( false );
+	}
+	
+	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams){
+		var img = new Image();
+		if ( anonProxy ){
+			img.crossOrigin = "anonymous";
+		}
+		img.src =getImageURL(imageUrl);
+		img.onload = function() {
+			var canvas = document.createElement("canvas");
+			canvas.width  = img.width;
+			canvas.height = img.height;
+			var cContext = canvas.getContext('2d');
+			cContext.mozImageSmoothingEnabled = false;
+			cContext.webkitImageSmoothingEnabled = false;
+			cContext.msImageSmoothingEnabled = false;
+			cContext.imageSmoothingEnabled = false;
+			cContext.drawImage(img, 0, 0);
+			var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
+			callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
+		}
+	}
+	
+	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
+	var proxyUrl;
+	var anonProxy = false;
+	var directURLlist = [];
+	function setImageProxy( url , directURLls , useAnonProxy){
+		proxyUrl = url;
+		if ( directURLls ){
+			directURLlist = directURLls;
+		} else {
+			directURLlist = [];
+		}
+		if ( useAnonProxy ){
+			anonProxy = true;
+		} else {
+			anonProxy = false;
+		}
+	}
+	
+	
+	function getImageURL(imageUrl){
+		if ( proxyUrl && imageUrl.indexOf("http") == 0){
+			if (isDirefcURL(imageUrl)){
+				// Do nothing (Direct Connection)
+			} else {
+				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
+				console.log("via proxy url:",imageUrl);
+			}
+		} else {
+			// Do nothing..
+		}
+		return (imageUrl);
+	}
+	
+	function isDirefcURL(url){
+		// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
+		var ans = false;
+		for ( var i = 0 ; i < directURLlist.length ; i++ ){
+			if ( url.indexOf(directURLlist[i])>=0){
+				ans = true;
+				break;
+			}
+		}
+		return ( ans );
+	}
+	
+	// rgb2hsv and hsv2rgb : from https://www.petitmonte.com/javascript/rgb_hsv_convert.html
+	// RGB色空間からHSV色空間へ変換する 
+	//  r(red)  : 赤色 0-255の値
+	//  g(green): 緑色 0-255の値
+	//  b(blue) : 青色 0-255の値 
+	function rgb2hsv(r, g, b){   
+		var max = Math.max(r, g, b);
+		var min = Math.min(r, g, b);   
+		var hsv = {'h':0,
+		's':0,
+		'v':max}; // V(明度)   
+		if (max != min) {
+			// H(色相)  
+			if (max == r) hsv.h = 60 * (g - b) / (max-min);
+			if (max == g) hsv.h = 60 * (b - r) / (max-min) + 120;
+			if (max == b) hsv.h = 60 * (r - g) / (max-min) + 240;
+			// S(彩度)
+			hsv.s = (max - min) / max;
+		}   
+		if (hsv.h < 0){
+			hsv.h = hsv.h + 360;
+		}
+		hsv.h =  Math.round(hsv.h);
+		hsv.s =  Math.round(hsv.s * 100);
+		hsv.v =  Math.round((hsv.v / 255) * 100);     
+		return hsv;   
+	}
+	// HSV(HSB)色空間からRGB色空間へ変換する 
+	//  h(hue)       : 色相/色合い   0-360度の値
+	//  s(saturation): 彩度/鮮やかさ 0-100%の値
+	//  v(Value)     : 明度/明るさ   0-100%の値 
+	//  ※v は b(Brightness)と同様 
+	function hsv2rgb(h, s, v){
+		var max = v;
+		var min = max - ((s / 255) * max);
+		var rgb = {'r':0,'g':0,'b':0};  
+		if (h == 360){
+			h = 0;
+		}
+		s = s / 100;   
+		v = v / 100;   
+		if (s == 0){
+			rgb.r = v * 255;
+			rgb.g = v * 255;
+			rgb.b = v * 255;
+			return rgb;
+		}
+		var dh = Math.floor(h / 60);
+		var p = v * (1 - s);
+		var q = v * (1 - s * (h / 60 - dh));
+		var t = v * (1 - s * (1 - (h / 60 - dh)));
+		switch (dh){
+			case 0 : rgb.r = v; rgb.g = t; rgb.b = p;  break;
+			case 1 : rgb.r = q; rgb.g = v; rgb.b = p;  break;
+			case 2 : rgb.r = p; rgb.g = v; rgb.b = t;  break;
+			case 3 : rgb.r = p; rgb.g = q; rgb.b = v;  break;
+			case 4 : rgb.r = t; rgb.g = p; rgb.b = v;  break;
+			case 5 : rgb.r = v; rgb.g = p; rgb.b = q;  break
+		}   
+		rgb.r =  Math.round(rgb.r * 255);
+		rgb.g =  Math.round(rgb.g * 255);
+		rgb.b =  Math.round(rgb.b * 255);
+		return rgb; 
+	} 	
+	
+	// geoJsonレンダラ系
+	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm){
 		console.log("called svgMapGisTool drawGeoJson");
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
@@ -671,12 +1080,12 @@ var svgMapGIStool = ( function(){
 		
 		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
 			for ( var i = 0 ; i < geojson.length ; i++ ){
-				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
 			}
 		} else if ( geojson.type == "FeatureCollection" ){
 			var features = geojson.features;
 			for ( var i = 0 ; i < features.length ; i++ ){
-				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
 			}
 		} else if ( geojson.type == "Feature" ){
 			var geom = geojson.geometry;
@@ -690,34 +1099,34 @@ var svgMapGIStool = ( function(){
 					}
 				}
 			}
-			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
 		} else if ( geojson.type == "GeometryCollection" ){
 			var geoms = geojson.geometries;
 			for ( var i = 0 ; i < geoms.length ; i++ ){
-				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata);
+				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
 			}
 		} else if ( geojson.type == "MultiPolygon" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
 			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata)
+				putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
 			}
 		} else if ( geojson.type == "Polygon" ){
-			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata)
+			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
 		} else if ( geojson.type == "MultiLineString" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
 			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata);
+				putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
 			}
 		} else if ( geojson.type == "LineString" ){
-			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata);
+			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
 			
 		} else if ( geojson.type == "MultiPoint" ){
 			// グループで囲んで一括でmetadataつけたほうが良いと思うが・・
 			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata);
+				putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
 			}
 		} else if ( geojson.type == "Point" ){
-			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata);
+			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
 		}
 		
 		/**
@@ -743,7 +1152,7 @@ var svgMapGIStool = ( function(){
 //		console.log(svgImage);
 	}
 	
-	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata){
+	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm){
 		var poie = svgImage.createElement("use");
 		var svgc = getSVGcoord(coordinates,crs);
 		poie.setAttribute( "x" , "0" );
@@ -756,10 +1165,15 @@ var svgMapGIStool = ( function(){
 		if ( metadata ){
 			poie.setAttribute( "content", metadata);
 		}
-		svgImage.documentElement.appendChild( poie );
+		if ( parentElm ){
+			parentElm.appendChild( poie );
+		} else {
+			svgImage.documentElement.appendChild( poie );
+		}
+		return ( poie );
 	}
 	
-	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata){
+	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm){
 		if ( !strokeColor ){
 			strokeColor = "blue";
 		}
@@ -776,10 +1190,15 @@ var svgMapGIStool = ( function(){
 		if ( metadata ){
 			pe.setAttribute( "content", metadata);
 		}
-		svgImage.documentElement.appendChild( pe );
+		if ( parentElm ){
+			parentElm.appendChild( pe );
+		} else {
+			svgImage.documentElement.appendChild( pe );
+		}
+		return (pe);
 	}
 	
-	function putPolygon(coordinates, svgImage, crs, fillColor, metadata){
+	function putPolygon(coordinates, svgImage, crs, fillColor, metadata, parentElm){
 		if ( !fillColor ){
 			strokeColor = "orange";
 		}
@@ -798,7 +1217,12 @@ var svgMapGIStool = ( function(){
 		if ( metadata ){
 			pe.setAttribute( "content", metadata);
 		}
-		svgImage.documentElement.appendChild( pe );
+		if ( parentElm ){
+			parentElm.appendChild( pe );
+		} else {
+			svgImage.documentElement.appendChild( pe );
+		}
+		return ( pe);
 	}
 	
 	function getPathD( geoCoords , crs ){
@@ -834,6 +1258,13 @@ var svgMapGIStool = ( function(){
 		svgMap.captureGISgeometries( cbFunc , opt );
 	}
 	
+	function latLng2GeoJsonPoint(lat , lng ){
+		return {
+			type:"Point",
+			coordinates:[ lng , lat]
+		}
+	}
+	
 return { // svgMapGIStool. で公開する関数のリスト
 	testCapGISgeom : testCapGISgeom,
 	captureGeometries : captureGeometries,
@@ -841,7 +1272,10 @@ return { // svgMapGIStool. で公開する関数のリスト
 	getExcludedPoints : getExcludedPoints,
 	buildIntersection : buildIntersection,
 	haltComputing : haltComputing,
-	drawGeoJson : drawGeoJson
+	drawGeoJson : drawGeoJson,
+	getInRangePoints : getInRangePoints,
+	setImageProxy: setImageProxy,
+	latLng2GeoJsonPoint
 }
 
 })();

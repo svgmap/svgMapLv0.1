@@ -7,6 +7,9 @@
 //  
 //  Copyright (C) 2012-2016 by Satoru Takagi @ KDDI CORPORATION
 //  
+// Contributors:
+//  jakkyfc
+//
 // License: (GPL v3)
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License version 3 as
@@ -124,6 +127,7 @@
 // 2017/08/25 : updateCenterPosをユーザが書き換えることができるよう変更
 // 2017/08/29 : smoothZoomInterval,smoothZoomTransitionTimeを設定できるよう変更,getVerticalScreenScaleを外部よりcallできるよう公開
 // 2018/01/16 : レイヤーのパスを指定する際ドメインなしのフルパスで指定できるよう変更
+// 2018/01/23 : data-controllerをルートコンテナのレイヤー要素から指定できるよう機能追加
 //
 // Issues:
 // (probably FIXED) 2016/06 Firefoxでヒープが爆発する？(最新48.0ではそんなことはないかも？　たぶんfixed？)
@@ -134,6 +138,7 @@
 // 2017/01 Authoring Tools Ext.で編集中にResumeが動かない
 // 2017/01 レイヤーがOffになっているときに、レイヤ特化UIが出たまま(これは本体の問題ではないかも)
 // 2017/02 getElementByIdNoNSの問題が再び。　plane XMLとなっている文書では、IEもgetElementById使えない。.querySelector('[id="hoge"]'));は使えるので・・・対策したが、そもそもXML:IDの機能(重複しないID)を満たした機能を提供していない
+// 2018/01 ERR404のレイヤーがあると、レイヤ追加変更に対して再描画のイベントが出なくなる。
 //
 // ToDo:
 // 各要素のdisplay,visibilityがcss style属性で指定しても効かない
@@ -871,7 +876,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 		svgImagesProps[docId].Path = docPath;
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] );
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
-		setController( svgImages[docId] , docPath , svgImagesProps[docId] ); // 2016.10.14
+
 //		if ( !svgImagesProps[docId].CRS  ){
 //			// 文書は地図として成り立っていないので消去し、終了する
 //			delete (svgImagesProps[docId]);
@@ -890,6 +895,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].isClickable = true;
 		}
 		
+		setController( svgImages[docId] , docPath , svgImagesProps[docId] ); // 2016.10.14
 		// ルートコンテナSVGのロード時専用の処理です・・・ 以下は基本的に起動直後一回しか通らないでしょう
 		if ( docId =="root"){
 			rootCrs = svgImagesProps[docId].CRS;
@@ -1670,7 +1676,8 @@ function getImageURL(href , docDir ){
 //	if ( href.indexOf("http://") == 0  ){}
 		imageURL = href;
 	}else if (href.indexOf("/") === 0) {	//2018.01.16 root path 
-		imageURL = location.protocol + "//" + document.domain + href;
+		imageURL = href;
+//		imageURL = location.protocol + "//" + document.domain + href; // doain書いてあるとCORS規制掛けるブラウザあった気もするので、それを確認してからですかね・・・
 	} else {
 		imageURL = docDir + href;
 	}
@@ -2276,6 +2283,14 @@ function setController( svgDoc , docPath , svgImageProps){
 		if ( cntPath ){
 			svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
 		} else {
+			//ルートコンテナの該当レイヤ要素にdata-controllerが指定されていた場合、該当のレイヤーにコントローラを設定する
+			//コントローラの強さは右記の通り：レイヤーの最上位コンテナ > ルートコンテナ
+			if(svgImageProps['parentDocId'] == 'root'){
+				cntPath = getLayer(svgImageProps['rootLayer']).getAttribute('data-controller');
+				if(!(cntPath === null || cntPath === undefined || cntPath === "")) {
+					svgImageProps.controller =  getImageURL(cntPath , getDocDir(docPath));
+				}
+			}
 		}
 	}
 }
