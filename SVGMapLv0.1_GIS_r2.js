@@ -28,6 +28,7 @@
 // 2018.01.04 Geojsonファイル内にプロパティが含まれている場合、埋め込むよう実装
 // 2018/06/21 Rev2 : ラスターGIS＝ビットイメージのimageをcanvasに読み込み、bitImage(画像処理)を用いたGIS機能～～　Web上で公開されている主題情報の多くがラスターなので・・
 // 2018/08/01 Add pointOnly option / get(Included/Excluded)Points
+// 2018.12.26 KMLを直接レンダリングする機能を実装
 //
 // 
 // ACTIONS:
@@ -52,7 +53,7 @@ var location = window.location;
 
 var svgMapGIStool = ( function(){ 
 
-//	console.log("Hello this is svgMapGIStool");
+	//console.log("Hello this is svgMapGIStool");
 	
 	if ( jsts ){ // using jsts (JTS javascript edition)
 //		console.log("This apps has jsts (JavaScript Topology Suites)");
@@ -1151,6 +1152,113 @@ var svgMapGIStool = ( function(){
 		**/
 //		console.log(svgImage);
 	}
+
+
+	/*
+		Styleは未実装
+		Point     : title = name, metadata = descrptionとして格納
+		LineString: metadata = name, descriptionとして格納
+	*/
+
+	function drawKml( kml , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,styleData){
+		console.log("kml draw method.");
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var svgImage = svgImages[targetSvgDocId];
+		var svgImagesProp = svgImagesProps[targetSvgDocId];
+		var crs = svgImagesProp.CRS;
+		//フォルダについて文法解釈
+		var folders = kml.querySelectorAll('Folder');
+		console.log(folders);
+		if(folders.length > 0){
+			var fld = Array.prototype.slice.call(folders,0); 
+			//NodeListのループ
+			//Firefox/Chrome 
+			//folders.forEach(folder => {
+			//case IE Edge
+			//Array.prototype.forEach.call(folders, (folder) => {
+			//case IE11
+			//fld.forEach(function(folder,index){
+			fld.forEach(function(folder,index){
+				var kmlName = getNameFromKML(folder);
+				var kmlDescription = getDescriptionFromKML(folder);
+				//console.log('FOLDER',folder);
+				drawKml( folder, targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, kmlName, kmlDescription, parentElm,styleData);
+			});
+		}else{
+			//Placemarkについて文法解釈
+			var placemarkAll = kml.querySelectorAll('Placemark');
+			//console.log(placemarkAll);
+			var plm = Array.prototype.slice.call(placemarkAll,0);
+			plm.forEach(function(placemark,index){
+				var kmlName = getNameFromKML(placemark);
+				var kmlDescription = getDescriptionFromKML(placemark);
+				if(kmlName === null && kmlDescription === null){
+					kmlName = poiTitle;
+					kmlDescription = metadata;
+				}
+				var kmlGeometory  = getGeometryFromKML(placemark);
+				var kmlCoordinate = getCordinamteFromKML(placemark);
+
+				if( kmlGeometory == "point" ){
+					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, kmlDescription, parentElm);
+				}else if(kmlGeometory == "linestring"){
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+				}else if( kmlGeometory == "linearring"){
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+				}else if( kmlGeometory == "polygon"){
+				}else if( kmlGeometory == "multigeometry"){
+				
+				}
+			});
+		}
+	}
+
+	function getNameFromKML(item){
+		var nameTag = item.querySelector('name');
+		if(nameTag){
+			return nameTag.textContent.trim();
+		}else{
+			return null;
+		}
+	}
+
+	function getDescriptionFromKML(item){
+		var nameTag = item.querySelector('description');
+		if(nameTag){
+			return nameTag.textContent.trim();
+		}else{
+			return null;
+		}
+	}
+
+
+	function getGeometryFromKML(item){
+		if(item.querySelector('Placemark')){
+			return 'placemark';
+		}else if(item.querySelector('Polygon')){
+			return "polygon";
+		}else if(item.querySelector('Point')){
+			return "point";
+		}else if(item.querySelector('LineString')){
+			return "linestring";
+		}else if(item.querySelector('LinearRing')){
+			return "linearring";
+		}else if(item.querySelector('MultiGeometry')){
+			return "multigeometry";
+		}
+	}
+
+
+	function getCordinamteFromKML(item){
+		var geoArray = []
+		var coordinates = item.querySelector('coordinates').textContent.trim().replace(/\n/g," ").replace(/\t/g," ").split(" ");
+		for (var i = 0; i < coordinates.length; i++){
+			coordinate = coordinates[i].trim().split(",");
+			geoArray.push([coordinate[0],coordinate[1]]);
+		}
+		return geoArray;
+	}
 	
 	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm){
 		var poie = svgImage.createElement("use");
@@ -1273,9 +1381,10 @@ return { // svgMapGIStool. で公開する関数のリスト
 	buildIntersection : buildIntersection,
 	haltComputing : haltComputing,
 	drawGeoJson : drawGeoJson,
+	drawKml : drawKml,
 	getInRangePoints : getInRangePoints,
 	setImageProxy: setImageProxy,
-	latLng2GeoJsonPoint
+	latLng2GeoJsonPoint : latLng2GeoJsonPoint
 }
 
 })();
