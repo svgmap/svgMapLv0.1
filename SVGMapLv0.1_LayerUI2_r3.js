@@ -831,7 +831,8 @@ function initIframe(lid,controllerURL,svgMap,reqSize){
 	iframe.style.display="block";
 	
 //	console.log("initIframe:  layerSpecificUIbody Style:",layerSpecificUIbody.style,"  iframe.style",iframe.style);
-	iframe.onload=function(){
+	iframe.addEventListener("load",function(){
+//	iframe.onload=function(){}
 		dispatchCutomIframeEvent(openFrame,iframeId);
 		if ( layerSpecificUiMaxHeight == 0 ){
 			layerSpecificUiMaxHeight = layerSpecificUI.offsetHeight
@@ -859,7 +860,12 @@ function initIframe(lid,controllerURL,svgMap,reqSize){
 		document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
 		document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
 		setTimeout( testIframeSize , 1000 , iframe ,reqSize);
-	}
+	}, { once: true });
+	if(iframe.srcdoc) { // Fix IE11 issue on srcdoc pattern 2019/2/19
+		var loadEvent = document.createEvent("HTMLEvents");
+		loadEvent.initEvent('load', false, true );
+		iframe.dispatchEvent(loadEvent);
+	};
 	
 	return (iframe);
 }
@@ -930,6 +936,12 @@ function testIframeSize( iframe ,reqSize){
 	} else { // 自動サイジング 最大値はcss設定値
 		if ( iframe.contentWindow.document.body.offsetHeight < layerSpecificUiMaxHeight ){
 			layerSpecificUI.style.height = (50 + iframe.contentWindow.document.body.offsetHeight) + "px";
+//		iframe.style.height = ""; //IE11対応
+//		if ( iframe.contentWindow.document.documentElement.offsetHeight < layerSpecificUiMaxHeight ){
+//			iframe.style.height = 0;
+//			iframe.style.height = iframe.contentWindow.document.documentElement.scrollHeight + "px"; //モダンブラウザ対応
+//			layerSpecificUI.style.height = iframe.contentWindow.document.documentElement.offsetHeight + "px";
+//			iframe.style.height = layerSpecificUI.style.height; //IE対応
 		} else {
 			layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
 		}
