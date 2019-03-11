@@ -2844,7 +2844,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		}
 		elemClass = imgE.getAttribute("class");
 		
-		if ( category == BITIMAGE  && ( (imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("imageRendering:pixelated")>=0) || (parentProps && parentProps.imageRendering  && parentProps.imageRendering == "pixelated") ) ){
+		if ( category == BITIMAGE  && ( (imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("image-rendering:pixelated")>=0) || (parentProps && parentProps["image-rendering"]  && parentProps["image-rendering"]  == "pixelated") ) ){
 //			console.log("pixelated");
 			pixelated = true;
 		}
@@ -5611,7 +5611,7 @@ function matMul( m1 , m2 ){
 	}
 }
 
-var styleCatalog = new Array("stroke" , "stroke-width" , "stroke-linejoin" , "stroke-linecap" , "fill" , "fill-rule" , "fill-opacity" , "opacity" , "vector-effect" , "display" , "font-size" , "stroke-dasharray" , "marker-end" , "visibility" ,"imageRendering"); 
+var styleCatalog = new Array("stroke" , "stroke-width" , "stroke-linejoin" , "stroke-linecap" , "fill" , "fill-rule" , "fill-opacity" , "opacity" , "vector-effect" , "display" , "font-size" , "stroke-dasharray" , "marker-end" , "visibility" ,"image-rendering"); 
 	
 function getStyle( svgNode , defaultStyle , hasHyperLink ){
 	// 親のスタイルを継承して該当要素のスタイルを生成する
@@ -5718,7 +5718,7 @@ function getStyleAttribute( svgElement ){
 
 function getStyleOf( styleName , svgElement , styleAtt ){
 	var style;
-	if (  svgElement.getAttribute(styleName) ){
+	if (  svgElement.getAttribute(styleName) ){ 
 		style = svgElement.getAttribute(styleName);
 	} else if ( styleAtt && styleAtt[styleName]){
 		style = styleAtt[styleName];

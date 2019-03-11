@@ -936,12 +936,6 @@ function testIframeSize( iframe ,reqSize){
 	} else { // 自動サイジング 最大値はcss設定値
 		if ( iframe.contentWindow.document.body.offsetHeight < layerSpecificUiMaxHeight ){
 			layerSpecificUI.style.height = (50 + iframe.contentWindow.document.body.offsetHeight) + "px";
-//		iframe.style.height = ""; //IE11対応
-//		if ( iframe.contentWindow.document.documentElement.offsetHeight < layerSpecificUiMaxHeight ){
-//			iframe.style.height = 0;
-//			iframe.style.height = iframe.contentWindow.document.documentElement.scrollHeight + "px"; //モダンブラウザ対応
-//			layerSpecificUI.style.height = iframe.contentWindow.document.documentElement.offsetHeight + "px";
-//			iframe.style.height = layerSpecificUI.style.height; //IE対応
 		} else {
 			layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
 		}
