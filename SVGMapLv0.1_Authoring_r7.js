@@ -32,6 +32,8 @@
 // 2018/02/01 minor bug fix
 // 2018/02/02 cursor.style.zIndexを設定するようにした(toBeDel on rev15対策)
 // 2018/03/05 polylineを編集できる機能をおおよそ実装
+// 2019/03/12 POIのアイコン定義が1個しかない場合はアイコン選択UI省略
+// 2019/03/12 タイリングされたレイヤーに対して処理可能にする(制約としては、タイルにあるオブジェクトを編集したものは保持されない。新規のオブジェクトはレイヤルートに設置。メタデータスキーマ・アイコン定義は、共通のものをレイヤールートにも設置必要)
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -60,9 +62,9 @@ var action = "none"; // 起こしたアクションがなんなのか（かな�
 
 
 // 開いている編集UIに関するグローバル情報を入れているオブジェクト
-// uiMapping = {uiPanel,editingDocId,editingMode,uiDoc,editingGraphicsElement,modifyTargetElement}
+// uiMapping = {uiPanel,editingLayerId,editingMode,uiDoc,editingGraphicsElement,modifyTargetElement}
 // uiPanel : オーサリングUIを発生させる(layer specific UI iframe中などの)div要素
-// editingDocId : 編集中のSVG文書のID(svgMapProps[]などの)
+// editingLayerId : 編集中のSVG文書のレイヤーID(svgMapProps[]などの)
 // editingMode : POI,POLYLINE,POIreg...
 // uiDoc : uiPanelのオーナードキュメント(layer specific UI iframe中などのhtml)
 // editingGraphicsElement : 図形要素を編集中かどうか(boolean)
@@ -139,7 +141,7 @@ function clearTools( e ){
 	uiMapping.modifyTargetElement=null;
 	uiMapping.editingGraphicsElement = false;
 	console.log( "get iframe close/hide event from authoring tools framework.");
-	svgMap.setRootLayersProps(uiMapping.editingDocId, null , false );
+	svgMap.setRootLayersProps(uiMapping.editingLayerId, null , false );
 //	uiMapping = {};
 	
 	removePointEvents( editPolyPoint );
@@ -148,7 +150,7 @@ function clearTools( e ){
 }
 function setTools( e ){
 	console.log( "get iframe appear event from authoring tools framework.");
-	svgMap.setRootLayersProps(uiMapping.editingDocId, true , true );
+	svgMap.setRootLayersProps(uiMapping.editingLayerId, true , true );
 }
 
 
@@ -164,7 +166,7 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 	}
 	
 	
-	if ( uiMapping.editingMode && uiMapping.editingMode=="POIreg" && uiDoc === uiMapping.uiDoc && poiDocId == uiMapping.editingDocId){ // すでにそのUIdocでPOIregモードの初期化済みのときは二個目以降のツールが追加されていく。このときcbFuncは無視・・
+	if ( uiMapping.editingMode && uiMapping.editingMode=="POIreg" && uiDoc === uiMapping.uiDoc && poiDocId == uiMapping.editingLayerId){ // すでにそのUIdocでPOIregモードの初期化済みのときは二個目以降のツールが追加されていく。このときcbFuncは無視・・
 		console.log("ADD uiMapping");
 	} else { // uiMappingを新規作成する系
 		console.log("NEW uiMapping");
@@ -184,7 +186,7 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 		}
 		uiMapping = {
 			uiPanel : [],
-			editingDocId : poiDocId,
+			editingLayerId : poiDocId,
 			editingMode : "POIreg",
 			uiDoc: uiDoc,
 			editingGraphicsElement: false,
@@ -268,8 +270,19 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly){
 	var symbols = svgMap.getSymbols(svgImages[poiDocId]);
 	var metaSchema = getMetaSchema(poiDocId);
 	
-	var ihtml = '<table id="poiEditor"><tr><td colspan="2" id="iconselection" >';
+	for ( var key in symbols ){ 
+		++symbolCount;
+	}
+	
+	var ihtml = '<table id="poiEditor">';
+	if ( symbolCount > 1 ){
+		ihtml += '<tr><td colspan="2" id="iconselection" >';
+	} else { // アイコンが一個しかないときはアイコン選択UIは不要でしょう 2018.6.21
+		ihtml += '<tr style="display:none"><td colspan="2" id="iconselection" >';
+	}
+	
 	firstSymbol = true;
+	var symbolCount = 0;
 	for ( var key in symbols ){ // srcに相対パスが正しく入っているか？
 		if ( symbols[key].type=="symbol"){
 	//		console.log(key , poiHref);
@@ -318,7 +331,7 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly){
 	
 	uiMapping = {
 		uiPanel : targetDiv,
-		editingDocId : poiDocId,
+		editingLayerId : poiDocId,
 		editingMode : "POI",
 		uiDoc: uiDoc,
 		editingGraphicsElement: false,
@@ -499,9 +512,18 @@ function setPoiSvg(poiParams, poiDocId, targetPoiId){
 	if ( targetId ){
 		poiElem = svgMap.getElementByImageId(poiDoc,targetId); // getElementByIdじゃないのよね・・・
 		if (!poiElem){ // edit existing POI
-//			poiElem = poiDoc.createElement("use");
-//			このケースは原理上はあってはならない　エラー
-			return ( false );
+			poiDocId = uiMapping.modifyTargetElement.ownerDocument.documentElement.getAttribute("about");
+			poiDoc = svgImages[poiDocId];
+			poiElem = svgMap.getElementByImageId(poiDoc,targetId);
+			
+			if ( ! poiElem ){
+	//			poiElem = poiDoc.createElement("use");
+	//			このケースは原理上はあってはならない　エラー
+				console.log("Can not find element.... Exit...");
+				return ( false );
+			} else {
+				console.log("Tiled Doc....continue");
+			}
 		}
 	} else if ( targetPoiId ){
 		if ( poiDoc.getElementById(targetPoiId) ){
@@ -673,7 +695,7 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 	} else {
 		setPoiSvg(
 			{title:directPutPoiParams.title,geoPos:[geop.lat,geop.lng],metadata:directPutPoiParams.metadata,href:directPutPoiParams.href},
-			uiMapping.editingDocId,
+			uiMapping.editingLayerId,
 			directPutPoiParams.id
 		);
 		svgMap.refreshScreen();
@@ -734,7 +756,7 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 			
 			setPoiSvg(
 				{title:params.title,geoPos:[geop.lat,geop.lng],metadata:params.metadata,href:params.href},
-				uiMapping.editingDocId,
+				uiMapping.editingLayerId,
 				params.id
 			);
 			svgMap.refreshScreen();
@@ -1250,9 +1272,9 @@ function getGeoCoordinates(svgXY , CRS){
 
 function setTargetObject(svgTarget){
 	console.log("called setTargetObject:",svgTarget);
-	console.log( uiMapping.editingDocId , svgTarget.docId, svgTarget);
+	console.log( uiMapping.editingLayerId , svgTarget.docId, svgTarget);
 	
-	if ( uiMapping.editingDocId === svgTarget.docId ){ // 冗長・・
+	if ( uiMapping.editingLayerId === svgTarget.docId  || uiMapping.editingLayerId === svgImagesProps[svgTarget.docId].rootLayer){ // 冗長・・
 		var svgNode = svgTarget.element;
 //		var targetDocId = svgTarget.docId
 		console.log("setTargetObject:",svgNode);
@@ -1439,7 +1461,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 	
 	uiMapping = {
 		uiPanel : targetDiv,
-		editingDocId : poiDocId,
+		editingLayerId : poiDocId,
 		editingMode : polyMode,
 		uiDoc: uiDoc,
 		editingGraphicsElement: false,

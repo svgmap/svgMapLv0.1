@@ -154,7 +154,7 @@
 // 2018/06/19 : script実行ルーチンのデバッグ
 // 2018/08/01 : TreatRectAsPolygonFlag
 // 2018/09/04 : ビットイメージ(image要素)にstyle.imageRendering pixelated実装 ヒートマップなどを最小ファイルサイズ構築するためのもの(一応Edgeも対応*4Edge　今後このルーチンはEdge対応次第で廃止する)
-// 
+// 2019/03/12 : authoring tools editing 判別小修整、imageRendering->image-rendering 修正
 //
 // Issues:
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
@@ -4782,7 +4782,7 @@ function poiSelectProcess( obj ){ // html:img要素によるPOI(from use要素)�
 	var svgTarget = svgTargetObj.element;
 //	console.log("isEditingLayer:",el);
 //	console.log("testClick:" , svgTarget);
-	if ( typeof svgMapAuthoringTool == "object"  && ( el && el.getAttribute("iid") == target.parentNode.getAttribute("id") ) ){ // 選択したオブジェクトが編集中レイヤのものの場合
+	if ( typeof svgMapAuthoringTool == "object"  && ( el && el.getAttribute("iid") == svgImagesProps[target.parentNode.getAttribute("id")].rootLayer ) ){ // 選択したオブジェクトが編集中レイヤのものの場合 (2019/3/12、タイルではなくレイヤーで判別するように変更)
 //	console.log("EDITING LAYER",target,svgTarget);
 		svgMapAuthoringTool.setTargetObject(svgTargetObj);
 	} else {
