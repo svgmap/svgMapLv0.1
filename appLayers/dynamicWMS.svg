@@ -1,0 +1,223 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-42.8202042942663, -49.9999999999999, 513.842451531196, 600" xmlns:go="http://purl.org/svgmap/profile"  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" property="id,type,latitude,longitude,title,address,spec" >
+<script>
+	// Dynamic WMS Layer for SVGMap Sample for SVGMapLevel0 ＞ r12
+	// Programmed by Satoru Takagi
+	// Copyright (C) 2013-2018 by Satoru Takagi @ KDDI CORPORATION
+	// 
+	// License:
+	//  This program is free software: you can redistribute it and/or modify
+	//  it under the terms of the GNU General Public License version 3 as
+	//  published by the Free Software Foundation.
+	//
+	//  This program is distributed in the hope that it will be useful,
+	//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+	//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	//  GNU General Public License for more details.
+	//
+	//  You should have received a copy of the GNU General Public License
+	//  along with this program.  If not, see (http://www.gnu.org/licenses/) .
+
+	// 2013/01/24 : 1st ver.
+	// 2018/01/18 汎用化に着手
+	
+	// 256px
+	
+	var tilePix = 256;
+	var baseURL_gsj ="https://gbank.gsj.jp/ows/GSJ_Combined_Bedrock_and_Superficial_Geology_and_Age/wms?LAYERS=JPN_GSJ_1M_Combined_BLT_SLT_BA&TRANSPARENT=TRUE&FORMAT=image/png&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&STYLES=&SRS=EPSG:900913"; // gsj.jp 地質情報
+	var baseURL_nagoya = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=tsunami_area"; // 地理学会　遡上範囲
+	var baseURL_nagoya2 = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=severe_tsunami_area"; // 地理学会　被害範囲
+	var baseURL_nagoya3 = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=tsunami_run-up_height_2014"; // 地理学会　遡上高分布
+	
+	var baseURL = baseURL_gsj;
+	
+	var imgW = tilePix;
+	var imgH = imgW;
+	
+	var canvasSize;
+//	console.log("Build Function");
+	var testIscript2 = 2;
+	
+	var currentZoom;
+	
+	
+	function onload(){ // onload = function()って書いてもOKですよ
+		 console.log("HelloOnloadFUNC of WMS layer :  this.location.hash: ",this.location.hash);
+		 if ( this.location.hash.indexOf("server=")>0){
+		 	baseURL = this.location.hash.substring(this.location.hash.indexOf("server=") + 7);
+		 }
+		 canvasSize = getCanvasSize();
+		 this.baseURL = baseURL;
+		 this.reloadAll = reloadAll;
+	}
+	
+	function reloadAll(newBaseURL){
+		if ( newBaseURL ){
+			baseURL = newBaseURL;
+		}
+		var currentTiles =  document.getElementsByTagName("image");
+		for (var i =currentTiles.length-1; i>=0; i--) {
+			(currentTiles[i].parentElement).removeChild(currentTiles[i]);
+		}
+		onzoom();
+		refreshScreen();
+		
+	}
+	
+	onzoom = function(){
+		console.log("onZoom:",baseURL);
+		if ( baseURL == "null" ){
+			return;
+		}
+		var level = 8;
+		var level = Math.floor( Math.LOG2E * Math.log(scale) + 7.5);
+		if (level > 18 ){
+			level = 18;
+		} else if ( level < 3 ){
+			level = 3;
+		}
+		++ testIscript2;
+		
+		var tileSet = getTileSet( geoViewBox , level )
+		
+		var currentTiles =  document.getElementsByTagName("image");
+		console.log(currentTiles, tileSet);
+		
+		for ( var i = currentTiles.length - 1 ; i >= 0 ; i-- ){
+			var oneTile = currentTiles[i];
+			var qkey = oneTile.getAttribute("metadata");
+			if ( tileSet[qkey] ){
+//				すでにあるのでスキップさせるフラグ立てる。
+				tileSet[qkey].exist = true;
+			} else {
+//				console.log("remove", oneTile);
+//				ないものなので、消去
+				oneTile.parentNode.removeChild(oneTile);
+			}
+		}
+		
+		
+		for ( var tkey in tileSet ){
+			if ( ! tileSet[tkey].exist ){
+				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , CRS );
+//				console.log ( addTile );
+				document.getElementsByTagName("svg")[0].appendChild(addTile);
+			} else {
+//				console.log("Exist:",tkey);
+			}
+		}
+	}
+	
+	onscroll = onzoom;
+	
+	function getTile( tileX ,  tileY , level , crs ){
+		var tileURL = getURL( tileX , tileY , level);
+		
+		// タイルのSVGにおけるbboxを得る
+		var tLatLng = XY2latLng( tileX * tilePix , tileY * tilePix, level );
+		var tSvg = transform( tLatLng.lng , tLatLng.lat , crs );
+		var tLatLngBR = XY2latLng( tileX * tilePix + tilePix , tileY * tilePix + tilePix , level  );
+		var tSvgBR = transform( tLatLngBR.lng , tLatLngBR.lat , crs );
+		tSvg.width  = tSvgBR.x - tSvg.x; // 効率悪い・・改善後回し
+		tSvg.height = tSvgBR.y - tSvg.y;
+//		console.log("tileSVGXYWH  : " + tSvg.x + " , " + tSvg.y + " , " + tSvg.width + " , " + tSvg.height );
+		
+		var cl = document.createElement("image");
+		cl.setAttribute("x" , tSvg.x);
+		cl.setAttribute("y" , tSvg.y);
+		cl.setAttribute("width" , tSvg.width);
+		cl.setAttribute("height" , tSvg.height);
+		cl.setAttribute("xlink:href" , tileURL.URL);
+//		cl.setAttribute("opacity" , "0.5");
+		cl.setAttribute("metadata" , tileURL.Key);
+		
+		return ( cl );
+	}
+	
+	function getTileSet( geoViewBox , level ){
+		
+		var TileSet = new Object();
+		// 指定エリアの、tileのXYとそのHashKeyを返却する
+		var tlxy = latLng2XY( geoViewBox.y + geoViewBox.height , geoViewBox.x , level );
+		var tileTLxy = XY2TileXY( tlxy );
+		var brxy = latLng2XY( geoViewBox.y , geoViewBox.x + geoViewBox.width, level );
+		var tileBRxy = XY2TileXY( brxy );
+		
+		for ( var i = tileTLxy.y ; i <= tileBRxy.y ; i++ ){
+			for ( var j = tileTLxy.x ; j <= tileBRxy.x  ; j++ ){
+				var qkey = getKey( j, i, level);
+				TileSet[qkey] = new Object();
+				TileSet[qkey].x = j;
+				TileSet[qkey].y = i;
+//				console.log( j , i , qkey );
+			}
+		}
+		return ( TileSet );
+	}
+	
+	function latLng2XY( lat , lng , lvl ){
+		var size = lvl2Res(lvl);
+//		console.log("size:" + size);
+		var sinLat = Math.sin(lat * Math.PI / 180.0);
+		var pixelX = (( lng + 180.0 ) / 360.0 ) * size;
+		var pixelY = (0.5 - Math.log((1 + sinLat) / (1.0 - sinLat)) / (4 * Math.PI)) * size;
+		return {
+			x : pixelX ,
+			y : pixelY
+		}
+	}
+	
+	function XY2TileXY( xy ){
+		var tileX = Math.floor(xy.x / tilePix);
+		var tileY = Math.floor(xy.y / tilePix);
+		return {
+			x : tileX ,
+			y : tileY
+		}
+	}
+	
+	function lvl2Res( lvl ){
+		var j = 1;
+		for(var i = 0 ; i < lvl ; i++){
+			j = j * 2;
+		}
+		return ( j * tilePix );
+	}
+	
+	function XY2latLng( px , py , lvl ){
+		var size = lvl2Res(lvl);
+		var x = ( px / size ) - 0.5;
+		var y = 0.5 - ( py / size);
+		var lat = 90 - 360 * Math.atan(Math.exp(-y * 2 * Math.PI)) / Math.PI;
+		var lng = 360 * x;
+		return{
+			lat : lat ,
+			lng : lng
+		}
+	}
+	
+	function getURL( tx , ty , lvl ){
+		var txy2mer = lvl2Res( lvl ) / tilePix;
+		
+		var memx = 40075016.68 * ( tx / txy2mer - 0.5 );
+		var memy = 40075016.68 * ( 0.5 - ty / txy2mer );
+		
+		var memSpan = 40075016.68 / txy2mer;
+		
+		var tile_ans = getKey( tx , ty , lvl );
+		var mapServerURL = baseURL + "&BBOX=" + memx + "," + (memy - memSpan) + "," + (memx + memSpan) + "," + memy + "&WIDTH=" + imgW + "&HEIGHT=" + imgH ;
+		return {
+			URL : mapServerURL ,
+			Key : tile_ans
+		}
+	}
+	
+	function getKey(tx , ty , lvl){
+		return ( tx + "_" + ty + "_" + lvl );
+	}
+	
+</script>
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="matrix(100,0,0,-100,0,0)" />
+
+</svg>

@@ -1,0 +1,214 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-42.8202042942663, -49.9999999999999, 513.842451531196, 600" xmlns:go="http://purl.org/svgmap/profile"  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" property="id,type,latitude,longitude,title,address,spec" >
+
+<script>
+	// Dynamic OpemStreetMap Layer for SVGMap Sample for SVGMapLevel0 > r10
+	// Programmed by Satoru Takagi
+	// Copyright (C) 2013 by Satoru Takagi @ KDDI CORPORATION
+	// 
+	// License:
+	//  This program is free software: you can redistribute it and/or modify
+	//  it under the terms of the GNU General Public License version 3 as
+	//  published by the Free Software Foundation.
+	//
+	//  This program is distributed in the hope that it will be useful,
+	//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+	//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	//  GNU General Public License for more details.
+	//
+	//  You should have received a copy of the GNU General Public License
+	//  along with this program.  If not, see (http://www.gnu.org/licenses/) .
+
+	// iframe化を想定した動的レイヤーのプロトタイプ
+	// (JavaScriptをインポートSVGコンテンツに置くことができる。)
+	// 地図データとしては、OpenStreetMapを利用（比較的容易に他にも置き換えられる）
+	//
+	// 
+	// このコードの動作環境では、以下があらかじめ設定される
+	// document:このドキュメント自身
+	// this.CRS:このドキュメントのCRS
+	// this.scale：このドキュメントの座標系での倍率
+	// this.actualViewBox：このドキュメントの座標系でのviewBox
+	// this.geoViewBox：地理座標におけるviewBox
+	// onload:ロードされると呼ばれる
+	// onzoom:ズームされると呼ばれる
+	// onscroll:スクロールされると呼ばれる（ほかにズーム以外で画面更新時も）
+	//
+	// 2013/01/24 : 1st ver.
+	
+	var canvasSize;
+//	console.log("Build Function");
+	var testIscript2 = 2;
+	
+	var currentZoom;
+	
+	
+	function onload(){ // onload = function()って書いてもOKですよ
+//		 console.log("HelloOnloadFUNC!");
+		 canvasSize = getCanvasSize();
+	}
+	
+	onzoom = function(){
+		var level = 8;
+		var level = Math.floor( Math.LOG2E * Math.log(this.scale) + 7.5);
+		if (level > 18 ){
+			level = 18;
+		} else if ( level < 3 ){
+			level = 3;
+		}
+		++ testIscript2;
+		
+		var tileSet = getTileSet( this.geoViewBox , level )
+		
+		var currentTiles =  document.getElementsByTagName("image");
+//		console.log(currentTiles);
+		
+		for ( var i = currentTiles.length - 1 ; i >= 0 ; i-- ){
+			var oneTile = currentTiles[i];
+			var qkey = oneTile.getAttribute("metadata");
+			if ( tileSet[qkey] ){
+//				すでにあるのでスキップさせるフラグ立てる。
+				tileSet[qkey].exist = true;
+			} else {
+//				console.log("remove", oneTile);
+//				ないものなので、消去
+				oneTile.parentNode.removeChild(oneTile);
+			}
+		}
+		
+		
+		for ( var tkey in tileSet ){
+			if ( ! tileSet[tkey].exist ){
+				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , this.CRS );
+				document.getElementsByTagName("svg")[0].appendChild(addTile);
+			}
+		}
+	}
+	
+	onscroll = onzoom;
+	
+	function getTile( tileX ,  tileY , level , crs ){
+		var tileURL = getURL( tileX , tileY , level);
+		
+		// タイルのSVGにおけるbboxを得る
+		var tLatLng = XY2latLng( tileX * tilePix , tileY * tilePix, level );
+		var tSvg = transform( tLatLng.lng , tLatLng.lat , crs );
+		var tLatLngBR = XY2latLng( tileX * tilePix + tilePix , tileY * tilePix + tilePix , level  );
+		var tSvgBR = transform( tLatLngBR.lng , tLatLngBR.lat , crs );
+		tSvg.width  = tSvgBR.x - tSvg.x; // 効率悪い・・改善後回し
+		tSvg.height = tSvgBR.y - tSvg.y;
+//		console.log("tileSVGXYWH  : " + tSvg.x + " , " + tSvg.y + " , " + tSvg.width + " , " + tSvg.height );
+		
+		var cl = document.createElement("image");
+		cl.setAttribute("x" , tSvg.x);
+		cl.setAttribute("y" , tSvg.y);
+		cl.setAttribute("width" , tSvg.width);
+		cl.setAttribute("height" , tSvg.height);
+		cl.setAttribute("xlink:href" , tileURL.URL);
+//		cl.setAttribute("opacity" , "0.5");
+		cl.setAttribute("metadata" , tileURL.Key);
+		
+		return ( cl );
+	}
+	
+	function getTileSet( geoViewBox , level ){
+		var TileSet = new Object();
+		if ( geoViewBox.y + geoViewBox.height > 85.05113 ){
+			geoViewBox.height = 85.05113 -  geoViewBox.y;
+		}
+		
+		if ( geoViewBox.y < -85.05113 ){
+			geoViewBox.y = -85.05113;
+		}
+		
+		// 指定エリアの、tileのXYとそのHashKeyを返却する
+		var tlxy = latLng2XY( geoViewBox.y + geoViewBox.height , geoViewBox.x , level );
+		var tileTLxy = XY2TileXY( tlxy );
+		var brxy = latLng2XY( geoViewBox.y , geoViewBox.x + geoViewBox.width, level );
+		var tileBRxy = XY2TileXY( brxy );
+		
+		for ( var i = tileTLxy.y ; i <= tileBRxy.y ; i++ ){
+			for ( var j = tileTLxy.x ; j <= tileBRxy.x  ; j++ ){
+				var qkey = getKey( j, i, level);
+				TileSet[qkey] = new Object();
+				TileSet[qkey].x = j;
+				TileSet[qkey].y = i;
+//				console.log( j , i , qkey );
+			}
+		}
+		return ( TileSet );
+	}
+	
+	function latLng2XY( lat , lng , lvl ){
+		var size = lvl2Res(lvl);
+//		console.log("size:" + size);
+		var sinLat = Math.sin(lat * Math.PI / 180.0);
+		var pixelX = (( lng + 180.0 ) / 360.0 ) * size;
+		var pixelY = (0.5 - Math.log((1 + sinLat) / (1.0 - sinLat)) / (4 * Math.PI)) * size;
+		return {
+			x : pixelX ,
+			y : pixelY
+		}
+	}
+	
+	function XY2TileXY( xy ){
+		var tileX = Math.floor(xy.x / tilePix);
+		var tileY = Math.floor(xy.y / tilePix);
+		return {
+			x : tileX ,
+			y : tileY
+		}
+	}
+	
+	var tilePix = 256;
+	function lvl2Res( lvl ){
+		var j = 1;
+		for(var i = 0 ; i < lvl ; i++){
+			j = j * 2;
+		}
+		return ( j * tilePix );
+	}
+	
+	function XY2latLng( px , py , lvl ){
+		var size = lvl2Res(lvl);
+		var x = ( px / size ) - 0.5;
+		var y = 0.5 - ( py / size);
+		var lat = 90 - 360 * Math.atan(Math.exp(-y * 2 * Math.PI)) / Math.PI;
+		var lng = 360 * x;
+		return{
+			lat : lat ,
+			lng : lng
+		}
+	}
+	
+	var sva = new Array(
+		"a" ,
+		"b" ,
+		"c" 
+		);
+	var svNumb = 0;
+	var culture ="en-US";
+	var bingRoadSearchPart = ".jpeg?g=849&amp;mkt=" + culture + "&amp;shading=hill";
+	
+	function getURL( tx , ty , lvl ){
+		var tile_ans = getKey( tx , ty , lvl );
+		var mapServerURL = "http://" + sva[svNumb] + ".tile.openstreetmap.org/" + lvl + "/" + tx + "/" + ty + ".png";
+		++ svNumb;
+		if ( svNumb > 2 ){
+			svNumb = 0;
+		}
+		return {
+			URL : mapServerURL ,
+			Key : tile_ans
+		}
+	}
+	
+	function getKey(tx , ty , lvl){
+		return ( tx + "_" + ty + "_" + lvl );
+	}
+	
+</script>
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="matrix(100,0,0,-100,0,0)" />
+
+</svg>

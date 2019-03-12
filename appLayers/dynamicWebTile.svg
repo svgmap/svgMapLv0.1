@@ -1,0 +1,321 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-42.8202042942663, -49.9999999999999, 513.842451531196, 600" xmlns:go="http://purl.org/svgmap/profile"  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" property="id,type,latitude,longitude,title,address,spec" >
+<script>
+	// Dynamic DenshiKokudo Layer for SVGMap Sample for SVGMapLevel0 ＞ r10
+	// Programmed by Satoru Takagi
+	// Copyright (C) 2013..2016 by Satoru Takagi @ KDDI CORPORATION
+	// 
+	// License:
+	//  This program is free software: you can redistribute it and/or modify
+	//  it under the terms of the GNU General Public License version 3 as
+	//  published by the Free Software Foundation.
+	//
+	//  This program is distributed in the hope that it will be useful,
+	//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+	//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	//  GNU General Public License for more details.
+	//
+	//  You should have received a copy of the GNU General Public License
+	//  along with this program.  If not, see (http://www.gnu.org/licenses/) .
+
+	// iframe化を想定した動的レイヤーのプロトタイプ
+	// (JavaScriptをインポートSVGコンテンツに置くことができる。)
+	// 地図データとしては、OpenStreetMapを利用（比較的容易に他にも置き換えられる）
+	//
+	// この実装の注意：
+	// ＞(&gt;)・＜(&lt;)・＆(&amp;)符号はエスケープしないと動かない
+	// 
+	// このコードの動作環境では、以下があらかじめ設定される
+	// document:このドキュメント自身
+	// this.CRS:このドキュメントのCRS
+	// this.scale：このドキュメントの座標系での倍率
+	// this.actualViewBox：このドキュメントの座標系でのviewBox
+	// this.geoViewBox：地理座標におけるviewBox
+	// onload:ロードされると呼ばれる
+	// onzoom:ズームされると呼ばれる
+	// onscroll:スクロールされると呼ばれる（ほかにズーム以外で画面更新時も）
+	//
+	// 2013/01/24 : 1st ver.
+	
+	// 2016/02/19 新サーバに対応し、フラグメントを与えることでいろいろな地図を出せるようにしてある。
+	// dynamicDenshiKokudo2016.svg#map=name||number
+	// nameは、stdとかblankとかenglishとか、あとは数字 (sva配列参照)
+	// see: http://maps.gsi.go.jp/development/ichiran.html
+	// 2016/10/27 地理院ドメインの地図以外でもなんでも出せるようなものにした
+	
+	
+	var canvasSize;
+//	console.log("Build Function");
+	var testIscript2 = 2;
+	
+	var currentZoom;
+	
+	var jpegMedia = false;
+	
+	var mapName = "std";
+	var baseURL = "http://cyberjapandata.gsi.go.jp/xyz/";
+	
+	function onload(){ // onload = function()って書いてもOKですよ
+//		console.log("HelloOnloadFUNC!", this.location.hash);
+		if ( this.location ){
+			var hParams = getHashParams(this.location.hash);
+			
+			canvasSize = getCanvasSize();
+			
+			if (hParams.map &amp;&amp; typeof(hParams.map) == "string" ){
+				if ( sva[hParams.map] ){
+					mapName = baseURL + hParams.map;
+					maxLevel = sva[hParams.map][1];
+				}
+			} else if (hParams.baseURL ){
+//				console.log("set baseurl to mapname");
+				mapName = hParams.baseURL;
+				if ( hParams.zmax ){
+					maxLevel = Number(hParams.zmax);
+				}
+				if ( hParams.jpegMedia ){
+					jpegMedia = true;
+				}
+				
+			} else {
+				mapName = baseURL + mapName;
+			}
+			
+//			console.log("resolved Url:",mapName, " jpg:",jpegMedia);
+		}
+	}
+	
+    function getHashParams( hash ){
+    	hash = hash.substring(1);
+    	hash = hash.split("&amp;");
+		for ( var i = 0 ; i &lt; hash.length ; i++ ){
+			hash[i] = hash[i].split("="); // "
+			if ( hash[i][1] ){
+				hash[hash[i][0]] = hash[i][1];
+			} else {
+				hash[hash[i][0]] = true;
+			}
+		}
+//    	console.log(hash);
+    	return ( hash );
+    }
+    
+	onzoom = function(){
+		var level = 8;
+		var level = Math.floor( Math.LOG2E * Math.log(this.scale) + 7.5);
+		if (level &gt; maxLevel ){
+			level = maxLevel;
+		} else if ( level &lt; minLevel ){
+			level = minLevel;
+		}
+		++ testIscript2;
+		
+		var tileSet = getTileSet( this.geoViewBox , level )
+		
+		var currentTiles =  document.getElementsByTagName("image");
+//		console.log(currentTiles);
+		
+		for ( var i = currentTiles.length - 1 ; i &gt;= 0 ; i-- ){
+			var oneTile = currentTiles[i];
+			var qkey = oneTile.getAttribute("metadata");
+			if ( tileSet[qkey] ){
+//				すでにあるのでスキップさせるフラグ立てる。
+				tileSet[qkey].exist = true;
+			} else {
+//				console.log("remove", oneTile);
+//				ないものなので、消去
+				oneTile.parentNode.removeChild(oneTile);
+			}
+		}
+		
+		
+		for ( var tkey in tileSet ){
+			if ( ! tileSet[tkey].exist ){
+				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , this.CRS );
+				document.getElementsByTagName("svg")[0].appendChild(addTile);
+			}
+		}
+	}
+	
+	onscroll = onzoom;
+	
+	function getTile( tileX ,  tileY , level , crs ){
+		var tileURL = getURL( tileX , tileY , level);
+//		console.log("tileURL:",tileURL);
+		
+		// タイルのSVGにおけるbboxを得る
+		var tLatLng = XY2latLng( tileX * tilePix , tileY * tilePix, level );
+		var tSvg = transform( tLatLng.lng , tLatLng.lat , crs );
+		var tLatLngBR = XY2latLng( tileX * tilePix + tilePix , tileY * tilePix + tilePix , level  );
+		var tSvgBR = transform( tLatLngBR.lng , tLatLngBR.lat , crs );
+		tSvg.width  = tSvgBR.x - tSvg.x; // 効率悪い・・改善後回し
+		tSvg.height = tSvgBR.y - tSvg.y;
+//		console.log("tileSVGXYWH  : " + tSvg.x + " , " + tSvg.y + " , " + tSvg.width + " , " + tSvg.height );
+		
+		var cl = document.createElement("image");
+		cl.setAttribute("x" , tSvg.x);
+		cl.setAttribute("y" , tSvg.y);
+		cl.setAttribute("width" , tSvg.width);
+		cl.setAttribute("height" , tSvg.height);
+		cl.setAttribute("xlink:href" , tileURL.URL);
+//		cl.setAttribute("opacity" , "0.5");
+		cl.setAttribute("metadata" , tileURL.Key);
+		
+		return ( cl );
+	}
+	
+	function getTileSet( geoViewBox , level ){
+		var TileSet = new Object();
+		// 指定エリアの、tileのXYとそのHashKeyを返却する
+		var tlxy = latLng2XY( geoViewBox.y + geoViewBox.height , geoViewBox.x , level );
+		var tileTLxy = XY2TileXY( tlxy );
+		var brxy = latLng2XY( geoViewBox.y , geoViewBox.x + geoViewBox.width, level );
+		var tileBRxy = XY2TileXY( brxy );
+		
+		for ( var i = tileTLxy.y ; i &lt;= tileBRxy.y ; i++ ){
+			for ( var j = tileTLxy.x ; j &lt;= tileBRxy.x  ; j++ ){
+				var qkey = getKey( j, i, level);
+				TileSet[qkey] = new Object();
+				TileSet[qkey].x = j;
+				TileSet[qkey].y = i;
+//				console.log( j , i , qkey );
+			}
+		}
+		return ( TileSet );
+	}
+	
+	function latLng2XY( lat , lng , lvl ){
+		var size = lvl2Res(lvl);
+//		console.log("size:" + size);
+		var sinLat = Math.sin(lat * Math.PI / 180.0);
+		var pixelX = (( lng + 180.0 ) / 360.0 ) * size;
+		var pixelY = (0.5 - Math.log((1 + sinLat) / (1.0 - sinLat)) / (4 * Math.PI)) * size;
+		return {
+			x : pixelX ,
+			y : pixelY
+		}
+	}
+	
+	function XY2TileXY( xy ){
+		var tileX = Math.floor(xy.x / tilePix);
+		var tileY = Math.floor(xy.y / tilePix);
+		return {
+			x : tileX ,
+			y : tileY
+		}
+	}
+	
+	var tilePix = 256;
+	function lvl2Res( lvl ){
+		var j = 1;
+		for(var i = 0 ; i &lt; lvl ; i++){
+			j = j * 2;
+		}
+		return ( j * tilePix );
+	}
+	
+	function XY2latLng( px , py , lvl ){
+		var size = lvl2Res(lvl);
+		var x = ( px / size ) - 0.5;
+		var y = 0.5 - ( py / size);
+		var lat = 90 - 360 * Math.atan(Math.exp(-y * 2 * Math.PI)) / Math.PI;
+		var lng = 360 * x;
+		return{
+			lat : lat ,
+			lng : lng
+		}
+	}
+	
+	var maxLevel = 18;
+	var minLevel = 3;
+	var sva = {
+		"std" : [2,18],
+		"pale" : [12,18],
+		"blank" : [5,14],
+		"english" : [5,11],
+		"relief" : [5,15],
+		"lcm25k_2012" :[10,16],
+		"lum4bl_capital2000" :[13,16],
+		"lum4bl_capital2005" :[13,16],
+		"lum4bl_chubu2003" :[13,16],
+		"lum4bl_kinki2001" :[13,16],
+		"lum4bl_kinki2008" :[13,16],
+		"ort" :[2,18],
+		"gazo1" :[10,17],
+		"gazo2" :[10,17],
+		"gazo3" :[10,17],
+		"gazo4" :[10,17],
+		"ort_old10" :[10,17],
+		"ort_USA10" :[10,17],
+		"airphoto" :[15,18],
+		"toho1" :[15,17],
+		"toho2" :[15,18],
+		"toho3" :[15,18],
+		"toho4" :[15,18],
+		"fukkokizu" :[18,18],
+		"20130717dol" :[10,18],
+		"20130717dol2" :[10,18],
+		"20130902dol" :[10,18],
+		"201204dol" :[8,18],
+		"20131017dol" :[10,18],
+		"20131017dol2" :[10,18],
+		"20131204doh" :[10,18],
+		"20131217doh" :[10,18],
+		"20140216doh" :[10,18],
+		"20140322dol" :[10,18],
+		"20140704dol" :[10,18],
+		"20141204doh" :[10,18],
+		"20141210doh" :[10,18],
+		"20150301doh" :[10,18],
+		"20150728dol" :[14,18],
+		"20151209dol" :[13,18],
+		"20140711dol" :[8,18],
+		"20140813dol" :[10,18],
+		"20140819dol" :[10,18],
+		"20140820dol" :[10,18],
+		"20140820dol2" :[10,18],
+		"20140820dol3" :[10,18],
+		"19480000dol" :[10,18],
+		"19620000dol" :[10,18],
+		"20140828dol" :[10,18],
+		"20140830dol" :[10,18],
+		"20140831dol" :[10,18],
+		"20140928dol" :[10,18],
+		"20140929dol2" :[10,18],
+		"20140930dol" :[10,18],
+		"20150911dol1" :[10,18],
+		"20150911dol2" :[10,18],
+		"20150913dol" :[10,18],
+		"20150915dol" :[10,18],
+		"20150929dol" :[14,18],
+		"20150911dol3" :[10,18],
+		"20150911dol4" :[10,18],
+		"20150911dol5" :[10,18],
+		"20150911dol" :[14,18],
+		"20150714dol" :[14,18],
+		"did2015" :[8,18],
+		"201807H3007gouu_kurashiki_0707dansaizu" : [6,16]
+		};
+	
+	function getURL( tx , ty , lvl ){
+		var tile_ans = getKey( tx , ty , lvl );
+		var media=".png";
+		if ( mapName=="ort" || jpegMedia ){
+			media =".jpg";
+		}
+		var mapServerURL = mapName + "/" + lvl + "/" + tx + "/" + ty + media;
+		return {
+			URL : mapServerURL ,
+			Key : tile_ans
+		}
+	}
+	
+	function getKey(tx , ty , lvl){
+		return ( tx + "_" + ty + "_" + lvl );
+	}
+	
+</script>
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="matrix(100,0,0,-100,0,0)" />
+
+</svg>

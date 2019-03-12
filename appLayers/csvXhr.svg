@@ -1,0 +1,447 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-42.8202042942663, -49.9999999999999, 513.842451531196, 600" xmlns:go="http://purl.org/svgmap/profile"  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" property="" >
+<script>
+	// Dynamic Csv POI Layer for SVGMap Sample for SVGMapLevel0.1 > r8
+	// Programmed by Satoru Takagi
+	// Copyright (C) 2014 by Satoru Takagi @ KDDI CORPORATION
+	// 
+	// License:
+	//  This program is free software: you can redistribute it and/or modify
+	//  it under the terms of the GNU General Public License version 3 as
+	//  published by the Free Software Foundation.
+	//
+	//  This program is distributed in the hope that it will be useful,
+	//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+	//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	//  GNU General Public License for more details.
+	//
+	//  You should have received a copy of the GNU General Public License
+	//  along with this program.  If not, see (http://www.gnu.org/licenses/) .
+	//
+	// XHRで外部のcsvデータを読み取りPOIとして表示するwebApps　csvはタイリングを想定していない単純なもの。
+	// SVGMapLv0.1_r10以降で使える。
+	// ○CSVの形式：
+	//   最初の行に属性名を記入 次の行からデータを入れる
+	//   緯度と経度(WGS84)の桁が必須
+	//   タイトルの桁が必須
+	//   その他の桁は任意(用意できていない場合は適当な桁を指定しておくと良いでしょう・・・)
+	// ○このファイル(svg)のコンテナでのリンクの張り方:
+	//   csvXhr.svg#csvPath=refuge.csv&latCol=9&lngCol=10&titleCol=6
+	//     ハッシュの後に、サーチパートと同じような書き方をします。
+	//     csvPathとして読み込むcsvのパスを記述
+	//     latColに緯度の桁(base 0) - Required
+	//     lngColに経度の桁(base 0) - Required
+	//     titleColにタイトルの桁 - Optional
+	//     iconにアイコンの番号(0..5) - Optional
+	//     circleRadiusに円の半径(Km) (Optional)
+	//       もしくは radiusColに円の半径の桁(Optional)
+	//
+	// この実装の注意：
+	// ＞(>)・＜(<)・＆(&)符号はエスケープしないと動かない
+	// 2015.xx 以降のrev11ではフレームワーク側で対処するようになり動作するようになった。
+	// 
+	// このコードの動作環境では、以下があらかじめ設定される
+	// document:このドキュメント自身
+	// this.CRS:このドキュメントのCRS
+	// this.scale：このドキュメントの座標系での倍率
+	// this.actualViewBox：このドキュメントの座標系でのviewBox
+	// this.geoViewBox：地理座標におけるviewBox
+	// this.location : 本来のdocument.locationに相当するもの
+	// this.verIE : IEの場合、そのバージョンが設定。それ以外だと100
+	// onload:ロードされると呼ばれる
+	// onzoom:ズームされると呼ばれる
+	// onscroll:スクロールされると呼ばれる（ほかにズーム以外で画面更新時も）
+	//
+	// 2013/04/20 : 1st ver. ( Dynamic SVGMap LayerのテンプレートApps)
+	// 2014/06/26 : 1st ver. XHRによってCSVを読み込むレイヤーを開発
+	// 2015/06/02 : fork from rev3 : asynchronous rev10 framework or later
+	// 2015/10/26 : 指定カラムの値(番号)でアイコンの番号を変える機能(iconCol)
+	// 2015/10/30 : ｘｘKm圏の円(楕円)を表示する機能(circleRadius)、指定カラム値でフィルタする機能(iconColMatch)
+	// 2018/01/?? : なんかちょっと改良　エスケープ廃止
+	// 2018/01/25 : ｘｘKm圏の円のためのカラム(radiusCol)指定可能
+	// 2018/06/01 : iconColの値が列挙型文字列の場合でも、値に応じて適当にアイコンを割り付ける
+	
+	var csv;
+	
+	var latCol=-1 , lngCol=-1 , titleCol=-1 , radiusCol=-1;
+	var csvPath, docPath;
+	var iconNumber = 0;
+	var iconCol = -1;
+	var circleRadiusDefault = -1;
+	var circleRadius;
+	var iconColMatch = null;
+	
+//	console.log("Build Function");
+	
+    var CR = String.fromCharCode(13);
+    var LF = String.fromCharCode(10);
+    
+    var category ={
+    "0" : "p0",
+    "1" : "p1",
+    "2" : "p2",
+    "3" : "p3",
+    "4" : "p4",
+    "5" : "p5",
+    "6" : "p6",
+    "7" : "p7",
+    "8" : "p8",
+    "9" : "p9"
+    }
+    
+    var iconsLength = category.length;
+    
+    
+    function getHashParams( hash ){
+    	hash = hash.substring(1);
+    	hash = hash.split("&");
+		for ( var i = 0 ; i < hash.length ; i++ ){
+			if ( hash[i].indexOf("=") >0 ){
+				var hName = hash[i].substring(0,hash[i].indexOf("="));
+				var hVal = hash[i].substring(hash[i].indexOf("=")+1);
+				hash[i] = [hName,hVal];
+				hash[hash[i][0]] =hVal;
+			} else {
+				hash[hash[i][0]] = true;
+			}
+			/**
+			hash[i] = hash[i].split("=");
+			if ( hash[i][1] ){
+				hash[hash[i][0]] = "";
+				for ( var j = 1 ; j < hash[i].length ; j++ ){
+					hash[hash[i][0]] += hash[i][j];
+				}
+			} else {
+				hash[hash[i][0]] = true;
+			}
+			**/
+		}
+//    	console.log(hash);
+    	return ( hash );
+    }
+    
+	var canvasSize;
+	
+	function onload(){ 
+		console.log("HelloOnloadFUNC! csvXhr2a: this.location:" , this.location ,  document.firstChild.getAttribute("property") , this.verIE);
+		var hParams = getHashParams(this.location.hash);
+		docPath = this.location.pathname;
+		docPath = docPath.substring(0,docPath.indexOf("#"));
+		if ( hParams.csvPath ){
+			if ( hParams.csvPath.indexOf("http")==0){
+				csvPath = hParams.csvPath;
+			} else {
+				csvPath = docPath.substring(0,docPath.lastIndexOf("/")+1) + hParams.csvPath;
+			}
+//		csvPath = hParams.csvPath;
+		}
+		this.csvPath = csvPath;
+		console.log("csvPath:",csvPath,"  this.location.hash:",this.location.hash);
+		if ( hParams.latCol && hParams.lngCol ){
+			latCol = Number(hParams.latCol);
+			lngCol = Number(hParams.lngCol);
+		}
+		if ( hParams.titleCol ){
+			titleCol = Number(hParams.titleCol);
+		}
+		
+		if ( hParams.icon ){
+			iconNumber = Number(hParams.icon);
+		} 
+		
+		if ( hParams.iconCol ){
+			iconCol = Number(hParams.iconCol);
+		}
+		
+		if ( hParams.radiusCol ){
+			radiusCol = Number(hParams.radiusCol);
+		} else if ( hParams.circleRadius ){
+			circleRadiusDefault = Number(hParams.circleRadius);
+		}
+		
+		if ( hParams.iconColMatch ){
+			iconColMatch = new RegExp(hParams.iconColMatch);
+		} 
+		
+		loadCSV();
+		
+		
+	}
+	
+	function getSchema(csv0, latC,lngC,titleC, radiusCol){ // latC,lngC,titleCは使わないようになってる‥　スキーマから緯度経度から無自動認識の追加のために・・・ 2018/6/1
+		var csvRow0 = csv0.split(",");
+		if ( latCol < 0 ){
+			for ( var i = 0 ; i < csvRow0.length ; i++ ){
+				var key = csvRow0[i].trim().toLowerCase();
+				if ( key == "latitude" || key == "lat" || key == "lati" || key == "緯度" ){
+					latCol = i;
+				} else if ( key == "longitude" || key == "lng" || key == "lon" || key == "long" || key == "経度" ){
+					lngCol = i;
+				} else if ( titleCol < 0 && ( key.indexOf("名")>=0 || key.indexOf("title")>=0 || key.indexOf("name")>=0 )){
+					titleCol = i;
+				}
+			}
+			
+			return {
+				schemaLine : true,
+				schema : csvRow0
+			}
+		} else if ( isNaN(Number(csvRow0[latCol])) && isNaN(Number(csvRow0[lngCol])) ){
+			return {
+				schemaLine : true,
+				schema : csvRow0
+			}
+		} else {
+			
+			var scs ="";
+			for ( var i = 0 ; i < csvRow0.length ; i++ ){
+				if ( i == latCol ){
+					scs +="latitude";
+				} else if ( i == lngCol ){
+					scs +="longitude";
+				} else if ( i == titleCol ){
+					scs +="title";
+				} else if ( i == radiusCol ){
+					scs +="radius";
+				} else {
+					scs += "prop."+i;
+				}
+				if ( i < csvRow0.length -1 ){
+					scs +=",";
+				}
+			}
+			return {
+				schemaLine : false,
+				schema : scs
+			}
+		}
+	}
+	
+	function initCsv(inputCsv, latC,lngC,titleC,icon, radiusC){
+		if(inputCsv){
+			removeAllPOIs();
+			csv = inputCsv;
+			latCol = latC;
+			lngCol = lngC;
+			titleCol = titleC;
+			iconNumber = icon;
+			radiusCol = radiusC;
+		}
+		csv = csv.split(LF);
+		console.log("initCsv:",csv);
+		var schema = getSchema(csv[0], latCol,lngCol,titleCol, radiusCol);
+		var startRow;
+		if ( schema.schemaLine ){
+			startRow = 1;
+		} else {
+			startRow = 0;
+		}
+		
+		document.firstChild.setAttribute("property", schema.schema);
+		for ( var i = startRow ; i < csv.length ; i++ ){
+			var strTxt = csv[i].split(",");
+			if ( strTxt.length > 2 ){
+				var wgPos = { lat: Number( strTxt[latCol] ) , lng: Number( strTxt[lngCol]) };
+				if ( isNaN(wgPos.lat) || isNaN(wgPos.lng) ){
+					continue;
+				}
+				
+				// 20180125
+				if ( radiusCol >= 0 ){
+					circleRadius = Number( strTxt[radiusCol] );
+					if ( isNaN(circleRadius) ){
+						circleRadius = circleRadiusDefault;
+					}
+				} else {
+					circleRadius = circleRadiusDefault;
+				}
+				
+				if ( iconCol != -1 ){
+					iconNumber = strTxt[iconCol] ;
+					if ( iconColMatch && !iconColMatch.test(iconNumber) ){
+						continue;
+					}
+				}
+//				var wgPos = toWGS( strTxt[2] * 1.0 , strTxt[1] * 1.0);
+				var titleStr ="";
+				if ( titleCol >= 0 ){
+					titleStr = strTxt[titleCol].trim();
+				}
+				var addPOI = getPOI( wgPos.lat , wgPos.lng , iconNumber , titleStr, strTxt); 
+//				console.log(addPOI);
+				document.getElementsByTagName("svg")[0].appendChild(addPOI);
+				if ( circleRadius > 0 ){
+					var addCircle = getGeoCircle( wgPos.lat , wgPos.lng , circleRadius );
+					document.getElementsByTagName("svg")[0].appendChild(addCircle);
+				}
+			}
+				
+			
+//			console.log(i,strTxt);
+		}
+		console.log(document);
+		canvasSize = getCanvasSize();
+//		var currentTiles =  document.getElementsByTagName("image");
+	}
+	
+	onzoom = function(){
+//		console.log("csvXhr2: call onzoom");
+	}
+	
+	onscroll = onzoom;
+	
+	function loadCSV(){
+//	console.log("loadCSV");
+		var httpObj = new XMLHttpRequest();
+		if ( httpObj ) {
+			httpObj.onreadystatechange = function(){ handleResult( this ) } ; // 非同期に変更(for rev10 or later) 2015.6.2
+			httpObj.open("GET", csvPath , true );
+//			httpObj.open("GET", csvPath , false );
+			httpObj.send(null);
+//			handleResult(httpObj); // 同期でとりあえず動作させる
+		}
+	}
+	
+	function handleResult( httpRes ){
+//	console.log("handleResult");
+	
+		if (( httpRes.readyState == 4 ) ){
+			if ( httpRes.status == 403 || httpRes.status == 404 || httpRes.status == 500 || httpRes.status == 503 ){
+				console.log( "csvXHR2 : File get failed");
+				return;
+			}
+//			console.log("xhrRes:",httpRes.responseText);
+			csv = httpRes.responseText;
+			initCsv();
+			if ( refreshScreen ){
+				refreshScreen();
+			}
+		}
+	}
+	
+	
+	var allocatedIconNumb = 0;
+	function getIconId(icon){ // iconColの内容が数字以外だったら連想配列で処理する 2018/06
+		if ( category[icon] ){
+			return ( category[icon] );
+		} else {
+			if ( allocatedIconNumb >= iconsLength ){
+				allocatedIconNumb = 0;
+			}
+			category[icon] = category[allocatedIconNumb];
+			++ allocatedIconNumb;
+			return ( category[icon] );
+		}
+	}
+
+	
+	function getPOI( latitude , longitude , icon , title , metadata){
+		var iconId = getIconId(icon);
+//		console.log("call getPOI:");
+		
+		var tf = "ref(svg," + (longitude * 100) + "," + ( latitude * -100 ) + ")";
+//		console.log("getPOI, tf:",tf);
+		
+		var cl;
+//		console.log("verIE:",verIE);
+		cl = document.createElement("use"); // Edgeで不具合発生＆すべてのケースでもはやdocumentはSVG文書ではなく単なるwell formed XML文書化したためSVGネームスペース宣言不要
+/**
+		if ( verIE < 100 ){
+			cl = document.createElement("use");
+		} else {
+			cl = document.createElementNS("http://www.w3.org/2000/svg","use"); // Should be used NS ( for Firefox!!)
+		}
+**/
+		cl.setAttribute("x" , 0);
+		cl.setAttribute("y" , 0);
+		cl.setAttribute("transform" , tf);
+		cl.setAttribute("xlink:href" , "#"+iconId);
+		cl.setAttribute("xlink:title" , title);
+		if ( metadata ){
+			cl.setAttribute("content" , metadata);
+		}
+//		cl.setAttribute("opacity" , "0.5");
+		return ( cl );
+	}
+	
+	function toWGS(jlat , jlng){
+		var glat = jlat - 0.00010695 * jlat + 0.000017464 * jlng + 0.0046017;
+		var glng = jlng - 0.000046038 * jlat - 0.000083043 * jlng + 0.010040;
+		return{
+			lat: glat ,
+			lng: glng
+		}
+	}
+	
+	function removeAllPOIs(){
+		var pois=document.getElementsByTagName("use");
+		if ( pois ){
+			for ( var i = pois.length -1  ; i >=0 ; i-- ){
+				pois[i].parentNode.removeChild(pois[i]);
+			}
+		}
+	}
+	
+	// lat:deg, lng:deg. , radius:Km
+	function getGeoCircle( latitude , longitude , radius ){
+		var cl = document.createElementNS("http://www.w3.org/2000/svg","path");
+		var x0 = longitude * 100;
+		var y0 = latitude * -100;
+		
+		ry = 100 * radius * ( 360 / 40000) ;
+		rx = ry / Math.cos(latitude * Math.PI / 180 );
+		
+		var pstr = "M";
+		for ( var angle = 0 ; angle <= 360 ; angle += 5 ){
+			var cx = rx * Math.sin( angle * Math.PI / 180 ) + x0;
+			var cy = ry * Math.cos( angle * Math.PI / 180 ) + y0;
+			if ( angle == 0 ){
+				pstr += cx.toFixed(3) + "," + cy.toFixed(3) + "L";
+			} else {
+				pstr += cx.toFixed(3) + "," + cy.toFixed(3) + " ";
+			}
+		}
+		cl.setAttribute("fill","none");
+		cl.setAttribute("stroke","red");
+		cl.setAttribute("d",pstr);
+//		console.log("path:",cl);
+		return ( cl );
+	}
+	
+	
+</script>
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="matrix(100,0,0,-100,0,0)" />
+<defs>
+ <g id="p0" >
+  <image xlink:href="mappin.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p1" >
+  <image xlink:href="mappin1.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p2" >
+  <image xlink:href="mappin2.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p3" >
+  <image xlink:href="mappin3.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p4" >
+  <image xlink:href="mappin4.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p5" >
+  <image xlink:href="mappin5.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p6" >
+  <image xlink:href="mappin6.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p7" >
+  <image xlink:href="mappin7.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p8" >
+  <image xlink:href="mappin8.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+ <g id="p9" >
+  <image xlink:href="mappin9.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+ </g>
+</defs>
+</svg>
