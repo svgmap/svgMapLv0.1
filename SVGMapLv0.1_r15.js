@@ -146,7 +146,7 @@
 // 2018/02/02 : オブジェクトクリック機能のリファクタリング：testClickの機能とgetObjectAtPointをrev15で大幅拡張したtestTickerに統合 testClick, POItargetSelectionはこれにより不要となったので廃止、これに伴いPOI(img要素)に設置していた testClick EventListenerを全撤去
 // 2018/02/05 : Rev15 Release クリーンナップ
 // 2018/02/23 : <text>の改善
-// 2018/02/26 : captureGISgeometriesでビットイメージタイルも取得可能とした　ただし、captureGISgeometriesOptionで設定した場合
+// 2018/02/26 : captureGISgeometriesでビットイメージタイル"Coverage"も取得可能とした　ただし、captureGISgeometriesOptionで設定した場合
 // 2018/03/02 : useではなく直接imageで設置したnonScaling bitImageもPOIとして扱うようにした　結構大きい影響のある改修
 // 2018/04/06 : Edge対応ほぼ完了したかな これに伴いuaProp新設　今後isIE,verIE,isSPをこれに統合したうえで、IE10以下のサポートを完全に切る予定
 // 2018/06/01 : script実行ルーチンのデバッグ
@@ -155,6 +155,8 @@
 // 2018/08/01 : TreatRectAsPolygonFlag
 // 2018/09/04 : ビットイメージ(image要素)にstyle.imageRendering pixelated実装 ヒートマップなどを最小ファイルサイズ構築するためのもの(一応Edgeも対応*4Edge　今後このルーチンはEdge対応次第で廃止する)
 // 2019/03/12 : authoring tools editing 判別小修整、imageRendering->image-rendering 修正
+// 2019/04/16 : getHitPoint なるべく端を使わないように改良
+// 2019/05/17 : captureGisGeometries()のCoverageのtransform対応
 //
 // Issues:
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
@@ -3250,20 +3252,25 @@ function setPointerEvents(){
 		document.onmousemove = showPanning;
 		document.onresize = refreshWindowSize;
 	}
-	
+
+	/**
 	if( typeof window.onmousewheel != 'undefined' ){
 		window.onmousewheel = testWheel;
 	} else if( window.addEventListener ){
 		window.addEventListener( 'DOMMouseScroll', testWheel, false );
 	}
+	**/
+	window.addEventListener( 'wheel', testWheel, false );
 	
 }
 
 function testWheel( evt ){
-//	console.log("Wheel:",evt,evt.wheelDelta );
-	if (evt.detail < 0 || evt.wheelDelta > 0 ){
+//	console.log("Wheel:",evt,evt.deltaY );
+	if (evt.deltaY < 0 || evt.detail < 0 || evt.wheelDelta > 0 ){
+		//evt.preventDefault();
 		zoomup();
-	} else {
+	} else if ( evt.deltaY > 0 || evt.detail > 0 || evt.wheelDelta < 0 ){
+		//evt.preventDefault();
 		zoomdown();
 	}
 }
@@ -4184,6 +4191,7 @@ function initTicker(){
 		ticker.style.cursor="pointer";
 		ticker.style.overflowX="hidden";
 		ticker.style.overflowY="auto";
+		ticker.addEventListener("wheel" , MouseWheelListenerFunc, false);
 		ticker.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
 		ticker.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
 		
@@ -5217,14 +5225,41 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 	
 	var hitPoint = new Object(); // pathのhitPoint(線のためのhitTestエリア)を追加してみる(2013/11/28)
 	
-	function getHP( hp , cp ){
-		if ( clickable && cp ) {
-			if (!hp.x && cp.x > 35  && cp.x < mapCanvasSize.width -35 && cp.y > 35 && cp.y <  mapCanvasSize.height - 35){
-	//			console.log("set:",cp);
-				hp.x = cp.x;
-				hp.y = cp.y;
+	function getHitPoint( hp , cp , isEdgePoint){ // 2019/4/16 なるべく端を設定しないように改良中　今後は選択したら選択した線を明示する機能が必要だね
+		// hp: ひとつ前のステップで決めたヒットポイント
+		// なるべく端点は使いたくない(というより端点だったら、次の点との間の中点を使う)
+		if ( hp.prevX){
+			// console.log("check half: hp.prevXY:",hp.prevX,hp.prevY ,"  cp.xy:",cp.x,cp.y,"  flg:",hp.isEdgePoint,isEdgePoint,hp.prevIsEdgePoint);
+			if (hp.isEdgePoint!=false && (isEdgePoint || hp.prevIsEdgePoint )){// hpが設定済みだけれど、hpに端点が設定されいた・・
+				// console.log("set half point");
+				var tmpx = (hp.prevX + cp.x)/2;
+				var tmpy = (hp.prevY + cp.y)/2;
+				if (tmpx > 35  && tmpx < mapCanvasSize.width -35 && tmpy > 35 && tmpy <  mapCanvasSize.height - 35){
+					hp.x = tmpx;
+					hp.y = tmpy;
+					hp.isNearEdgePoint=true;
+				}
 			}
 		}
+		
+		if (cp.x > 35  && cp.x < mapCanvasSize.width -35 && cp.y > 35 && cp.y <  mapCanvasSize.height - 35){
+			if ( !hp.x ){ // まだ未設定の場合は端点でもなんでもひとまず設定しておく
+//			console.log("set:",cp);
+				hp.x = cp.x;
+				hp.y = cp.y;
+				hp.isEdgePoint=isEdgePoint;
+				hp.isNearEdgePoint =false;
+			} else if ( !isEdgePoint && (hp.isEdgePoint|| hp.isNearEdgePoint) ){ // 設定済みの場合、端点で無くて、hpが端点だったときはそれを設定する。
+				hp.x = cp.x;
+				hp.y = cp.y;
+				hp.isEdgePoint=false;
+				hp.isNearEdgePoint =false;
+			}
+		}
+		hp.prevX = cp.x;
+		hp.prevY = cp.y;
+		hp.prevIsEdgePoint = isEdgePoint;
+		// console.log( "getHitPoint: cp:",cp,isEdgePoint,"  hitPoint:",hp );
 		return ( hp );
 	}
 	
@@ -5257,7 +5292,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
 			mx = cp.x;
 			my = cp.y;
-//			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp , true );
 			context.moveTo(cp.x,cp.y);
 //			console.log("M",sx,sy);
 			if ( GISgeometry && !vectorEffectOffset ){
@@ -5277,7 +5312,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
 			mx = cp.x;
 			my = cp.y;
-//			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp , true );
 			context.moveTo(cp.x,cp.y);
 			if ( GISgeometry && !vectorEffectOffset ){
 				var svgP = [sx,sy];
@@ -5293,7 +5328,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			sy = Number(d[i]);
 //			console.log("L",sx,sy);
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
-			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp);
 			context.lineTo(cp.x,cp.y);
 			if ( GISgeometry && !vectorEffectOffset ){
 				var svgP = [sx,sy];
@@ -5307,7 +5342,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			++i;
 			sy += Number(d[i]);
 			cp = transform( sx , sy , child2canvas , false , vectorEffectOffset );
-			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp);
 			context.lineTo(cp.x,cp.y);
 			if ( GISgeometry && !vectorEffectOffset ){
 				var svgP = [sx,sy];
@@ -5401,7 +5436,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 		case "Z":
 		case "z":
 			context.closePath();
-			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp);
 			closed = true;
 			sx = startX; // debug 2016.12.1
 			sy = startY;
@@ -5412,7 +5447,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			}
 			break;
 		default:
-			hitPoint = getHP(hitPoint, cp);
+//			hitPoint = getHitPoint(hitPoint, cp);
 			prevCont = true;
 			break;
 		}
@@ -5429,6 +5464,10 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 			}
 			if ( cp.y > maxy ){
 				maxy = cp.y;
+			}
+			if ( clickable ){
+				// console.log("clk:",i,d.length-1);
+				hitPoint = getHitPoint(hitPoint, cp , (i==2 || i == (d.length-1)) );
 			}
 		}
 		
@@ -6165,6 +6204,27 @@ function vectorDataWrapperForShowPoiProperty(targetElement , targetBbox , usedPa
 		targetElement.setAttribute("content", usedParent.getAttribute("content"));
 	}
 	
+	console.log("targetElement:",targetElement);
+	
+	/**
+	// 選択されたベクタオブジェクトの線の太さだけを変える　2019.4.17 (この実装はやっぱりいまいちユーザビリティよくないのでやめる)
+	var origVE=targetElement.getAttribute("vector-effect");
+	var origSW=targetElement.getAttribute("stroke-width");
+	targetElement.setAttribute("stroke-width","5");
+	targetElement.setAttribute("vector-effect","non-scaling-stroke");
+	refreshScreen();
+	if ( origVE ){
+		targetElement.setAttribute("vector-effect",origVE);
+	} else {
+		targetElement.removeAttribute("vector-effect");
+	}
+	if ( origSW ){
+		targetElement.setAttribute("stroke-width",origSW);
+	} else {
+		targetElement.removeAttribute("stroke-width");
+	}
+	**/
+	
 	// showPoiPropertyWrapper()が想定しているオブジェクト形式に無理やり合わせて、呼び終わったら戻している・・・微妙
 //				targetElement.removeAttribute("d");
 	targetElement.setAttribute("lat",geolocMin.lat + ","+geolocMax.lat);
@@ -6486,8 +6546,9 @@ function showModal( htm , maxW, maxH ){
 
 	modalDiv.appendChild(btn);
 
-	modalDiv.addEventListener("mousewheel" , function(e){e.stopPropagation();}, false); //chrome
-	modalDiv.addEventListener("DOMMouseScroll" , function(e){e.stopPropagation();}, false); //firefox
+	modalDiv.addEventListener("wheel" , MouseWheelListenerFunc, false); //chrome
+	modalDiv.addEventListener("mousewheel" , MouseWheelListenerFunc, false); //chrome
+	modalDiv.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false); //firefox
 	document.getElementsByTagName("body")[0].appendChild(modalDiv);
 }
 
@@ -6956,7 +7017,7 @@ function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , p
 			var invCrs = getInverseMatrix(crs);
 			
 //			console.log( "layerID:",docId," crs:",crs);
-			var geoCrd;
+			var geoCrd, geoCrd2;
 			for ( var i = 0 ; i < layerGeoms.length ; i++ ){
 				var geom = layerGeoms[i];
 				if ( geom.type === "Point" ){
@@ -6964,11 +7025,27 @@ function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , p
 					geom.coordinates = [ geoCrd.lng , geoCrd.lat ];
 				} else if ( geom.type === "Coverage" ){
 					geom.coordinates = new Array();
-					geoCrd = SVG2Geo( geom.svgXY[0][0] , geom.svgXY[0][1] , null , invCrs );
-					var geoCrd2 = SVG2Geo( geom.svgXY[1][0] , geom.svgXY[1][1] , null , invCrs );
-					geom.coordinates.push({lat:Math.min(geoCrd.lat,geoCrd2.lat), lng:Math.min(geoCrd.lng,geoCrd2.lng)});
-					geom.coordinates.push({lat:Math.max(geoCrd.lat,geoCrd2.lat), lng:Math.max(geoCrd.lng,geoCrd2.lng)});
-					delete geom.transform; // TBDです・・・
+					if ( ! geom.transform || (geom.transform && geom.transform.b == 0 && geom.transform.c == 0 )){
+						if ( ! geom.transform ){
+							geoCrd = SVG2Geo( geom.svgXY[0][0] , geom.svgXY[0][1] , null , invCrs );
+							geoCrd2 = SVG2Geo( geom.svgXY[1][0] , geom.svgXY[1][1] , null , invCrs );
+						} else {
+							// transform 一時対応（回転成分がないケースのみ）2019.5.16
+							var sxy = transform( geom.svgXY[0][0] , geom.svgXY[0][1] , geom.transform );
+							var sxy2 = transform( geom.svgXY[1][0] , geom.svgXY[1][1] , geom.transform );
+							geoCrd = SVG2Geo( sxy.x , sxy.y , null , invCrs );
+							geoCrd2 = SVG2Geo( sxy2.x , sxy2.y , null , invCrs );
+						}
+						geom.coordinates.push({lat:Math.min(geoCrd.lat,geoCrd2.lat), lng:Math.min(geoCrd.lng,geoCrd2.lng)});
+						geom.coordinates.push({lat:Math.max(geoCrd.lat,geoCrd2.lat), lng:Math.max(geoCrd.lng,geoCrd2.lng)});
+						delete geom.transform; // TBDです・・・
+					} else {
+						geom.coordinates.push({x:geom.svgXY[0][0], y:geom.svgXY[0][1]});
+						geom.coordinates.push({x:geom.svgXY[1][0], y:geom.svgXY[1][1]});
+						geoTf = matMul(geom.transform,invCrs);
+						geom.transform = geoTf;
+//						console.log("WARN: 非対角成分transform:",geom);
+					}
 					
 				} else {
 					geom.coordinates = new Array();

@@ -29,6 +29,7 @@
 // 2018/06/21 Rev2 : ラスターGIS＝ビットイメージのimageをcanvasに読み込み、bitImage(画像処理)を用いたGIS機能～～　Web上で公開されている主題情報の多くがラスターなので・・
 // 2018/08/01 Add pointOnly option / get(Included/Excluded)Points
 // 2018.12.26 KMLを直接レンダリングする機能を実装
+// 2019/05/17 getInRangePoints(): Coverageがtransform付きのものをサポート
 //
 // 
 // ACTIONS:
@@ -53,7 +54,7 @@ var location = window.location;
 
 var svgMapGIStool = ( function(){ 
 
-	//console.log("Hello this is svgMapGIStool");
+//	console.log("Hello this is svgMapGIStool");
 	
 	if ( jsts ){ // using jsts (JTS javascript edition)
 //		console.log("This apps has jsts (JavaScript Topology Suites)");
@@ -690,7 +691,7 @@ var svgMapGIStool = ( function(){
 	}
 	
 	function getRangeParam(rangeData){
-		console.log("getRangeParam:",rangeData);
+//		console.log("getRangeParam:",rangeData);
 		var nRange = {};
 		// デフォルトは透明でないもの
 		var nRange={
@@ -764,7 +765,7 @@ var svgMapGIStool = ( function(){
 		var targetPois = [];
 		var targetCoverages = [];
 		// ここでcanvasに入れたimageとpoisで、いろいろやる感じ
-		console.log("getInRangePointsS2  geom:",geom);
+//		console.log("getInRangePointsS2  geom:",geom);
 		var svgImagesProps = svgMap.getSvgImagesProps();
 		if ( superParam.points ){
 			targetPois = superParam.points;
@@ -786,7 +787,7 @@ var svgMapGIStool = ( function(){
 		}
 		
 		// viewportにある対象オブジェクトが取れているはず
-		console.log("targetCoverages:",targetCoverages,"  targetPois:",targetPois);
+//		console.log("targetCoverages:",targetCoverages,"  targetPois:",targetPois);
 		superParam.targetPoisBbox = getTargetPoisBbox(targetPois);
 //		console.log("targetPoisBbox:",superParam.targetPoisBbox);
 		superParam.targetPois = targetPois;
@@ -816,11 +817,34 @@ var svgMapGIStool = ( function(){
 			if ( cindex == targetCov.length ){
 				return ( cindex);
 			} else {
-				// lng:x lat:y
-				var cLatMin = Math.min( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
-				var cLatMax = Math.max( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
-				var cLngMin = Math.min( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
-				var cLngMax = Math.max( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
+				var cLatMin, cLatMax, cLngMin, cLngMax;
+				if ( targetCov[cindex].geoExtent ){
+//					console.log("geoExtent再利用");
+					cLatMin = geoExtent[0];
+					cLatMax = geoExtent[1];
+					cLngMin = geoExtent[2];
+					cLngMax = geoExtent[3];
+				} else if ( targetCov[cindex].coordinates[0].lat ){
+					// lng:x lat:y
+					cLatMin = Math.min( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
+					cLatMax = Math.max( targetCov[cindex].coordinates[0].lat , targetCov[cindex].coordinates[1].lat);
+					cLngMin = Math.min( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
+					cLngMax = Math.max( targetCov[cindex].coordinates[0].lng , targetCov[cindex].coordinates[1].lng);
+					targetCov[cindex].geoExtent=[cLatMin,cLatMax,cLngMin,cLngMax];
+				} else {
+//					console.log("非対角transform処理:");
+					var s2g = targetCov[cindex].transform;
+					var p0 = targetCov[cindex].coordinates[0];
+					var p1 = targetCov[cindex].coordinates[1];
+					var gp0 = svgMap.transform(p0.x ,p0.y , s2g);
+					var gp1 = svgMap.transform(p1.x ,p1.y , s2g);
+					cLatMin = Math.min( gp0.y , gp1.y);
+					cLatMax = Math.max( gp0.y , gp1.y);
+					cLngMin = Math.min( gp0.x , gp1.x);
+					cLngMax = Math.max( gp0.x , gp1.x);
+					targetCov[cindex].geoExtent=[cLatMin,cLatMax,cLngMin,cLngMax];
+					targetCov[cindex].geo2svg=svgMap.getInverseMatrix(s2g);
+				}
 				if ( cLatMin <= targetPoisBbox.ymax && 
 					targetPoisBbox.ymin <= cLatMax && 
 					cLngMin <= targetPoisBbox.xmax && 
@@ -837,19 +861,40 @@ var svgMapGIStool = ( function(){
 	
 	
 	function computeInRangePoints( pixData , pixWidth , pixHeight , superParam ){
-		console.log("computeInRangePoints: coverageData:",pixData.length , pixWidth, pixHeight,"  targetPois.length:",superParam.targetPois.length);
-		var extent = superParam.targetCoverages[superParam.coverageIndex].coordinates;
+//		console.log("computeInRangePoints: coverageData:",pixData.length , pixWidth, pixHeight,"  targetPois.length:",superParam.targetPois.length);
+		// var extent = superParam.targetCoverages[superParam.coverageIndex].coordinates;
 		
 		for ( var i = 0 ; i < superParam.targetPois.length ; i++ ){
 			var pointCrd = superParam.targetPois[i].coordinates;
-			var latMin = Math.min(extent[0].lat, extent[1].lat);
-			var latMax = Math.max(extent[0].lat, extent[1].lat);
-			var lngMin = Math.min(extent[0].lng, extent[1].lng);
-			var lngMax = Math.max(extent[0].lng, extent[1].lng);
+			var latMin = superParam.targetCoverages[superParam.coverageIndex].geoExtent[0];
+			var latMax = superParam.targetCoverages[superParam.coverageIndex].geoExtent[1];
+			var lngMin = superParam.targetCoverages[superParam.coverageIndex].geoExtent[2];
+			var lngMax = superParam.targetCoverages[superParam.coverageIndex].geoExtent[3];
+			//var latMin = Math.min(extent[0].lat, extent[1].lat);
+			//var latMax = Math.max(extent[0].lat, extent[1].lat);
+			//var lngMin = Math.min(extent[0].lng, extent[1].lng);
+			//var lngMax = Math.max(extent[0].lng, extent[1].lng);
 //			console.log("cover:",latMin,latMax,lngMin,lngMax,"  poi:",pointCrd[1],pointCrd[0]);
 			if ( lngMin <= pointCrd[0] && lngMax > pointCrd[0] && latMin <= pointCrd[1] && latMax > pointCrd[1] ){
-				var px = Math.floor(pixWidth  * (pointCrd[0] - lngMin)/(lngMax - lngMin));
-				var py = pixHeight - Math.floor(pixHeight * (pointCrd[1] - latMin)/(latMax - latMin)) - 1;
+				var px,py;
+				if ( !superParam.targetCoverages[superParam.coverageIndex].geo2svg){
+					px = Math.floor(pixWidth  * (pointCrd[0] - lngMin)/(lngMax - lngMin));
+					py = pixHeight - Math.floor(pixHeight * (pointCrd[1] - latMin)/(latMax - latMin)) - 1;
+				} else {
+					var g2s = superParam.targetCoverages[superParam.coverageIndex].geo2svg;
+					var cov_sp0 = superParam.targetCoverages[superParam.coverageIndex].coordinates[0]; //カバレッジのsvg原点座標(transformかける前)
+					var cov_sp1 = superParam.targetCoverages[superParam.coverageIndex].coordinates[1]; //同対角座標
+					var poi_svgPos = svgMap.transform(pointCrd[0] , pointCrd[1] , g2s); // カバレッジのsvgコンテンツの座標系上でのポイントの座標
+					var cov_sw = cov_sp1.x - cov_sp0.x;
+					var cov_sh = cov_sp1.y - cov_sp0.y;
+					px = Math.floor(pixWidth * ( poi_svgPos.x -cov_sp0.x )/cov_sw);
+					py = Math.floor(pixHeight * ( poi_svgPos.y -cov_sp0.y )/cov_sh);
+//					console.log(g2s,cov_sp0,cov_sp1,poi_svgPos,cov_sw,cov_sh,pixWidth,pixHeight);
+//					console.log("非対角transform PX,PY算出:px,py:",px,py);
+					if ( px <0 || py <0 || px >= pixWidth || py>= pixHeight ){
+						break;
+					}
+				}
 				
 				var addr = ( px + py * pixWidth ) * 4;
 				var R = pixData[ addr ];
@@ -1152,7 +1197,7 @@ var svgMapGIStool = ( function(){
 		**/
 //		console.log(svgImage);
 	}
-
+	
 
 	/*
 		Styleは未実装
@@ -1384,7 +1429,7 @@ return { // svgMapGIStool. で公開する関数のリスト
 	drawKml : drawKml,
 	getInRangePoints : getInRangePoints,
 	setImageProxy: setImageProxy,
-	latLng2GeoJsonPoint : latLng2GeoJsonPoint
+	latLng2GeoJsonPoint: latLng2GeoJsonPoint
 }
 
 })();
