@@ -57,6 +57,10 @@ var location = window.location;
 var svgMapLayerUI = ( function(){ 
 
 
+var UTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARElEQVQoU2NkIAEwkqCWAaviUIaD/1cz2GPIYQiAFMJsQ9eAohhZITYNcMXYFKJrACvGpxBZAyMxCmEaKA86XGFPkskAu/sRITlJWQUAAAAASUVORK5CYII=";
+var DTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARklEQVQoU2NkIAEwkqCWgTTFoQwH/xNrOthkYjSsZrBnhDsDnwaQQpChKG7GpgGmEEMxupOQFWJVDNOArhCnYlyhQ1I4AwDsgxEhKAdQXgAAAABJRU5ErkJggg==";
+var RTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAAQUlEQVQoU2NkQAKhDAf/r2awZ0QWQ2ajSIAUgyRxacCqGJcGnIqxacCrGF0DQcXIGggqRvYsddyMLfgoC2d8MQgAdTkhDCcGd3MAAAAASUVORK5CYII=";
+
 var layerList, uiOpen , layerTableDiv , uiOpened , layerGroupStatus ; // layerGroupStatusは今はグループ折り畳み状態のみ管理
 var layerSpecificUI; // layerSpecificUIの要素
 function layerListOpenClose(){
@@ -65,12 +69,12 @@ function layerListOpenClose(){
 	if ( layerList.style.height== layerListFoldedHeight + "px" ){ // layer list is colsed
 		updateLayerTable();
 		layerList.style.height=layerListMaxHeightStyle;
-		uiOpenBtn.value="^";
+		uiOpenBtn.firstChild.src=UTpng;
 		layerTableDiv.style.display="";
 		uiOpened = true;
 	} else { // opened
 		layerList.style.height= layerListFoldedHeight + "px";
-		uiOpenBtn.value="v";
+		uiOpenBtn.firstChild.src=DTpng;
 		layerTableDiv.style.display="none";
 		uiOpened = false;
 	}
@@ -220,11 +224,12 @@ function getLayerTR(title, id ,visible,hasLayerList,groupName){
 	
 	// レイヤ固有UIのボタン生成
 	var td = document.createElement("td");
-	var btn = document.createElement("input");
-	btn.type="button";
+	var btn = document.createElement("button");
+	btn.innerHTML="<img style='pointer-events: none;' src='"+RTpng+"'>";
+//	btn.type="button";
 	btn.className="layerUiButton";
 	btn.id = btid;
-	btn.value=">";
+//	btn.value=">";
 //	btn.setAttribute("onClick","svgMapLayerUI.showLayerSpecificUI(event)");
 	btn.addEventListener("click", showLayerSpecificUI, false);
 	if ( visible ){
@@ -388,14 +393,14 @@ function getGroupTR(lp, gfolded){ // グループ項目を生成する
 	
 	// group fold button
 	var foldTd = document.createElement("td");
-	var foldButton = document.createElement("input");
+	var foldButton = document.createElement("button");
 	foldButton.id = gbid;
-	foldButton.type="button";
+//	foldButton.type="button";
 	foldButton.addEventListener("click",toggleGroupFold,false);
 	if ( ! gfolded ){
-		foldButton.value = "^";
+		foldButton.innerHTML="<img style='pointer-events: none;' src='"+UTpng+"'>";
 	} else {
-		foldButton.value = "v";
+		foldButton.innerHTML="<img style='pointer-events: none;' src='"+DTpng+"'>";
 	}
 	foldTd.appendChild(foldButton);
 	groupTr.appendChild(foldTd);
@@ -464,6 +469,7 @@ function initLayerList(){
 	layerGroupStatus = new Object();
 	layerList = document.getElementById("layerList");
 //	console.log("ADD EVT");
+	layerList.addEventListener("wheel" , MouseWheelListenerFunc, false); // added 2019/04/15
 	layerList.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
 	layerList.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
 	layerList.style.zIndex="20";
@@ -490,10 +496,10 @@ function initLayerList(){
 //	layerList.appendChild(llUIlabel);
 	llUItop.appendChild(llUIlabel);
 	
-	var llUIbutton = document.createElement("input");
+	var llUIbutton = document.createElement("button");
 	llUIbutton.id="layerListOpenButton";
-	llUIbutton.type="button";
-	llUIbutton.value="v";
+//	llUIbutton.type="button";
+	llUIbutton.innerHTML="<img style='pointer-events: none;' src='"+DTpng+"'>";
 	llUIbutton.style.position="absolute";
 	llUIbutton.style.right="0px";
 	llUIbutton.addEventListener("click",layerListOpenClose);
@@ -730,6 +736,7 @@ function showLayerSpecificUI(e){
 				img.id = targetIframeId;
 				//画像サイズを指定した場合div(layerSpecificUI)のサイズを変更して画像１枚を表示させる
 				var resLayerSpecificUI = document.getElementById("layerSpecificUI");
+				resLayerSpecificUI.addEventListener("wheel" , MouseWheelListenerFunc, false);
 				resLayerSpecificUI.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
 				resLayerSpecificUI.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
 				document.getElementById("layerSpecificUIbody").appendChild(img);
@@ -936,6 +943,12 @@ function testIframeSize( iframe ,reqSize){
 	} else { // 自動サイジング 最大値はcss設定値
 		if ( iframe.contentWindow.document.body.offsetHeight < layerSpecificUiMaxHeight ){
 			layerSpecificUI.style.height = (50 + iframe.contentWindow.document.body.offsetHeight) + "px";
+//		iframe.style.height = ""; //IE11対応
+//		if ( iframe.contentWindow.document.documentElement.offsetHeight < layerSpecificUiMaxHeight ){
+//			iframe.style.height = 0;
+//			iframe.style.height = iframe.contentWindow.document.documentElement.scrollHeight + "px"; //モダンブラウザ対応
+//			layerSpecificUI.style.height = iframe.contentWindow.document.documentElement.offsetHeight + "px";
+//			iframe.style.height = layerSpecificUI.style.height; //IE対応
 		} else {
 			layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
 		}

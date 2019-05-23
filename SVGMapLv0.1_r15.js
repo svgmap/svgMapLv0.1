@@ -239,7 +239,7 @@ var svgImages = new Array(); // svg文書群(XML) arrayのハッシュキーはi
 var svgImagesProps = new Array(); // 同svg文書群の .Path,.CRS,.script,.editable,.editing,.isClickable,.parentDocId,.childImages,.controller,.metaSchema
 
 var ticker; // Ticker文字のdiv要素
-var tickerTable // 同 table要素
+var tickerTable; // 同 table要素
 
 var ignoreMapAspect = false; // 地図のアスペクト比を、rootSVGのvireBox( or hashのviewBox)そのものにする場合true
 
@@ -709,41 +709,47 @@ function tempolaryZoomPanImages( zoomFactor , sftX , sftY ){
 	
 //	console.log("total:"+mapImgs.length+"imgs");
 //	var removedImgs= 0;
-	for ( var i = mapImgs.length - 1 ; i >= 0 ; i-- ){
-		var il = Number(mapImgs.item(i).style.left.replace("px",""));
-		var it = Number(mapImgs.item(i).style.top.replace("px",""));
-		var iw = Number(mapImgs.item(i).width);
-		var ih = Number(mapImgs.item(i).height);
-		
-		var xd = getIntValue( (il - mapCanvasSize.width * 0.5) * zoomFactor + mapCanvasSize.width * 0.5 + sftX  , iw * zoomFactor );
-		var yd = getIntValue( (it - mapCanvasSize.height * 0.5) * zoomFactor + mapCanvasSize.height * 0.5 + sftY  , ih * zoomFactor );
-		
-		var imgRect = new Object();
-		imgRect.x = xd.p0;
-		imgRect.y = yd.p0;
-		imgRect.width = xd.span;
-		imgRect.height = yd.span;
-		
-		/** This removeChildLogic causes safari(both iOS&MacOS) Crash.. 2016.5.16
-		if (isIntersect(imgRect,mapCanvasSize)){ // キャンバス内にあるimgのみ書き換える
+	if ( uaProp.IE){ // 下の再利用処理はIE11でかなりのボトルネック化している・・・
+		for ( var i = mapImgs.length - 1 ; i >= 0 ; i-- ){
+			mapImgs.item(i).parentNode.removeChild(mapImgs.item(i)); // 何の工夫もせず単に全部消す。これが一番早い感じで表示もまずまず・・・
+		}
+	} else {
+		for ( var i = mapImgs.length - 1 ; i >= 0 ; i-- ){
+			var il = Number(mapImgs.item(i).style.left.replace("px",""));
+			var it = Number(mapImgs.item(i).style.top.replace("px",""));
+			var iw = Number(mapImgs.item(i).width);
+			var ih = Number(mapImgs.item(i).height);
 			
+			var xd = getIntValue( (il - mapCanvasSize.width * 0.5) * zoomFactor + mapCanvasSize.width * 0.5 + sftX  , iw * zoomFactor );
+			var yd = getIntValue( (it - mapCanvasSize.height * 0.5) * zoomFactor + mapCanvasSize.height * 0.5 + sftY  , ih * zoomFactor );
+			
+			var imgRect = new Object();
+			imgRect.x = xd.p0;
+			imgRect.y = yd.p0;
+			imgRect.width = xd.span;
+			imgRect.height = yd.span;
+			
+			/** This removeChildLogic causes safari(both iOS&MacOS) Crash.. 2016.5.16
+			if (isIntersect(imgRect,mapCanvasSize)){ // キャンバス内にあるimgのみ書き換える
+				
+				mapImgs.item(i).style.left = xd.p0 + "px";
+				mapImgs.item(i).style.top = yd.p0 + "px";
+				
+				mapImgs.item(i).width = xd.span;
+				mapImgs.item(i).height = yd.span;
+			} else { // それ以外のimgは消す
+				mapImgs.item(i).parentNode.removeChild(mapImgs.item(i));
+	//			++ removedImgs;
+			}
+			**/
+			// Simply rewrite image position
 			mapImgs.item(i).style.left = xd.p0 + "px";
 			mapImgs.item(i).style.top = yd.p0 + "px";
 			
 			mapImgs.item(i).width = xd.span;
 			mapImgs.item(i).height = yd.span;
-		} else { // それ以外のimgは消す
-			mapImgs.item(i).parentNode.removeChild(mapImgs.item(i));
-//			++ removedImgs;
+			
 		}
-		**/
-		// Simply rewrite image position
-		mapImgs.item(i).style.left = xd.p0 + "px";
-		mapImgs.item(i).style.top = yd.p0 + "px";
-		
-		mapImgs.item(i).width = xd.span;
-		mapImgs.item(i).height = yd.span;
-		
 	}
 //	console.log("removed " + removedImgs + "imgs");
 	
@@ -1046,6 +1052,8 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 	}
 }
 
+var usedImages=[]; // DOM操作によるsvgmapドキュメントやそのプロパティのメモリリークのチェック用 2019.5.22
+
 function dynamicLoad( docId , parentElem ){ // アップデートループのルート：ほとんど機能がなくなっている感じがする・・
 	if (! docId && ! parentElem ){
 		docId ="root";
@@ -1063,6 +1071,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 	parentElem.setAttribute("property",svgImagesProps[docId].metaSchema); // added 2012/12
 	var symbols = getSymbols(svgDoc); // シンボルの登録を事前に行う(2013.7.30)
 	if ( docId == "root" ){
+		usedImages=[];
 		setCentralVectorObjectsGetter(); // 2018.1.18 checkTicker()の二重パースの非効率を抑制する処理を投入
 		
 //		console.log("called root dynamicLoad");
@@ -1212,6 +1221,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	
 	if ( svgElem.nodeName=="svg"){
 		updateMetaSchema(docId); // 2018.2.28 metaSchemaがDOM操作で変更されることがある・・・
+		usedImages[docId]=true; // 2019.5.22 メモリリーク防止用　今描画されてるドキュメントのID表を作る
 	}
 	
 	var beforeElem = null;
@@ -3073,6 +3083,24 @@ function removeChildDocs( imageId ){
 	}
 }
 
+// DOM操作などでdocが追加削除されると、上の関数だけではメモリリークする可能性がある(インターバルrefreshなど) 2019.5.22
+// usedImages[]を使って使われていないドキュメントを消していく
+function removeUnusedDocs(){
+	// console.log("removeUnusedDocs: usedImages: ", usedImages);
+	var delKeys=[];
+	for ( key in svgImages ){
+		// console.log("key:",key,"  is Used?:",usedImages[key]);
+		if ( !usedImages[key] ){
+			delete svgImages[key];
+			delete svgImagesProps[key];
+			delKeys.push(key);
+		}
+	}
+	if ( delKeys.length > 0 ){
+		console.log("removeUnusedDocs : docId:",delKeys," are no longer used. Delete it.");
+	}
+}
+
 function setLayerListSize(){
 	var llElem = document.getElementById("layerList");
 	// id:layerList 要素はwidthが"px"で指定されていなければならない・・　とりあえず
@@ -4551,6 +4579,7 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 		if ( !loadCompleted && !pathHitTest.enable ){ // forceDelの時もイベントだすべきでは？ ただしpathHitTest.enableのサーチで出すのはおかしいのでは？
 //			console.log("loading Completed");
 //			loadCompleted = true; // これ意味ない
+			removeUnusedDocs(); // 2019.5.22 メモリリーク対策
 			if ( viewBoxChanged() ){ // 2017.3.16 本当にviewboxが変化したときのみzoomPanMap ev出す
 				var customEvent = document.createEvent("HTMLEvents");
 				customEvent.initEvent("zoomPanMap", true , false );
