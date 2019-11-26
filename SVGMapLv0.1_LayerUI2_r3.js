@@ -5,7 +5,7 @@
 // 
 //  Programmed by Satoru Takagi
 //  
-//  Copyright (C) 2016-2017 by Satoru Takagi @ KDDI CORPORATION
+//  Copyright (C) 2016-2019 by Satoru Takagi @ KDDI CORPORATION
 //  
 // License: (GPL v3)
 //  This program is free software: you can redistribute it and/or modify
@@ -38,7 +38,9 @@
 // 2017/08/25 : 凡例（画像）表示時においてサイズ未指定の場合は元画像のサイズでフレームをリサイズする様追加
 // 2017/09/08 : data-controllerに、#exec=appearOnLayerLoad,hiddenOnLayerLoad,onClick(default)
 // 2018/04/02 : layerListmessage に選択レイヤ名称をtextで設定する処理を追加
-//
+// 2019/02/19 : ^>v等のボタンをビットイメージ化　wheel系イベントをモダンに
+// 2019/11/26 : CORSがあれば、別ドメインのレイヤーでもLayerUIframeが動作できるようになった（かも）
+// 
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
 //  レイヤ固有UIを別ウィンドウ化できる機能があったほうが良いかも
@@ -743,11 +745,11 @@ function showLayerSpecificUI(e){
 				setTimeout(imgResize, 100, img, resLayerSpecificUI, reqSize); 
 				setTimeout(setLsUIbtnOffset,100,img);
 			} else {
-				initIframe(layerId,controllerURL,svgMap,reqSize);
+				initIframe(layerId,controllerURL,reqSize);
 			}
 		}
 	} else {  // hiddenOnLaunchフラグが立っているときは、iframeは起動させるが、画面上に表示はさせない 2017.9.22
-		var hideIframe=initIframe(layerId,controllerURL,svgMap,reqSize);
+		var hideIframe=initIframe(layerId,controllerURL,reqSize);
 		hideIframe.display="none";
 	}
 }
@@ -799,14 +801,26 @@ function dispatchCutomIframeEvent(evtName, targetFrameId){
 	}
 }
 
-function initIframe(lid,controllerURL,svgMap,reqSize){
+function initIframe(lid,controllerURL,reqSize){
 	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
 	var iframe = document.createElement("iframe");
-	layerSpecificUIbody.appendChild(iframe);
+//	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26
 	iframeId = "layerSpecificUIframe_"+ lid;
 	iframe.id = iframeId;
+	var bySrcdoc = false;
 	if ( controllerURL.charAt(0) != ":" ){
-		iframe.src=controllerURL;
+		if (controllerURL.startsWith("http://") || controllerURL.startsWith("https://")){
+			// CORS設定されてる別サイトのiframeでもdata-controllerでURL表現状態でも起動可能にする 2019/11/26
+			console.log("Get controller by XHR");
+			var httpObj = new XMLHttpRequest();
+			httpObj.onreadystatechange = function(){ initIframePh2( this , iframe , lid, reqSize ) } ; 
+			httpObj.open("GET", controllerURL , true );
+			httpObj.send(null);
+			bySrcdoc = true;
+		} else {
+			iframe.src=controllerURL;
+			layerSpecificUIbody.appendChild(iframe);
+		}
 	} else {
 		var controllerSrc = (svgMap.getSvgImagesProps())[lid].controller;
 		
@@ -821,6 +835,8 @@ function initIframe(lid,controllerURL,svgMap,reqSize){
 		
 		
 		iframe.srcdoc = sourceDoc;
+		layerSpecificUIbody.appendChild(iframe);
+		bySrcdoc = true;
 		if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
 			sourceDoc = sourceDoc.replace(/&quot;/g,'"');
 			iframe.contentWindow.document.write(sourceDoc );
@@ -837,44 +853,82 @@ function initIframe(lid,controllerURL,svgMap,reqSize){
 	iframe.style.border ="none";
 	iframe.style.display="block";
 	
-//	console.log("initIframe:  layerSpecificUIbody Style:",layerSpecificUIbody.style,"  iframe.style",iframe.style);
 	iframe.addEventListener("load",function(){
-//	iframe.onload=function(){}
-		dispatchCutomIframeEvent(openFrame,iframeId);
-		if ( layerSpecificUiMaxHeight == 0 ){
-			layerSpecificUiMaxHeight = layerSpecificUI.offsetHeight
-		}
-		iframe.contentWindow.layerID=lid;
-		iframe.contentWindow.svgMap = svgMap;
-		if ( typeof svgMapGIStool != "undefined" ){
-//			console.log("add svgMapGIStool to iframe");
-			iframe.contentWindow.svgMapGIStool = svgMapGIStool;
-		}
-		if ( typeof svgMapAuthoringTool != "undefined" ){ // added 2016.12.19 AuthoringTools
-//			console.log("add svgMapAuthoringTool to iframe");
-			iframe.contentWindow.svgMapAuthoringTool = svgMapAuthoringTool;
-		}
-		
-		iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
-		iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
-//		iframe.contentWindow.testIframe("hellow from parent");
-		if ( transferCustomEvent2iframe[lid] ){
-			document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[lid], false);
-			document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[lid], false);
-		} else {
-			transferCustomEvent2iframe[lid] = transferCustomEvent4layerUi(lid);
-		}
-		document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
-		document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
-		setTimeout( testIframeSize , 1000 , iframe ,reqSize);
+		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL);
 	}, { once: true });
+//	console.log("iframe.srcdoc?:",iframe.srcdoc);
+	if(iframe.srcdoc) { // Fix IE11 issue on srcdoc pattern 2019/2/19 (IE以外ではsrcdocは読みだせないらしい 2019/11/26)
+		console.log("Patch for IE11 force send load event.");
+		var loadEvent = document.createEvent("HTMLEvents");
+		loadEvent.initEvent('load', false, true );
+		iframe.dispatchEvent(loadEvent);
+	};
+	return (iframe);
+}
+
+function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
+	// srcdocだと、xxmsぐらい待たないと、contentWindowへの設定がwindowに保持されないので、初期化されるまでリトライすることに。
+	// xxmsの時間もなんかまちまち・・(on chrome) 2019/11/26
+	var iframeId = iframe.id;
+	console.log("initIframe load eventListen");
+	dispatchCutomIframeEvent(openFrame,iframeId);
+	if ( layerSpecificUiMaxHeight == 0 ){
+		layerSpecificUiMaxHeight = layerSpecificUI.offsetHeight
+	}
+	iframe.contentWindow.layerID=lid;
+	
+	iframe.contentWindow.controllerSrc = controllerURL; // Add 2019/11/26 srcdocでロードしたケースでdocPath知りたいとき
+//	iframe.contentWindow.controllerDir = controllerURL.substring(0,controllerURL.lastIndexOf("/")); // #や?があるのでもちょっとしっかりやった方が良いので後回し 2019
+	
+	iframe.contentWindow.svgMap = svgMap;
+//	console.log("iframe.contentWindow:",iframe.contentWindow);
+	if ( typeof svgMapGIStool != "undefined" ){
+//			console.log("add svgMapGIStool to iframe");
+		iframe.contentWindow.svgMapGIStool = svgMapGIStool;
+	}
+	if ( typeof svgMapAuthoringTool != "undefined" ){ // added 2016.12.19 AuthoringTools
+//			console.log("add svgMapAuthoringTool to iframe");
+		iframe.contentWindow.svgMapAuthoringTool = svgMapAuthoringTool;
+	}
+	
+	iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
+	iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
+//		iframe.contentWindow.testIframe("hellow from parent");
+	if ( transferCustomEvent2iframe[lid] ){
+		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[lid], false);
+		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[lid], false);
+	} else {
+		transferCustomEvent2iframe[lid] = transferCustomEvent4layerUi(lid);
+	}
+	document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
+	document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
+	setTimeout( testIframeSize , 1000 , iframe ,reqSize);
+}
+
+
+function initIframePh2(httpRes, iframe , lid, reqSize ){
+	if (( httpRes.readyState != 4 ) ){
+		return;
+	}
+	if ( httpRes.status == 403 || httpRes.status == 404 || httpRes.status == 500 || httpRes.status == 503 ){
+		console.log( "csvXHR2 : File get failed");
+		return;
+	}
+	console.log("initIframePh2(byXHR): httpRes: ",httpRes, "   lid:",  lid);
+	var sourceDoc = httpRes.responseText;
+	iframe.srcdoc = sourceDoc;
+	layerSpecificUIbody.appendChild(iframe);
+	if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
+		console.log("patch for IE&Edge");
+		sourceDoc = sourceDoc.replace(/&quot;/g,'"');
+		iframe.contentWindow.document.write(sourceDoc );
+	}
+	
 	if(iframe.srcdoc) { // Fix IE11 issue on srcdoc pattern 2019/2/19
 		var loadEvent = document.createEvent("HTMLEvents");
 		loadEvent.initEvent('load', false, true );
 		iframe.dispatchEvent(loadEvent);
 	};
-	
-	return (iframe);
 }
 
 function pxNumb( pxval ){
@@ -996,7 +1050,7 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);
 		delete transferCustomEvent2iframe[layerId];
-		dispatchCutomIframeEvent("closeFrame",targetIframeId );
+		dispatchCutomIframeEvent(closeFrame,targetIframeId );
 		setTimeout( function(){
 			console.log( "remove iframe:",targetIframe.id);
 			targetIframe.parentNode.removeChild(targetIframe);

@@ -6,7 +6,7 @@
 //  
 // Programmed by Satoru Takagi
 //  
-// Copyright (C) 2012-2018 by Satoru Takagi @ KDDI CORPORATION
+// Copyright (C) 2012-2019 by Satoru Takagi @ KDDI CORPORATION
 //  
 // Contributors:
 //  jakkyfc
