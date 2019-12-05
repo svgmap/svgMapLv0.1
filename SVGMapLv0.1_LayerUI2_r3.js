@@ -40,7 +40,8 @@
 // 2018/04/02 : layerListmessage に選択レイヤ名称をtextで設定する処理を追加
 // 2019/02/19 : ^>v等のボタンをビットイメージ化　wheel系イベントをモダンに
 // 2019/11/26 : CORSがあれば、別ドメインのレイヤーでもLayerUIframeが動作できるようになった（かも）
-// 
+// 2019/12/05 : SVGMap.jsのグローバルエリア"globalMesasge" span要素がある場合、そこに(調停付きで)レイヤー固有UIframeからメッセージを出せるフレームワーク putGlobalMessage()
+//
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
 //  レイヤ固有UIを別ウィンドウ化できる機能があったほうが良いかも
@@ -869,6 +870,8 @@ function initIframe(lid,controllerURL,reqSize){
 function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 	// srcdocだと、xxmsぐらい待たないと、contentWindowへの設定がwindowに保持されないので、初期化されるまでリトライすることに。
 	// xxmsの時間もなんかまちまち・・(on chrome) 2019/11/26
+	// DOMContentLoaded イベントで動作させれば良いんじゃないかな とも思ったがどうだろう
+	// 参考: https://ja.javascript.info/onload-ondomcontentloaded 2019/12/05
 	var iframeId = iframe.id;
 	console.log("initIframe load eventListen");
 	dispatchCutomIframeEvent(openFrame,iframeId);
@@ -890,6 +893,9 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 //			console.log("add svgMapAuthoringTool to iframe");
 		iframe.contentWindow.svgMapAuthoringTool = svgMapAuthoringTool;
 	}
+	
+	iframe.contentWindow.svgMapLayerUI=svgMapLayerUI;
+	iframe.contentWindow.putGlobalMessage = putGlobalMessageForLayer(lid); // added 2019/12/05 今後、この種の"そのレイヤーに対するAPI"が増えると思うが、もう少しきれいにまとめたい。(TBD)
 	
 	iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
 	iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
@@ -1051,6 +1057,7 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);
 		delete transferCustomEvent2iframe[layerId];
 		dispatchCutomIframeEvent(closeFrame,targetIframeId );
+		clearGlobalMessage(layerId);
 		setTimeout( function(){
 			console.log( "remove iframe:",targetIframe.id);
 			targetIframe.parentNode.removeChild(targetIframe);
@@ -1058,10 +1065,77 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 	}
 }
 
+var GlobalMessageprefix = "gMsg_";
+var maxGlobalMessages = 5;
+var globalMessageID="globalMessage";
+// ローバルエリアにID="globalMesasge" span要素がある場合、そこに(調停付きで)レイヤー固有UIframeからメッセージを出せるフレームワーク 2019/12/02
+function putGlobalMessage(message , layerId){
+	console.log("caller:",putGlobalMessage.caller); // layerIdはいらないんだよね
+	console.log("this:",this); // layerIdはいらないんだよね
+	var gs = document.getElementById(globalMessageID)
+	if ( !gs ){
+		console.log('NO id="'+globalMessageID+'" element skip');
+		return(false);
+	}
+	var tbl = gs.getElementsByTagName("table")[0];
+	if ( !tbl ){
+		console.log("init globalMesasge area");
+		tbl = document.createElement("table");
+		tbl.style.border="0px";
+		tbl.style.padding="0px";
+		tbl.style.margin="0px";
+		gs.appendChild(tbl);
+	}
+	
+	gmc = gs.children;
+	var msgCell = document.getElementById(GlobalMessageprefix+layerId);
+	if ( ! msgCell ){
+		if ( gmc.length >= maxGlobalMessages ){
+			console.log("can not append global message due to limit");
+				return(false);
+		} else {
+			msgCell = document.createElement("td");
+			var tr = document.createElement("tr");
+			tr.id=GlobalMessageprefix+layerId;
+			tr.appendChild(msgCell);
+			gs.appendChild(tr);
+		}
+	}
+	console.log(msgCell,message);
+	msgCell.innerText = message;
+	return ( true );
+}
+
+function putGlobalMessageForLayer(layerID){
+	return function(message){
+		putGlobalMessage(message,layerID);
+	}
+	
+}
+
+//layerUIが消滅したもののglobalMessageを消す
+function clearGlobalMessage(layerId){
+	console.log("clearGlobalMessage:",layerId);
+//	var svgLayers = svgMap.getSvgImagesProps()["root"]; // この機に、全チェックしたほうが良いのかなぁ・・
+	var gs = document.getElementById(globalMessageID);
+	console.log("globalMessage:",gs);
+	if ( !gs ){
+		console.log('NO id="globalMesasge" element skip');
+		return;
+	}
+	var gmc = document.getElementById(GlobalMessageprefix + layerId);
+	console.log("globalMessageCell:",gmc);
+	if ( gmc ){
+		console.log("Remove GlobalMessage for layer:",layerId);
+		gmc.parentNode.removeChild(gmc);
+	}
+}
+
 
 return { // svgMapLayerUI. で公開する関数のリスト
 	layerSpecificUIhide : layerSpecificUIhide,
-	setLayerListmessage : setLayerListmessage
+	setLayerListmessage : setLayerListmessage,
+//	putGlobalMessage: putGlobalMessage,
 }
 
 })();
