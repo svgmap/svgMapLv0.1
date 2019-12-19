@@ -6109,6 +6109,7 @@ function getVectorObjectsAtPoint( x, y ){
 		return ( null );
 	}
 	refreshScreen(); // 本来この関数は非同期の動きをするのでこの呼び方はまずいけれど・・・（ロードさえ生じなければ同期してるはずなので大丈夫だと思う）この呼び出しケースの場合、原理的にはロード生じないはずなのでオーケー・・でもなかった　リドロー完了形のイベントがまともに動かなくなってしまう2017.8.18
+	loadCompleted=true; // 2019/12/19 debug　ロード済みの同期呼び出しだから当然・・・ベクトルヒットテスト(checkticker)でおかしくなってた
 	return ( getHittedObjects() );
 }
 
