@@ -808,9 +808,14 @@ function initIframe(lid,controllerURL,reqSize){
 //	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26
 	iframeId = "layerSpecificUIframe_"+ lid;
 	iframe.id = iframeId;
+	
+	iframe.addEventListener("load",function(){
+		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL);
+	}, { once: true });
+	
 	var bySrcdoc = false;
 	if ( controllerURL.charAt(0) != ":" ){
-		if (controllerURL.startsWith("http://") || controllerURL.startsWith("https://")){
+		if (controllerURL.substr(0,7)=="http://" || controllerURL.substr(0,8)=="https://"){ // startsWithがIEでは・・・
 			// CORS設定されてる別サイトのiframeでもdata-controllerでURL表現状態でも起動可能にする 2019/11/26
 			console.log("Get controller by XHR");
 			var httpObj = new XMLHttpRequest();
@@ -834,15 +839,15 @@ function initIframe(lid,controllerURL,reqSize){
 			// 対応法はDOM操作か・・http://detail.chiebukuro.yahoo.co.jp/qa/question_detail/q1032803595
 		}
 		
-		
 		iframe.srcdoc = sourceDoc;
 		layerSpecificUIbody.appendChild(iframe);
 		bySrcdoc = true;
 		if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
+			console.log("patch for IE&Edge:");
 			sourceDoc = sourceDoc.replace(/&quot;/g,'"');
 			iframe.contentWindow.document.write(sourceDoc );
+			iframe.contentWindow.document.close(); // 2019.12.16 これがないとloadイベント発生しない・・
 		}
-		
 	}
 	iframe.setAttribute("frameborder","0");
 	iframe.style.width="100%";
@@ -854,16 +859,7 @@ function initIframe(lid,controllerURL,reqSize){
 	iframe.style.border ="none";
 	iframe.style.display="block";
 	
-	iframe.addEventListener("load",function(){
-		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL);
-	}, { once: true });
 //	console.log("iframe.srcdoc?:",iframe.srcdoc);
-	if(iframe.srcdoc) { // Fix IE11 issue on srcdoc pattern 2019/2/19 (IE以外ではsrcdocは読みだせないらしい 2019/11/26)
-		console.log("Patch for IE11 force send load event.");
-		var loadEvent = document.createEvent("HTMLEvents");
-		loadEvent.initEvent('load', false, true );
-		iframe.dispatchEvent(loadEvent);
-	};
 	return (iframe);
 }
 
@@ -873,7 +869,7 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 	// DOMContentLoaded イベントで動作させれば良いんじゃないかな とも思ったがどうだろう
 	// 参考: https://ja.javascript.info/onload-ondomcontentloaded 2019/12/05
 	var iframeId = iframe.id;
-	console.log("initIframe load eventListen");
+	console.log("initIframe load eventListen : controllerURL:", controllerURL);
 	dispatchCutomIframeEvent(openFrame,iframeId);
 	if ( layerSpecificUiMaxHeight == 0 ){
 		layerSpecificUiMaxHeight = layerSpecificUI.offsetHeight
@@ -928,13 +924,8 @@ function initIframePh2(httpRes, iframe , lid, reqSize ){
 		console.log("patch for IE&Edge");
 		sourceDoc = sourceDoc.replace(/&quot;/g,'"');
 		iframe.contentWindow.document.write(sourceDoc );
+		iframe.contentWindow.document.close(); // 2019.12.16 これがないとloadイベント発生しない・・
 	}
-	
-	if(iframe.srcdoc) { // Fix IE11 issue on srcdoc pattern 2019/2/19
-		var loadEvent = document.createEvent("HTMLEvents");
-		loadEvent.initEvent('load', false, true );
-		iframe.dispatchEvent(loadEvent);
-	};
 }
 
 function pxNumb( pxval ){
