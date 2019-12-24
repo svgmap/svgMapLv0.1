@@ -558,7 +558,8 @@ function panningAnim(){
 function setCssTransform( elem , tMat ){
 	var tVal;
 	if ( verIE > 9 ){
-		tVal = "matrix3d(" + tMat.a + "," + tMat.b + ",0,0," + tMat.c + "," + tMat.d +",0,0,0,0,1,0," + tMat.e + "," + tMat.f + ",0,1)";
+		tVal = "matrix(" + tMat.a + "," + tMat.b + "," + tMat.c + "," + tMat.d +"," + tMat.e + "," + tMat.f + ")";
+//		tVal = "matrix3d(" + tMat.a + "," + tMat.b + ",0,0," + tMat.c + "," + tMat.d +",0,0,0,0,1,0," + tMat.e + "," + tMat.f + ",0,1)"; // 2019/12/24 Chrome(blinkのバグ？)でまともに動かなくなっているので・・・matrixに戻す
 	} else {
 		tVal = "matrix(" + tMat.a + "," + tMat.b + "," + tMat.c + "," + tMat.d +"," + tMat.e + "," + tMat.f + ")";
 	}
