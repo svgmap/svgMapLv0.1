@@ -30,14 +30,17 @@
 // 2018/08/01 Add pointOnly option / get(Included/Excluded)Points
 // 2018.12.26 KMLを直接レンダリングする機能を実装
 // 2019/05/17 getInRangePoints(): Coverageがtransform付きのものをサポート
+// 2019/12/26 効率向上のためのオプション追加(getIncludedPointsのpreCapturedGeometry)
 //
 // 
 // ACTIONS:
-// ・ポリゴン包含、ポリラインクロス等の基本関数(jtsのような)
-// ・ポイント（マウスポインタ―）と、ポイント、ポリライン、ポリゴンヒットテスト（既存のクリッカブルオブジェクト同等動作）：　ただし、ポイント、ポリラインはバッファが必要なので後回しか？
-// ・ラインと、ライン、ポリゴンのヒットテスト
-// ・ポリゴンと、ポイント、ライン、ポリゴンのヒットテスト
-// ・カラーピッカーになりえるもの
+// ・ポリゴン包含、ポリラインクロス等の基本関数(jtsのような) done
+// ・ポイント（マウスポインタ―）と、ポイント、ポリライン、ポリゴンヒットテスト（既存のクリッカブルオブジェクト同等動作）：　ただし、ポイント、ポリラインはバッファが必要なので後回しか？ done
+// ・ラインと、ライン、ポリゴンのヒットテスト done
+// ・ポリゴンと、ポイント、ライン、ポリゴンのヒットテスト done
+// ・カラーピッカーになりえるもの done
+// ・ベクタプロパティの利用 done
+// ・オートパイロット機能のフレームワーク化(vectorGisLayer/rasterGisLayerの実装の改善と取り込み)
 //
 // ・入力：
 // 　・マウスポインタ―ベースの対話的に生成されたオブジェクトと指定したレイヤー
@@ -150,9 +153,10 @@ var svgMapGIStool = ( function(){
 	// https://github.com/morganherlocker/weiler-atherton
 	
 	
-	
-	// poiID（およびその子供の文書）が、
-	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse , pointOnly ){
+	// 画面中の、指定したレイヤのポリゴンに包含されている指定したレイヤのPOIを検索する
+	// poiID : POIのレイヤID（その子供の文書も対象）、polyID: ポリゴンのレイヤID
+	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse , pointOnly ,getIncludedPolygonAttr , preCapturedGeometry){
+	// 2019.12.26 : preCapturedGeometry あらかじめ別に取得済みのgeom.を流用したいときに指定 : 今後同様オプションをcaptureGISgeometries実行しているロジックに入れていくだろう
 		var superParam = {
 			pointsDocTreeID: poiID,
 			polygonsDocTreeID: polyID,
@@ -160,13 +164,19 @@ var svgMapGIStool = ( function(){
 			param: param,
 			progrssCallback: progrssCallback,
 			inverse: inverse,
-			pointOnly : pointOnly
+			pointOnly : pointOnly,
+			getIncludedPolygonAttr : getIncludedPolygonAttr
 		}
 		var pointsDocTreeID = poiID;
 		var polygonsDocTreeID = polyID;
 		console.log( "called getIncludedPoints:", pointsDocTreeID, polygonsDocTreeID);
 //		svgMap.captureGISgeometries(getIncludedPointsS2 , superParam );
-		svgMap.captureGISgeometries(getIncludedPointsS2a , superParam );
+		if ( ! preCapturedGeometry ){
+			svgMap.captureGISgeometries(getIncludedPointsS2a , superParam ); // まずはGIS Geomを取得し、それから包含判定を行う(非同期)
+		} else {
+			console.log("getIncludedPoints: USE preCapturedGeometry");
+			getIncludedPointsS2a(preCapturedGeometry,superParam); // あらかじめキャプチャしてあるgeometryがある場合は飛ばす
+		}
 	}
 	
 	function getExcludedPoints(poiID, polyID, cbFunc, param , progrssCallback , pointOnly ){
@@ -276,6 +286,7 @@ var svgMapGIStool = ( function(){
 		cbFunc(ansPois , totalPoiCount , param ); // 検索したPOIを全部Arrayとして返す。一個パラメータを渡せる
 	}
 	
+	// 非同期での包含判定のための前処理　包含判定に必要な全組み合わせを構築する (指定したレイヤのPOI全部 × 指定したレイヤのポリゴン全部 の組み合わせをArrayに投入)
 	// 重くなることがあるので、非同期処理版を作る・・・
 	function getIncludedPointsS2a( geom , superParam ){
 		console.log("getIncludedPointsS2a called : ",geom);
@@ -307,10 +318,12 @@ var svgMapGIStool = ( function(){
 		}
 		superParam.totalPoiCount = totalPoiCount;
 		
-		console.log("call getIncludedPointsS3 :" , compArray);
-		getIncludedPointsS3( geom, superParam , compArray);
+		// console.log("call getIncludedPointsS3 :" , compArray);
+		getIncludedPointsS3( geom, superParam , compArray); // 組み合わせが構築出来たら実際の包含判定に進む(非同期)
 	}
 	
+	// 非同期処理での包含判定演算の実体
+	// すべての組み合わせに対して実施
 	function getIncludedPointsS3( geom , superParam , compArray , counter , startTime , ansPois ){
 		
 		
@@ -364,9 +377,13 @@ var svgMapGIStool = ( function(){
 			polygon = polDoc[plc].coordinates;
 			if ( !superParam.inverse ){ // 内包判定
 				if ( insidePolygon( point , polygon ) ){
-					// 一個でも内包してたらそれで内包判断完了
+					// 一個でも内包してたらそれで内包判断完了 ⇒こうするかどうかは今後選択にすべき(複数のポリゴンに内包されてて、そのポリゴンはどんな属性なのかを知りたいケースがある)2019/12/19
+					if ( superParam.getIncludedPolygonAttr ){ // 2019/12/19
+//						console.log("polygon:",polDoc[plc],"  point:",poiDoc[pic]);
+						poiDoc[pic].includedPolygonAttr = polDoc[plc].src.getAttribute("content");
+					}
 					ansPois.push(poiDoc[pic]);
-					console.log("PUSH");
+//					console.log("PUSH");
 					counter = skipPOIcounter(compArray, counter);
 				}
 			} else { // 非内包判定
@@ -384,13 +401,13 @@ var svgMapGIStool = ( function(){
 			
 			var currentTime =  new Date().getTime();
 			++ counter;
-			if ( currentTime - startTime > 500 ){ // 0.3秒以上たったらちょっと(30ms)休憩
+			if ( currentTime - startTime > 500 ){ // 0.5秒以上たったらちょっと(20ms)休憩
 				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
 				if ( superParam.progrssCallback ){
 					superParam.progrssCallback( Math.ceil(1000 * counter /  compArray.length) / 10 );
 				}
 				startTime = new Date().getTime();
-				setTimeout(getIncludedPointsS3, 30 , geom, superParam, compArray , counter , startTime , ansPois);
+				setTimeout(getIncludedPointsS3, 20 , geom, superParam, compArray , counter , startTime , ansPois);
 				break;
 			}
 		}
@@ -410,15 +427,18 @@ var svgMapGIStool = ( function(){
 	function skipPOIcounter(compArray, counter){
 //		console.log("called:skipPOIcounter:",counter);
 		var ansCounter = counter;
-		var currentPoiC = compArray[counter][1];
+		var currentPoiC = compArray[counter][1]; // [1]がPOIの値？じゃないよ・・・
+		var currentPoiDC = compArray[counter][0]; // [0]でPOIのドキュメントの値も評価しないとダメ DEBUG 2019/12/20
 		var poiC = currentPoiC;
-		while ( poiC == currentPoiC ){
+		var poiDC = currentPoiDC;
+		while ( (poiC == currentPoiC && poiDC == currentPoiDC ) ){
 			++ansCounter;
 			if ( ansCounter == compArray.length ){
-				console.log("BREAK.....");
+//				console.log("BREAK.....");
 				break;
 			}
 			poiC = compArray[ansCounter][1];
+			poiDC = compArray[ansCounter][0];
 		}
 		return ( ansCounter -1);
 	}
@@ -670,7 +690,7 @@ var svgMapGIStool = ( function(){
 	// 2018/6/8 S.Takagi
 	// range: [hueRangemin,hueRangemax] or [[hueRange1min,hueRange1max],[...]] or {hue:[[range1min,range1max],[...]],satulation:[[range1min,range1max],[...]],value:[[range1min,range1max],[...]],alpha:[[range1min,range1max],[...]]}
 	// poiID_or_pointsには、POINTジオメトリが入ってるレイヤIDもしくは、直接POINTジオメトリの配列を入れる
-	function getInRangePoints(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback ){
+	function getInRangePoints(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry ){
 		halt = false;
 		var superParam = {
 			coverageDocTreeID: coverID,
@@ -685,9 +705,15 @@ var svgMapGIStool = ( function(){
 			superParam.pointsDocTreeID= poiID_or_points;
 		}
 		console.log( "called getInRangePoints: poi,cover:", poiID_or_points, coverID,"  range:", superParam.range);
+		
 		svgMap.captureGISgeometriesOption(true); // カバレッジが必要
-		// captureGISgeometriesはviewportにあるオブジェクトのみ取ってくる仕様
-		svgMap.captureGISgeometries(getInRangePointsS2 , superParam );
+		if ( ! preCapturedGeometry ){
+			// captureGISgeometriesはviewportにあるオブジェクトのみ取ってくる仕様
+			svgMap.captureGISgeometries(getInRangePointsS2 , superParam );
+		} else {
+			console.log("getInRangePoints: USE preCapturedGeometry");
+			getInRangePointsS2(preCapturedGeometry, superParam);
+		}
 	}
 	
 	function getRangeParam(rangeData){

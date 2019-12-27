@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Layer Specific UI for rasterGIS</title>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<script>
+// Raster GIS Layer (Imagintersection GIS)
+// 任意のラスター(によるカバレッジ)レイヤーに入る任意のレイヤーのポイント(Vector)データを抽出する機能
+// Programmed by Satoru Takagi
+// Copright 2019 by Satoru Takagi @ KDDI All Rights Reserved
+//
+// Version History
+// Rev0 2018/06/19 一点だけの検索
+// Rev1 2018/08/01 オートパイロット(一括検索)
+// Rev3 2019/12/27 附番変更した
+// Rev3 2019/12/27 (in DEV) 2019/12/26版フレームワーク対応・高性能化 (vectorGISと同じ効率化処理を導入) 
+// 
+// ToDo
+// ALREADY 検索したHue値を追加記載する(SV値は？)
+// DONE    vectorGISと同じ効率化処理(一括検索のgeom流用、検索で不要レイヤーをいったんOffなど)
+// もうちょっとラスタのトレース処理速くならないかな？
+// オートパイロットのベクタとの共通フレームワーク化
+// 
+//
+// layerID
+// svgMap
+// svgImageProps: svgMap.getSvgImagesProps()
+// svgImages: svgMap.getSvgImages()
+//
+// event zoomPanMap
+
+var sourcePolygonLayerId, sourceLineLayerId;
+var svgImages,svgImagesProps;
+var sourceCoverId,sourcePoiId;
+var contSearchBtn;
+
+onload=function(){
+	console.log("onload:");
+	setTimeout(initColorPicker,10);
+	setTimeout(initSvgMapGIStool,10);
+	setTimeout(listVisiblePoiCaverLayers,10);
+	document.addEventListener("screenRefreshed", listVisiblePoiCaverLayers , false);
+	contSearchBtn = document.getElementById("contSearchBtn");
+}
+
+function halt(){
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+	svgMapGIStool.haltComputing();
+	if ( allSearching ){ // 一括検索時には表示レイヤとビューポートをもとに戻す
+		allSearching = false;
+		revertLayerSetup();
+		svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+	}
+	document.getElementById("hlt").disabled=true;
+	document.getElementById("progress").innerHTML= "";
+	document.getElementById("hitcount").innerHTML="Halt";
+}
+
+function initSvgMapGIStool(){
+	// svgMapGIStool.setImageProxy("SvgMapProxy.php?file=",null,false); // you should set proper proxy path for cross domain bitimage processing
+}
+
+function searchInRangePoints(cbf,preCapturedGeometry){
+	svgImages = svgMap.getSvgImages();
+	svgImagesProps = svgMap.getSvgImagesProps();
+//	console.log("svgImagesProps:",svgImagesProps);
+	document.getElementById("hlt").disabled=false;
+//	console.log("Search POI included within this polygon");
+
+	sourceCoverId = getTargetLayerId("targetCoverLayer");
+	
+	sourcePoiId = getTargetLayerId("targetPoiLayer");
+	
+	var getInRangePointsCallback;
+	if ( cbf ){
+		getInRangePointsCallback = cbf;
+	} else {
+		getInRangePointsCallback = markInRangePoints;
+	}
+	
+	console.log("Search : sourceCoverId:",sourceCoverId,svgImages[sourceCoverId],"  sourcePoiId:",sourcePoiId,svgImages[sourcePoiId], " thisLayerId:",layerID );
+	
+	svgMapGIStool.getInRangePoints( sourcePoiId, sourceCoverId , targetRange, getInRangePointsCallback , null , progrssCallback , preCapturedGeometry);
+}
+
+function markInRangePoints(ans){
+	console.log("complete computation... ",ans);
+	var printedIndex = prepareResultAndPrintcsv(ans);
+//	clearCircles();
+//	var svgDoc = svgImages[layerID];
+	var svgDoc = svgImage
+	var svgImageRoot = svgDoc.documentElement;
+	for ( var i = 0 ; i < printedIndex.length ; i++ ){
+		var circle = svgDoc.createElement("circle");
+		circle.setAttribute("transform","ref(svg,"+ans[printedIndex[i]].coordinates[0]*100+","+(-ans[printedIndex[i]].coordinates[1]*100)+")");
+		circle.setAttribute("cx","0");
+		circle.setAttribute("cy","0");
+		circle.setAttribute("r","10");
+		circle.setAttribute("fill","red");
+		svgImageRoot.appendChild(circle);
+//		console.log(circle);
+	}
+	/** 廃止
+	if ( cbf ){
+		cbf();
+	} else {
+		svgMap.refreshScreen();
+	}
+	**/
+}
+
+
+var csvAppendMode = false;
+var csvSource = {};
+function prepareResultAndPrintcsv(ans){
+	if ( ! csvAppendMode ){
+		printCsvSchema();
+	}
+	
+	var printedIndex = [];
+	var ta = document.getElementById("ansArea");
+	var csvTxt ="";
+	for ( var i = 0 ; i < ans.length ; i++ ){
+		var lng = ans[i].coordinates[0];
+		var lat = ans[i].coordinates[1];
+		var hue = ans[i].hsv.h;
+		var title = ans[i].src.getAttribute("xlink:title");
+		var meta = ans[i].src.getAttribute("content");
+		
+		var hashKey = title+lat+","+lng;
+		if ( ! csvSource[hashKey] ){
+			csvTxt += title +","+lat+","+lng+","+hue+","+meta+"\n";
+			csvSource[hashKey] = {title:title,lat:lat,lng:lng,meta:meta,hue:hue};
+			printedIndex.push(i);
+		} else {
+			console.log("match hash skip output");
+		}
+	}
+	ta.value += csvTxt;
+	return ( printedIndex );
+}
+
+function printCsvSchema(){
+	csvSource = {};
+	var ta = document.getElementById("ansArea");
+	var csvTxt = "title,latitude,longitude,hue,"+ getPoiSchema()+"\n";
+	ta.value = csvTxt;
+}
+
+function markAllInRangePoints(){ // 一括検索完了時の処理
+	var svgDoc = svgImage;
+	var svgImageRoot = svgDoc.documentElement;
+	for ( var ansHash in csvSource){
+		var POI = csvSource[ansHash];
+		var circle = svgDoc.createElement("circle");
+		circle.setAttribute("transform","ref(svg,"+POI.lng*100+","+(-POI.lat*100)+")");
+		circle.setAttribute("cx","0");
+		circle.setAttribute("cy","0");
+		circle.setAttribute("r","10");
+		circle.setAttribute("fill","red");
+		svgImageRoot.appendChild(circle);
+//		console.log(circle);
+	}
+	revertLayerSetup();
+}
+
+
+function getPoiSchema(){
+	svgImagesProps = svgMap.getSvgImagesProps();
+	sourcePoiId = getTargetLayerId("targetPoiLayer");
+	for ( var key in svgImagesProps){
+		if ( svgImagesProps[key].rootLayer == sourcePoiId &&
+		svgImagesProps[key].metaSchema ){
+			return ( svgImagesProps[key].metaSchema );
+		}
+	}
+}
+
+function clearCircles(){
+	clearElementsByTagName("circle");
+}
+function clearElementsByTagName(tagName){
+//	var svgDoc = svgImages[layerID];
+	var svgDoc = svgImage
+	var svgImageRoot = svgDoc.documentElement;
+	var circles = svgDoc.getElementsByTagName(tagName);
+	for ( var i = circles.length - 1 ; i >= 0 ; i-- ){
+//		console.log("clearCircles circles.length:",circles.length);
+		circles[i].parentNode.removeChild(circles[i]);
+	}
+}
+
+
+function progrssCallback( percent ){
+	console.log("progrssCallback:",percent);
+	if ( percent < 100 ){
+		document.getElementById("hitcount").innerHTML= "computing:"+ percent + "/100";
+	} else {
+		document.getElementById("hitcount").innerHTML= "completed!!";
+		if ( !allSearching ){
+			document.getElementById("hlt").disabled=true;
+		}
+	}
+}
+
+var authoringToolProps;
+function initColorPicker(){
+//	authoringToolProps = svgMapAuthoringTool.initPOItools(document.getElementById("colorPicker"),layerID,pickColorUiCbf,null,true);
+	authoringToolProps = svgMapAuthoringTool.initPOIregistTool(document.getElementById("colorPicker"),layerID,"colorPickIcon", "syl0", "colorPoint", "", pickColorUiCbf,null,true);
+}
+
+function pickColorUiCbf( stat ){
+	console.log("pickColorUiCbf:",stat);
+	pickColors();
+}
+
+function pickColors(){
+	stopContSearch();
+	clearCircles();
+	sourceCoverId = getTargetLayerId("targetCoverLayer");
+	
+	svgMapGIStool.getInRangePoints( layerID, sourceCoverId , null, pickColorsPh2 , null , progrssCallback );
+}
+
+var targetRange = [[30,36]];
+
+function pickColorsPh2(ans){
+	clearElementsByTagName("use");
+	console.log("complete pickColors... ",ans);
+	var resultDiv = document.getElementById("pickedColors");
+	for ( var i = 0 ; i < ans.length ; i++ ){
+		var r = ("0" + ans[i].hsv.r.toString(16)).slice(-2);
+		var g = ("0" + ans[i].hsv.g.toString(16)).slice(-2);
+		var b = ("0" + ans[i].hsv.b.toString(16)).slice(-2);
+		var span = document.createElement("span");
+		span.innerHTML="&nbsp;&nbsp;";
+		span.style.backgroundColor="#"+r+g+b;
+		resultDiv.appendChild(span);
+		var cRange = [ans[i].hsv.h - 5, ans[i].hsv.h + 5];
+		targetRange.push(cRange);
+	}
+	console.log(targetRange);
+}
+
+function clearPickColors(){
+	stopContSearch();
+	clearCircles();
+	svgMap.refreshScreen();
+	targetRange = [];
+	var resultDiv = document.getElementById("pickedColors");
+	resultDiv.innerHTML="&nbsp;";
+	document.getElementById("ansArea").value="";
+}
+
+
+var prevTargetLayers=[];
+function listVisiblePoiCaverLayers(e){
+	var targetLayers=[];
+	var layers = svgMap.getLayers();
+	for ( var i = layers.length -1  ; i >=0 ; i-- ){
+		if ( layers[i].getAttribute("visibility")!="hidden" && layers[i].getAttribute("iid")!=layerID){
+			var lTitle = layers[i].getAttribute("title");
+//			console.log(lTitle);
+			targetLayers.push(lTitle);
+		}
+	}
+	
+	// check changed
+//	console.log("targetLayers:",targetLayers);
+	var changed = false;
+	if ( prevTargetLayers.length != targetLayers.length ){
+		changed = true;
+	} else {
+		for ( var i = 0 ; i < prevTargetLayers ; i++ ){
+			if ( prevTargetLayers[i] != targetLayers[i]){
+				changed = true;
+				break;
+			}
+		}
+	}
+	
+	if ( changed ){
+		listVisibleLayers("targetPoiLayer",targetLayers);
+		listVisibleLayers("targetCoverLayer",targetLayers);
+	}
+	prevTargetLayers = targetLayers;
+}
+
+
+function listVisibleLayers(selectId,targetLayers){
+//	console.log("called listVisibleLayers");
+	
+	targetList = document.getElementById(selectId);
+	var selName ="";
+	if ( targetList.options.length > 0 ){
+		selName = targetList.options[targetList.selectedIndex].value;
+	}
+	
+	console.log("listVisibleLayers:",targetList);
+	removeChildren(targetList);
+	for ( var i = 0 ; i < targetLayers.length ; i++ ){
+		var opt = document.createElement("option");
+		var lTitle = targetLayers[i];
+		opt.setAttribute("value",lTitle);
+		if ( lTitle == selName ){
+			opt.selected = true;
+		}
+		opt.innerHTML=lTitle;
+		targetList.appendChild(opt);
+	}
+}
+
+function removeChildren( parent ){
+	for (var i =parent.childNodes.length-1; i>=0; i--) {
+		parent.removeChild(parent.childNodes[i]);
+	}
+}
+
+var contSearch = false;
+function toggleContSearch(){
+	contSearch = ! contSearch;
+	console.log("called toggleContSearch:",contSearch);
+	if ( contSearch ){
+		startContSearch();
+		
+	} else {
+		stopContSearch();
+	}
+}
+
+function startContSearch(){
+	contSearch = true;
+	contSearchBtn.value="連続検索終了";
+	csvAppendMode = true;
+	printCsvSchema();
+	searchInRangePoints();
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+	document.addEventListener("zoomPanMap", doContSearch , false);
+}
+
+function stopContSearch(){
+	contSearch = false;
+	contSearchBtn.value="連続検索開始";
+	csvAppendMode = false;
+	document.removeEventListener("zoomPanMap", doContSearch , false);
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+}
+
+function doContSearch(){
+	console.log("called doContSearch");
+	searchInRangePoints();
+}
+
+
+// オートパイロット これは別モジュールで建てるかも？
+var currentLevelPos ; // 次に検索すべきエリアを演算するためのデータ。int[level]1次元整数(0..3まで)配列： 配列番号はタイルレベル、それぞれの値はそのレベルにおける４分木タイル番号(0..3) 0: 左下, 1:右下, 2:左上, 3:右上　なお、タイルレベルは、初期ビューボックスをレベル0と定義（グローバルタイルとは違う）
+var initialViewBox , sourcePoiLayerId, contDepth, prevImage;
+var depthLimitter = 5;
+var allSearching = false; // 現在一括検索中フラグ
+var totalHitCount;
+function searchAll(){
+	document.getElementById("hlt").disabled=false;
+	document.getElementById("progress").innerHTML="Start computing.";
+	clearCircles();
+	csvAppendMode = true;
+	allSearching = true;
+	totalHitCount = 0;
+	printCsvSchema();
+	initialViewBox = svgMap.getGeoViewBox();
+	document.addEventListener("zoomPanMap",APzoomPanListener,false);
+
+	sourceCoverId = getTargetLayerId("targetCoverLayer");
+	sourcePoiLayerId = getTargetLayerId("targetPoiLayer");
+	
+	// レイヤーのオンオフ状況をストアしたうえで、検索ターゲット以外のレイヤーをオフにする
+	turnoutLayerSetup(sourceCoverId,sourcePoiLayerId);
+	
+	console.log("SearchAll:",sourcePoiId, "   geoVB:",initialViewBox);
+	currentLevelPos = [];
+	var superParam = {	}
+	contDepth = 0;
+	prevImage = false;
+	svgMap.captureGISgeometriesOption(true); 
+	svgMap.captureGISgeometries(searchAllS2 , superParam );	
+}
+
+function searchAllS2(geom , superParam ){
+	console.log(geom,  currentLevelPos , initialViewBox , sourcePoiLayerId);
+	
+	var hasPoiLowResI = hasPoiLowResImage(geom,sourcePoiLayerId)
+	console.log("hasPoiLowResImage:", hasPoiLowResI, "  in ",sourcePoiLayerId);
+	
+	if ( hasPoiLowResI ){
+		if ( prevImage ){
+			++ contDepth;
+			if ( contDepth > depthLimitter ){
+				console.log("Over Limitter...");
+				document.getElementById("progress").innerHTML= "";
+				document.getElementById("hitcount").innerHTML="Canceled by limitter over.";
+				document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+				svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+				document.getElementById("hlt").disabled=true;
+				allSearching = false;
+				return;
+			}
+		} else {
+			contDepth = 0;
+		}
+		prevImage = true;
+//		console.log("レベルを上げる・・・・・・",contDepth);
+		// レベルを上げる
+		// setGeoViewPort( lat, lng, latSpan , lngSpan)..
+		currentLevelPos.push(0);
+		var subArea = getSubArea(currentLevelPos,initialViewBox);
+		document.getElementById("hitcount").innerHTML= "Hit:" + totalHitCount + "  Zooming.";
+		svgMap.setGeoViewPort( subArea.y, subArea.x, subArea.height , subArea.width);
+	} else {
+		prevImage = false;
+		// 検索する
+		// TBD 今後ここで、上で作ったgeomを使った再利用機構を入れる（searchInRangePointsを更に先のGIStoolsを改良した上で) 2019/12/27
+		searchInRangePoints( searchAllS3,geom
+//			function(){ // 検索が完了したら必要に応じて次のタイルに移行させる
+//			document.getElementById("hitcount").innerHTML= "Moving to next area.";
+//			document.getElementById("progress").innerHTML=getProgress(currentLevelPos) + "/100 completed.";
+//			prepareNextArea(currentLevelPos);
+//		}
+		);
+	}
+}
+
+function searchAllS3(ans,totalPoiCount, param){ // totalPoiCount , param はないと思う 2019/12
+	var printedIndex = prepareResultAndPrintcsv(ans);
+	totalHitCount += printedIndex.length;
+	document.getElementById("hitcount").innerHTML= "Hit:" + totalHitCount + "  Moving to next area.";
+	document.getElementById("progress").innerHTML=getProgress(currentLevelPos) + "/100 completed.";
+	prepareNextArea(currentLevelPos);
+}
+
+
+function prepareNextArea(currentLevelPos){
+	if ( currentLevelPos.length > 0 ){
+		if ( currentLevelPos[currentLevelPos.length-1] < 3 ){
+			// 次のタイルに移動する
+			currentLevelPos[currentLevelPos.length-1] = currentLevelPos[currentLevelPos.length-1]+1;
+			var subArea = getSubArea(currentLevelPos,initialViewBox);
+			svgMap.setGeoViewPort( subArea.y, subArea.x, subArea.height , subArea.width);
+		} else {
+			// そのレベルの探索は完了 上のレベルに戻す
+			console.log("Complete this level :",currentLevelPos);
+			var cl = currentLevelPos.length-1;
+			currentLevelPos.splice(cl,1);
+			prepareNextArea(currentLevelPos);
+		}
+	} else {
+		// 処理終了
+		console.log("Totally Completed...");
+		csvAppendMode = false;
+		document.getElementById("progress").innerHTML= "";
+		document.getElementById("hitcount").innerHTML="Totally Completed!";
+		document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+		document.getElementById("hlt").disabled=true;
+		allSearching = false;
+		markAllInRangePoints();
+		svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+	}
+}
+
+var APzoomPanListener = function (event){
+	console.log("APzoomPanListener");
+	svgMap.captureGISgeometriesOption(true); 
+	svgMap.captureGISgeometries(searchAllS2 );
+}
+
+function getSubArea(currentLevelPos,initialViewBox){
+	console.log(initialViewBox);
+	var x = initialViewBox.x;
+	var y = initialViewBox.y;
+	var w = initialViewBox.width;
+	var h = initialViewBox.height;
+	for ( var lvl = 0 ; lvl < currentLevelPos.length ; lvl++ ){
+		w = w/2;
+		h = h/2;
+		tx = currentLevelPos[lvl] % 2;
+		ty = Math.floor(currentLevelPos[lvl] / 2);
+		
+		x = x + tx * w;
+		y = y + ty * h;
+	}
+	return {
+		x:x,
+		y:y,
+		width:w,
+		height:h
+	}
+}
+
+
+function hasPoiLowResImage(geom,sourcePoiLayerId){
+	var svgImagesProps = svgMap.getSvgImagesProps();
+	var gCount = 0;
+	for ( var layerId in geom ){
+		if ( svgImagesProps[layerId].rootLayer == sourcePoiLayerId){ // 対象としているPOIのレイヤー(及びそのサブレイヤー)に対して
+			for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+				if ( geom[layerId][i].type =="Coverage" ){
+					return ( true ); // 一個でもカバレッジがあればtrue
+				}
+				++ gCount
+			}
+		}
+	}
+	if ( gCount > 0 ){
+		return ( false ); // 一方カバレッジがないけれどその他のオブジェクトがあればfalse
+	} else {
+		return ( false ); // なんもないときは・・・
+	}
+}
+
+function getProgress(currentLevelPos){
+	var ans = 0;
+	var mul = 1;
+	for ( var i = 0 ; i < currentLevelPos.length ; i++ ){
+		if ( i == currentLevelPos.length-1){
+			ans += (currentLevelPos[i]+1)*25 / mul;
+		} else {
+			ans += currentLevelPos[i]*25 / mul;
+		}
+		mul = mul * 4;
+	}
+	return ( ans );
+}
+
+function getTargetLayerId(seledtTagId){
+	var sel = document.getElementById(seledtTagId);
+	var layerTitle = sel.options[sel.selectedIndex].value;
+	if ( layerTitle ){
+		return( svgMap.getLayerId(layerTitle));
+	} else {
+		sel.selectedIndex==1; // これはポリゴンの自分のレイヤーで編集してるとき
+		return (layerID);
+	}
+	
+}
+
+var currentLayerProps;
+function turnoutLayerSetup(targetPolyId, targetPoiId){
+	// 一括検索時に、不要なレイヤーを非表示にして効率化する
+	var lp = svgMap.getRootLayersProps();
+	console.log("RootLayersProps:",lp);
+	currentLayerProps=[];
+	for ( var i = 0 ; i < lp.length ; i++ ){
+		currentLayerProps.push({
+			id:lp[i].id,
+			visible:lp[i].visible
+		});
+		
+		if ( lp[i].id != targetPolyId && lp[i].id != targetPoiId && lp[i].id != layerID){
+			svgMap.setRootLayersProps(lp[i].id, false, false);
+		}
+		
+	}
+	
+}
+function revertLayerSetup(){
+	// 一括検索終了時に、レイヤーのOn/Off状態をもとに戻す
+	// setRootLayersProps(layerID_Numb_Title, visible , editing , hashOption ){
+	for ( var i = 0 ; i < currentLayerProps.length ; i++){
+		svgMap.setRootLayersProps(currentLayerProps[i].id, currentLayerProps[i].visible, false);
+	}
+	currentLayerProps=[];
+
+}
+
+</script>
+<body>
+<h3>ラスターGISレイヤー</h3>
+<div style="background-color:#E0E0E0;">
+<b>Target Layer:</b>
+<div>
+POI:
+<select name="targetPoiLayer" id="targetPoiLayer" onChange="clearPickColors()" >
+</select>
+</div>
+<div>
+Coverage:
+<select name="targetCoverLayer" id="targetCoverLayer" onChange="clearPickColors()">
+</select>
+</div>
+</div>
+<div style="background-color:#FFFFFF;">
+<b>色域選択</b>
+<div id="colorPicker"></div>
+<div id="pickedColors"><span style="background-color:#F8ab46;">&nbsp;&nbsp;</span></div>
+<input type="button" value="クリア" onClick="clearPickColors()">
+</div>
+<div style="background-color:#E0E0E0;">
+<b>空間検索</b>
+<input type="button" value="単発検索" onClick="searchInRangePoints()"/>
+<input id="contSearchBtn"  type="button" value="連続検索開始" onClick="toggleContSearch()"/>
+<input id="allSearchBtn"  type="button" value="一括検索" onClick="searchAll()"/>
+<input type="button" id="hlt" value="中止" onClick="halt()" disabled/>
+<div id="hitcount">count</div><div id="progress"></div>
+<textarea id="ansArea" style="width:95%;height:200px;font-size:8pt">About: 任意のラスターデータ(Coverage)のレイヤーの指定した色域と重なっている、任意のポイント情報(POI)のレイヤーのPOIを検索し、結果を地図上にマーク＆この欄にCSVを出力します。
+
+Note:
+・POIのレイヤーがアイコン化した状態まで拡大していないと、検索対象になりません。
+・連続検索を押すと、伸縮スクロールするたびに検索が実行され結果が地図上及びCSVに追加されていきます、広い領域の検索に便利です。
+・一括検索を押すと、選択したPOIレイヤーのPOIがアイコン化していない場合、自動的に拡大＆スクロールを繰り返し検索を実行します。こちらも広い領域の検索に便利です。</textarea>
+</div>
+</body>
+</html>

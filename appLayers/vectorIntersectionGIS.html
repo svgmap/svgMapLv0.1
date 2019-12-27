@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Layer Specific UI for rasterGIS</title>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<script>
+// Vector GIS Layer
+// 任意のベクトルのポリゴンレイヤーに入る任意のレイヤーのポイント(Vector)データを抽出する機能
+// Programmed by Satoru Takagi
+// Copright 2019 by Satoru Takagi @ KDDI All Rights Reserved
+//
+// Version History
+// Rev0 
+// 2018/08/01 Rev1 一括検索(オートパイロット)
+// 2019/10/11 オートパイロット系のいろいろデバッグ
+// 2019/10/11 Rev2 オーサリングツールを実装し、自分で描いたテンポラリなポリゴンに対する範囲検索を可能にした。
+// 2019/12/26 効率をかなり向上（３倍ぐらい速くなったか？）
+
+// ISSUE 何か一括検索が止まるケースがある（リロードすると直るので再現性が低い）対症的だが、タイマー仕掛けてrefreshscreenすると良いのではないかと思う
+
+// http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/rev13/SVGMapper_r15_GISr2.html#xywh=global:138.43,35.20,0.1,0.1
+
+// layerID
+// svgMap
+// svgImageProps: svgMap.getSvgImagesProps()
+// svgImages: svgMap.getSvgImages()
+//
+// event zoomPanMap
+
+var sourcePolygonLayerId, sourceLineLayerId;
+var svgImages,svgImagesProps;
+//var sourceCoverId,sourcePoiId;
+var contSearchBtn;
+
+onload=function(){
+	console.log("onload:");
+	setTimeout(listVisiblePoiCoverLayers,10);
+	document.addEventListener("screenRefreshed", listVisiblePoiCoverLayers , false);
+	contSearchBtn = document.getElementById("contSearchBtn");
+	setTimeout(initAuthoringTool,10);
+//	document.addEventListener("screenRefreshed",testScreenRefreshedListener,false);
+}
+
+function initAuthoringTool(){
+	console.log("initAuthoringTool",svgImage,svgImageProps,layerID);
+	
+	svgMapAuthoringTool.initPolygonTools(document.getElementById("polygonTool"),layerID,polygonToolCBF,"cbFuncParam",false);
+}
+
+function polygonToolCBF( param1 , param2 ){
+	console.log("polygonToolCBF:");
+	var pols= svgImage.getElementsByTagName("path");
+	for ( var i =0 ; i <pols.length ; i++){
+		pols[i].setAttribute("opacity","0.3");
+	}
+}
+
+function halt(){
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+	svgMapGIStool.haltComputing();
+	if ( allSearching ){ // 一括検索時には表示レイヤとビューポートをもとに戻す
+		allSearching = false;
+		revertLayerSetup();
+		svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+	}
+	document.getElementById("hlt").disabled=true;
+	document.getElementById("progress").innerHTML= "";
+	document.getElementById("hitcount").innerHTML="Halt";
+}
+
+var usePolygonAttr = false; // 2019/12/19 包含するポリゴンの属性を取得して利用するケース
+function setIncludedPolygonAttrFlg(){
+	var flg = document.getElementById("includedPolygonAttrFlg").selectedIndex;
+	if ( flg == 0 ){
+		usePolygonAttr = false;
+	} else {
+		usePolygonAttr = true;
+	}
+}
+
+function searchInAreaPoints(cbf,preCapturedGeometry){
+	svgMap.captureGISgeometriesOption(true,true); 
+	document.getElementById("hitcount").innerHTML="Start";
+	svgImages = svgMap.getSvgImages();
+	svgImagesProps = svgMap.getSvgImagesProps();
+//	console.log("svgImagesProps:",svgImagesProps);
+	document.getElementById("hlt").disabled=false;
+//	console.log("Search POI included within this polygon");
+
+	var sourceCoverId = getTargetLayerId("targetCoverLayer");
+
+	var sourcePoiId = getTargetLayerId("targetPoiLayer");
+	
+	if ( !sourceCoverId || !sourcePoiId ){
+		return;
+	}
+	
+	console.log("Search : sourceCoverId:",sourceCoverId,svgImages[sourceCoverId],"  sourcePoiId:",sourcePoiId,svgImages[sourcePoiId], " thisLayerId:",layerID );
+	
+	var getIncludedPointsCallback; // 一括検索時は効率化のためmarkInRangePointsを全く使用しないことにする 2019/12/26
+	if ( cbf ){
+		getIncludedPointsCallback = cbf;
+	} else {
+		getIncludedPointsCallback = markInRangePoints;
+	}
+	
+	svgMapGIStool.getIncludedPoints( sourcePoiId, sourceCoverId, getIncludedPointsCallback, null , progrssCallback , false , true , usePolygonAttr , preCapturedGeometry); // 2019/12/26 新設したpreCapturedGeometryパラメータで効率化を図る(一括検索時)
+}
+
+function markInRangePoints(ans,totalPoiCount){
+	console.log("complete computation... ",ans);
+	var printedIndex = prepareResultAndPrintcsv(ans);
+//	clearCircles();
+//	var svgDoc = svgImages[layerID];
+	var svgDoc = svgImage
+	var svgImageRoot = svgDoc.documentElement;
+	for ( var i = 0 ; i < printedIndex.length ; i++ ){
+		var circle = svgDoc.createElement("circle");
+		circle.setAttribute("transform","ref(svg,"+ans[printedIndex[i]].coordinates[0]*100+","+(-ans[printedIndex[i]].coordinates[1]*100)+")");
+		circle.setAttribute("cx","0");
+		circle.setAttribute("cy","0");
+		circle.setAttribute("r","10");
+		circle.setAttribute("fill","red");
+		svgImageRoot.appendChild(circle);
+//		console.log(circle);
+	}
+	/** 廃止 2019/12/26
+	if ( cbf ){
+		cbf();
+	} else {
+		svgMap.refreshScreen();
+	}
+	**/
+	svgMap.refreshScreen();
+}
+
+
+var csvAppendMode = false;
+var csvSource = {}; // 重複のない、検索済みデータ(CSVやSVGのマークとして出力すべきデータの必要部分)を格納する
+function prepareResultAndPrintcsv(ans){
+	if ( ! csvAppendMode ){
+		printCsvSchema();
+	}
+//	console.log("csvSource(for matching):", csvSource);
+	var printedIndex = [];
+	var ta = document.getElementById("ansArea");
+	var csvTxt ="";
+	for ( var i = 0 ; i < ans.length ; i++ ){
+		var lng = ans[i].coordinates[0];
+		var lat = ans[i].coordinates[1];
+		var title = ans[i].src.getAttribute("xlink:title");
+		var meta = ans[i].src.getAttribute("content");
+		
+		var polyMeta ="";
+		if ( usePolygonAttr ){
+			polyMeta = ","+ans[i].includedPolygonAttr;
+		}
+		
+		var hashKey = title+lat+","+lng; // 重複のチェックは緯度経度とタイトルで行う
+		if ( ! csvSource[hashKey] ){ // 重複しているものは出力しない
+			csvTxt += title + "," + lat + "," + lng + "," + meta + polyMeta + "\n";
+			csvSource[hashKey] = {title:title,lat:lat,lng:lng,meta:meta,polyMeta:polyMeta};
+			printedIndex.push(i);
+		} else {
+			console.log("match hash skip output");
+		}
+	}
+	ta.value += csvTxt;
+	return ( printedIndex ); // 重複しないもののインデックスを返す
+}
+
+function printCsvSchema(){
+	csvSource = {};
+	console.log ("clear csvSource=====================");
+	var ta = document.getElementById("ansArea");
+	var polySchemaTxt="";
+	if ( usePolygonAttr ){
+		var polySchema = (getPolygonSchema()).split(",");
+//		console.log("polySchema:",polySchema);
+		if ( polySchema ){
+			for ( var i = 0 ; i < polySchema.length ; i++){
+				polySchemaTxt = polySchemaTxt + ",includedPolygon_" + polySchema[i];
+			}
+		}
+	}
+	var csvTxt = "title,latitude,longitude,"+ getPoiSchema()+polySchemaTxt+"\n";
+	ta.value = csvTxt;
+}
+
+function getPoiSchema(){
+	svgImagesProps = svgMap.getSvgImagesProps();
+	var sourcePoiId = getTargetLayerId("targetPoiLayer");
+	return (getLayerSchema(sourcePoiId));
+}
+
+function getPolygonSchema(){
+	var sourcePolyId = getTargetLayerId("targetCoverLayer");
+	return (getLayerSchema(sourcePolyId));
+}
+
+function getLayerSchema(sourcePoiId){
+	svgImagesProps = svgMap.getSvgImagesProps();
+	for ( var key in svgImagesProps){
+		if ( svgImagesProps[key].rootLayer == sourcePoiId &&
+		svgImagesProps[key].metaSchema ){
+			return ( svgImagesProps[key].metaSchema );
+		}
+	}
+}
+
+function clearCircles(){
+	clearElementsByTagName("circle");
+}
+function clearElementsByTagName(tagName){
+//	var svgDoc = svgImages[layerID];
+	var svgDoc = svgImage
+	var svgImageRoot = svgDoc.documentElement;
+	var circles = svgDoc.getElementsByTagName(tagName);
+	for ( var i = circles.length - 1 ; i >= 0 ; i-- ){
+//		console.log("clearCircles circles.length:",circles.length);
+		circles[i].parentNode.removeChild(circles[i]);
+	}
+}
+
+
+function progrssCallback( percent ){
+	console.log("progrssCallback:",percent);
+	if ( percent < 100 ){
+		document.getElementById("hitcount").innerHTML= "computing:"+ percent + "/100";
+	} else {
+		document.getElementById("hitcount").innerHTML= "completed!!";
+		if ( !allSearching ){
+			document.getElementById("hlt").disabled=true;
+		}
+	}
+}
+
+
+var prevTargetLayers=[];
+function listVisiblePoiCoverLayers(e){
+	var targetLayers=[];
+	var layers = svgMap.getLayers();
+	for ( var i = layers.length -1  ; i >=0 ; i-- ){
+		if ( layers[i].getAttribute("visibility")!="hidden" && layers[i].getAttribute("iid")!=layerID){
+			var lTitle = layers[i].getAttribute("title");
+//			console.log(lTitle);
+			targetLayers.push(lTitle);
+		}
+	}
+	
+	// check changed
+//	console.log("targetLayers:",targetLayers);
+	var changed = false;
+	if ( prevTargetLayers.length != targetLayers.length ){
+		changed = true;
+	} else {
+		for ( var i = 0 ; i < prevTargetLayers ; i++ ){
+			if ( prevTargetLayers[i] != targetLayers[i]){
+				changed = true;
+				break;
+			}
+		}
+	}
+	
+	if ( changed ){
+		listVisibleLayers("targetPoiLayer",targetLayers);
+		listVisibleLayers("targetCoverLayer",targetLayers,true);
+	}
+	prevTargetLayers = targetLayers;
+}
+
+function clearPickColors(){
+	console.log("clearPickColors : ", document.getElementById("targetCoverLayer").selectedIndex);
+	stopContSearch();
+	clearCircles();
+	svgMap.refreshScreen();
+	targetRange = [];
+	document.getElementById("ansArea").value="検索結果表示エリア";
+	
+	if(document.getElementById("targetCoverLayer").selectedIndex==1){ // 描いて指定の場合はオーサリングツール出す
+		document.getElementById("polygonToolPanel").style.display="";
+	} else {
+		document.getElementById("polygonToolPanel").style.display="none";
+	}
+	
+}
+
+
+function listVisibleLayers(selectId,targetLayers,authoringLayer){
+//	console.log("called listVisibleLayers");
+	
+	targetList = document.getElementById(selectId);
+	var selName ="";
+	if ( targetList.options.length > 0 ){
+		selName = targetList.options[targetList.selectedIndex].value;
+	}
+	
+	console.log("listVisibleLayers:",targetList);
+	removeChildren(targetList);
+	
+	var headOpt=document.createElement("option");
+	headOpt.setAttribute("value","");
+	headOpt.selected = true;
+	headOpt.innerHTML="対象を選択";
+	targetList.appendChild(headOpt);
+	if(authoringLayer){
+		var atOpt = document.createElement("option");
+		atOpt.setAttribute("value","");
+		atOpt.innerHTML="領域を描いて指定";
+		targetList.appendChild(atOpt);
+	}
+	
+	for ( var i = 0 ; i < targetLayers.length ; i++ ){
+		var opt = document.createElement("option");
+		var lTitle = targetLayers[i];
+		opt.setAttribute("value",lTitle);
+		if ( lTitle == selName ){
+			opt.selected = true;
+		}
+		opt.innerHTML=lTitle;
+		targetList.appendChild(opt);
+	}
+}
+
+function removeChildren( parent ){
+	for (var i =parent.childNodes.length-1; i>=0; i--) {
+		parent.removeChild(parent.childNodes[i]);
+	}
+}
+
+var contSearch = false;
+function toggleContSearch(){
+	contSearch = ! contSearch;
+	console.log("called toggleContSearch:",contSearch);
+	if ( contSearch ){
+		startContSearch();
+		
+	} else {
+		stopContSearch();
+	}
+}
+
+function startContSearch(){
+	contSearch = true;
+	contSearchBtn.value="連続検索終了";
+	csvAppendMode = true;
+	printCsvSchema();
+	searchInAreaPoints();
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+	document.addEventListener("zoomPanMap", doContSearch , false);
+}
+
+function stopContSearch(){
+	contSearch = false;
+	contSearchBtn.value="連続検索開始";
+	csvAppendMode = false;
+	document.removeEventListener("zoomPanMap", doContSearch , false);
+	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+}
+
+function doContSearch(){ // こちらが、連続検索を発動させるイベントリスナ
+	console.log("called doContSearch");
+	searchInAreaPoints();
+}
+
+
+// 一括検索機能の実装
+// オートパイロット機能をもつ これは別モジュールで建てる方向
+var currentLevelPos ; // 次に検索すべきエリアを演算するためのデータ。int[level]1次元整数(0..3まで)配列： 配列番号はタイルレベル、それぞれの値はそのレベルにおける４分木タイル番号(0..3) 0: 左下, 1:右下, 2:左上, 3:右上　なお、タイルレベルは、初期ビューボックスをレベル0と定義（グローバルタイルとは違う）
+var initialViewBox , sourcePoiLayerId, contDepth, prevImage;
+var depthLimitter = 5;
+var allSearching = false; // 現在一括検索中フラグ
+var totalHitCount;
+function searchAll(){
+	document.getElementById("hlt").disabled=false;
+	document.getElementById("progress").innerHTML="Start computing.";
+	clearCircles();
+	csvAppendMode = true;
+	allSearching = true;
+	totalHitCount = 0;
+	printCsvSchema();
+	initialViewBox = svgMap.getGeoViewBox();
+	document.addEventListener("zoomPanMap",APzoomPanListener,false);
+	
+	sourcePoiLayerId = getTargetLayerId("targetPoiLayer");
+	
+	sourcePolygonLayerId = getTargetLayerId("targetCoverLayer");
+	
+	if(!sourcePoiLayerId || !sourcePolygonLayerId){
+		return;
+	}
+	
+	// レイヤーのオンオフ状況をストアしたうえで、検索ターゲット以外のレイヤーをオフにする
+	turnoutLayerSetup(sourcePolygonLayerId,sourcePoiLayerId);
+	
+	console.log("SearchAll:",sourcePoiLayerId, "   geoVB:",initialViewBox);
+	currentLevelPos = [];
+	var superParam = {	}
+	contDepth = 0;
+	prevImage = false;
+	svgMap.captureGISgeometriesOption(true,true); 
+	svgMap.captureGISgeometries(searchAllS2 , superParam );	
+}
+
+function searchAllS2(geom , superParam ){ // この関数が一括検索処理の中心。prepareNextAreaやこれ自身で次に検索すべきエリアへsetGeoViewPort、遷移によるロードが完了すると"zoomPanMap"イベントを経由してAPzoomPanListenerが起動、geometryを取得してsearchAllS2を再起呼び出しするループ
+//	console.log(geom,  currentLevelPos , initialViewBox , sourcePoiLayerId);
+	
+	var hasPoiLowResI = hasPoiLowResImage(geom,sourcePoiLayerId);
+	var hasPolygonLowResI = hasPolygonLowResImage(geom,sourcePolygonLayerId);
+	
+//	console.log("hasPoiLowResImage:", hasPoiLowResI, "  in ",sourcePoiLayerId);
+//	console.log("hasPolygonLowResImage:", hasPolygonLowResI, "  in ",sourcePolygonLayerId);
+	
+	if ( hasPoiLowResI || hasPolygonLowResI ){
+		if ( prevImage ){
+			++ contDepth;
+			if ( contDepth > depthLimitter ){
+				console.log("Over Limitter...");
+				document.getElementById("progress").innerHTML= "";
+				document.getElementById("hitcount").innerHTML="Canceled by limitter over.";
+				document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+				svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+				document.getElementById("hlt").disabled=true;
+				allSearching = false;
+				return;
+			}
+		} else {
+			contDepth = 0;
+		}
+		prevImage = true;
+//		console.log("レベルを上げる・・・・・・",contDepth);
+		// レベルを上げる
+		// setGeoViewPort( lat, lng, latSpan , lngSpan)..
+		currentLevelPos.push(0);
+		var subArea = getSubArea(currentLevelPos,initialViewBox);
+		document.getElementById("hitcount").innerHTML= "Hit:" + totalHitCount + "  Zooming.";
+		svgMap.setGeoViewPort( subArea.y, subArea.x, subArea.height , subArea.width);
+	} else {
+		prevImage = false;
+		// 検索する
+		searchInAreaPoints(searchAllS3,geom); // 取得済みgeomを再利用し効率化 2019/12/26(フレームワークにもオプション追加)
+	}
+}
+
+function searchAllS3(ans,totalPoiCount, param){
+	var printedIndex = prepareResultAndPrintcsv(ans);
+	totalHitCount += printedIndex.length;
+	document.getElementById("hitcount").innerHTML= "Hit:" + totalHitCount + "  Moving to next area.";
+	document.getElementById("progress").innerHTML=getProgress(currentLevelPos) + "/100 completed.";
+	prepareNextArea(currentLevelPos);
+}
+
+function prepareNextArea(currentLevelPos){
+	if ( currentLevelPos.length > 0 ){
+		if ( currentLevelPos[currentLevelPos.length-1] < 3 ){
+			// 次のタイルに移動する
+			currentLevelPos[currentLevelPos.length-1] = currentLevelPos[currentLevelPos.length-1]+1;
+			var subArea = getSubArea(currentLevelPos,initialViewBox);
+			svgMap.setGeoViewPort( subArea.y, subArea.x, subArea.height , subArea.width);
+		} else {
+			// そのレベルの探索は完了 上のレベルに戻す
+			console.log("Complete this level :",currentLevelPos);
+			var cl = currentLevelPos.length-1;
+			currentLevelPos.splice(cl,1);
+			prepareNextArea(currentLevelPos);
+		}
+	} else {
+		// 処理終了
+		console.log("Totally Completed...");
+		csvAppendMode = false;
+		document.getElementById("progress").innerHTML= "";
+		document.getElementById("hitcount").innerHTML="Totally Completed!";
+		document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+		document.getElementById("hlt").disabled=true;
+		allSearching = false;
+		markAllInRangePoints();
+		svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
+	}
+}
+
+function markAllInRangePoints(){ // 一括検索完了時の処理
+	var svgDoc = svgImage;
+	var svgImageRoot = svgDoc.documentElement;
+	for ( var ansHash in csvSource){
+		var POI = csvSource[ansHash];
+		var circle = svgDoc.createElement("circle");
+		circle.setAttribute("transform","ref(svg,"+POI.lng*100+","+(-POI.lat*100)+")");
+		circle.setAttribute("cx","0");
+		circle.setAttribute("cy","0");
+		circle.setAttribute("r","10");
+		circle.setAttribute("fill","red");
+		svgImageRoot.appendChild(circle);
+//		console.log(circle);
+	}
+	revertLayerSetup();
+}
+
+var APzoomPanListener = function (event){ // 一括検索において、伸縮スクロールが完了（ドキュメントのロードも完了:zoomPanMap ev）したところで検索を開始させる（連続検索ループを動かしている）イベントリスナ
+	console.log("APzoomPanListene:");
+	svgMap.captureGISgeometriesOption(true,true); 
+	svgMap.captureGISgeometries(searchAllS2 );
+}
+
+function testScreenRefreshedListener(event){
+	console.log("testScreenRefreshedListen");
+}
+
+function getSubArea(currentLevelPos,initialViewBox){
+	console.log(initialViewBox);
+	var x = initialViewBox.x;
+	var y = initialViewBox.y;
+	var w = initialViewBox.width;
+	var h = initialViewBox.height;
+	for ( var lvl = 0 ; lvl < currentLevelPos.length ; lvl++ ){
+		w = w/2;
+		h = h/2;
+		tx = currentLevelPos[lvl] % 2;
+		ty = Math.floor(currentLevelPos[lvl] / 2);
+		
+		x = x + tx * w;
+		y = y + ty * h;
+	}
+	return {
+		x:x,
+		y:y,
+		width:w,
+		height:h
+	}
+}
+
+
+function hasPoiLowResImage(geom,sourcePoiLayerId){
+	var svgImagesProps = svgMap.getSvgImagesProps();
+	var gCount = 0;
+	for ( var layerId in geom ){
+		if ( svgImagesProps[layerId].rootLayer == sourcePoiLayerId){ // 対象としているPOIのレイヤー(及びそのサブレイヤー)に対して
+			for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+				if ( geom[layerId][i].type =="Coverage" ){
+					return ( true ); // 一個でもカバレッジがあればtrue
+				}
+				++ gCount
+			}
+		}
+	}
+	if ( gCount > 0 ){
+		return ( false ); // 一方カバレッジがないけれどその他のオブジェクトがあればfalse
+	} else {
+		return ( false ); // なんもないときは・・・
+	}
+}
+
+// ポリゴンに対してもLowResでないのを確認して評価しないとダメですね。
+function hasPolygonLowResImage(geom,sourcePolygonLayerId){ // 同じロジックで大丈夫かな 2019/10/11
+	return hasPoiLowResImage(geom,sourcePolygonLayerId);
+}
+
+function getProgress(currentLevelPos){
+	var ans = 0;
+	var mul = 1;
+	for ( var i = 0 ; i < currentLevelPos.length ; i++ ){
+		if ( i == currentLevelPos.length-1){
+			ans += (currentLevelPos[i]+1)*25 / mul;
+		} else {
+			ans += currentLevelPos[i]*25 / mul;
+		}
+		mul = mul * 4;
+	}
+	return ( ans );
+}
+
+function getTargetLayerId(seledtTagId){
+	var sel = document.getElementById(seledtTagId);
+	var layerTitle = sel.options[sel.selectedIndex].value;
+	if ( layerTitle ){
+		return( svgMap.getLayerId(layerTitle));
+	} else {
+		sel.selectedIndex==1; // これはポリゴンの自分のレイヤーで編集してるとき
+		return (layerID);
+	}
+	
+}
+
+var currentLayerProps;
+function turnoutLayerSetup(targetPolyId, targetPoiId){
+	// 一括検索時に、不要なレイヤーを非表示にして効率化する
+	var lp = svgMap.getRootLayersProps();
+	console.log("RootLayersProps:",lp);
+	currentLayerProps=[];
+	for ( var i = 0 ; i < lp.length ; i++ ){
+		currentLayerProps.push({
+			id:lp[i].id,
+			visible:lp[i].visible
+		});
+		
+		if ( lp[i].id != targetPolyId && lp[i].id != targetPoiId && lp[i].id != layerID){
+			svgMap.setRootLayersProps(lp[i].id, false, false);
+		}
+		
+	}
+	
+}
+function revertLayerSetup(){
+	// 一括検索終了時に、レイヤーのOn/Off状態をもとに戻す
+	// setRootLayersProps(layerID_Numb_Title, visible , editing , hashOption ){
+	for ( var i = 0 ; i < currentLayerProps.length ; i++){
+		svgMap.setRootLayersProps(currentLayerProps[i].id, currentLayerProps[i].visible, false);
+	}
+	currentLayerProps=[];
+
+}
+
+</script>
+<body>
+<h3>ベクターGISレイヤー</h3>
+<div style="background-color:#E0E0E0;">
+<b>Target Layer:</b>
+<div>
+POI:
+<select name="targetPoiLayer" id="targetPoiLayer" onChange="clearPickColors()" >
+</select>
+</div>
+<div>
+Polygon:
+<select name="targetCoverLayer" id="targetCoverLayer" onChange="clearPickColors()">
+</select>
+
+<select style="font-size:10px" name="includedPolygonAttrFlg" id="includedPolygonAttrFlg" onChange="setIncludedPolygonAttrFlg()">
+<option selected=true" value="false">包含ポリゴン情報無し</option>
+<option value="true">包含ポリゴン情報付記</option>
+</select>
+
+</div>
+</div>
+<div style="background-color:#FFFFFF;">
+<input type="button" value="クリア" onClick="clearPickColors()">
+</div>
+<div style="background-color:#E0E0E0;">
+<b>空間検索</b>
+<input type="button" value="単発検索" onClick="searchInAreaPoints()"/>
+<input id="contSearchBtn"  type="button" value="連続検索開始" onClick="toggleContSearch()"/>
+<input id="allSearchBtn"  type="button" value="一括検索" onClick="searchAll()"/>
+<input type="button" id="hlt" value="中止" onClick="halt()" disabled/>
+<div id="hitcount">count</div><div id="progress"></div>
+
+<div id="polygonToolPanel" style="background-color:#A0E0E0;display:none">
+<b>領域指定</b>
+<div id="polygonTool"></div>
+</div>
+
+<textarea id="ansArea" style="width:95%;height:200px;font-size:8pt">About: 任意のベクトルポリゴン(Polygon)のレイヤーの領域と重なっている、任意のポイント情報(POI)のレイヤーのPOIを検索し、結果を地図上にマーク＆この欄にCSVを出力します。
+
+Note:
+・POIのレイヤーがアイコン化した状態まで拡大していないと、検索対象になりません。
+・連続検索を押すと、伸縮スクロールするたびに検索が実行され結果が地図上及びCSVに追加されていきます、広い領域の検索に便利です。
+・一括検索を押すと、選択したPOIレイヤーのPOIがアイコン化していない場合、自動的に拡大＆スクロールを繰り返し検索を実行します。こちらも広い領域の検索に便利です。</textarea>
+</div>
+
+
+</body>
+</html>

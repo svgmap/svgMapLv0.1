@@ -161,6 +161,7 @@
 // 2019/11/14 : refreshScreen()の排他制御導入
 // 2019/11/14 : ビットイメージにもキャッシュ不使用オプション有効化
 // 2019/11/14 : editableレイヤーでも、レイヤ非表示にしたら、DOMを消去することに仕様変更
+// 2019/12/26 : refreshScreen()の効率化 主にcaptureGisGeometries()->vectorGISの高性能化を図るため
 //
 //
 // Issues:
@@ -190,6 +191,7 @@
 // レイヤーごとのUI, レイヤーごとの凡例等
 // IE < 11実装の除去
 // POIや2Dベクタをクリックしたとき、レイヤ文書に対して、イベントを飛ばしてあげると良いと思う
+// refreshScreen()でgeoGeomを取得するというパターンはあるが、zoom/pan時にもそれができるともう一段効率化するかも？(ただかなりいろいろ非同期処理が絡むので・・・2019/12
 // 
 // devNote:
 // http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/airPort_r4.html#svgView(viewBox(global,135,35,1,1))
@@ -1128,7 +1130,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 		}
 //		console.log("checkDeletedNodes", existNodes);
 		checkDeletedNodes( mapCanvas );
-		if ( ticker && !pathHitTest.enable ){ // スマホなどでクリックしやすくするためのティッカー ただし単なるpathHitTestのときは無限ループが起きるのでパスする 2017.7.31 pathHitTest.enableチェックせずとも無限ループは起きなくなったはず 2018.1.18
+		if ( ticker && !pathHitTest.enable && !GISgeometriesCaptureFlag){ // スマホなどでクリックしやすくするためのティッカー ただし単なるpathHitTestのときは無限ループが起きるのでパスする 2017.7.31 pathHitTest.enableチェックせずとも無限ループは起きなくなったはず 2018.1.18 GISgeometriesCapture中はtickerの表示は不要なので高速化のため外す2019.12.26
 			checkTicker(); // ここで呼び出しただけでは、ロード中のレイヤのオブジェクトは拾えないので、スクロール・伸縮などで新たに出現するオブジェクトはTicker表示されない(ちょっとスクロールするとかしないと表示されない) バグに近いです
 		}
 //		console.log("call checkLoadCompleted : ending dynamicLoad");
@@ -1826,8 +1828,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 		if ( GISgeometry && onViewport ){ // ひとまずviewportにあるオブジェクトだけを収集する機能を検証2016.12.7
 			if (GISgeometry.href){ // 2018/2/27 debug
 				GISgeometry.href = getImageURL(GISgeometry.href,docDir);
-				if ( imgElem.naturalHeight > 0 ){ // ロードできてないイメージは外す。 cesiumのimageryではerr404imgで動作が停止する・・　何とかしてよねぇ‥
+				if ( imgElem.naturalHeight > 0 || GISgeometry.href.indexOf("data:")==0){ // ロードできてないイメージは外す。 cesiumのimageryではerr404imgで動作が停止する・・　何とかしてよねぇ‥
 					// ただし、ロード済みでないとこの値はセットされないので・・　ロード中にgisgeomを呼ぶパターンでは使えないはず・・ 2018.2.27
+					// dataURLの場合は、データは実存するにもかかわらずnaturalHeightの設定が遅延するので・・・なんか、こういう話じゃなかも・・(これだと本当にロードが遅延してるdataURLじゃないコンテンツの場合にどうするかがわからない感じもするが・) 2019/12/26
 					GISgeometries[docId].push(GISgeometry);
 				}
 			} else {
@@ -6635,18 +6638,42 @@ function contColorSet() {
 	}
 }
 
-function refreshScreen(noRetry){
+var retryingRefreshScreen = false;
+function refreshScreen(noRetry, parentCaller, isRetryCall){
+	// スクロール・パンを伴わずに画面の表示を更新(内部のSVGMapDOMとシンクロ)する処理
+	// SVGMapコンテンツ全体のDOMトラバースが起きるため基本的に重い処理
+	// SVGMapLv0.1.jsは画面の更新は定期的に行われ"ない" 実際は末尾のdynamicLoad()でそれが起きる
+	//
+	// この関数は、データのロードが起きる可能性があるため、非同期処理になっている。
+	// viewBoxは変化しないので、タイルコンテンツの非同期読み込みはないものの、
+	// 直前に外部リソースを読み込むDOM編集が起きたケースが非同期になる。
+	// 一方、他の非同期読み込みが進んでいるときに動作することは好ましくないので・・
+	
+	// ペンディングされている間に、更に新たなrefreshScreenが来た場合は、原理的に不要(caputureGISgeomも含め)のはずなので無視する。
+	if ( retryingRefreshScreen && !isRetryCall){
+		console.log( "Is refreshScreen retry queue:: SKIP this Call" );
+		return;
+	}
+	
+	var rsCaller = ((refreshScreen.caller).toString()).substring(0,20);
+	console.log("called refreshScreen: caller:",rsCaller, " parentCaller:",parentCaller);
 	if ( loadCompleted == false){ // loadCompletedしてないときに実行すると破綻するのを回避 2019/11/14
 		if ( !noRetry ){
 			console.log( "NOW LOADING:: delay and retry refreshScreen" );
-			setTimeout(refreshScreen , 100); // 何度でもリトライし必ず実行することにする・・(問題起きるかも？)
+			setTimeout(function(){
+				refreshScreen(noRetry, rsCaller, true);
+			}, 10); // 何度でもリトライし必ず実行することにする・・(問題起きるかも？)
+			retryingRefreshScreen = true;
 		} else {
 			console.log( "NOW LOADING:: SKIP refreshScreen" );
 		}
+		return;
+	} else {
+		retryingRefreshScreen = false;
 	}
 //	console.log("called refreshScreen from", refreshScreen.caller);
 	loadCompleted = false; // 2016.11.24 debug この関数が呼ばれるときは少なくとも(描画に変化がなくとも) loadCompletedをfalseにしてスタートさせないと、あらゆるケースでの描画完了を検知できない
-	dynamicLoad( "root" , mapCanvas );
+	dynamicLoad( "root" , mapCanvas ); // 以前はrefreshScreenのためにこの関数を生で呼んでいたが、上のいろんな処理が加わったので、それは廃止している（はず）
 }
 	
 // サンプルその１
@@ -7072,6 +7099,11 @@ var GISgeometries;
 
 function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , prop6 , prop7 ){ // 非同期、callbackFuncいるだろうね
 //	console.log(cbFunc);
+	if ( GISgeometriesCaptureFlag ){ // 2019/12/24 排他制御
+		console.log("Now processing another captureGISgeometries. Try later.");
+		cbFunc(false);
+		return ( false );
+	}
 	GISgeometriesCaptureFlag = true;
 	delete GISgeometries;
 	GISgeometries = new Object;
@@ -7085,7 +7117,7 @@ function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , 
 }
 
 function prepareGISgeometries(cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , prop6 , prop7 ){
-//	console.log("Called prepareGISgeometries   GISgeometries:", GISgeometries);
+//	console.log("Called prepareGISgeometries in resp to captGISgeom GISgeometries:", GISgeometries);
 //	DEBUG 2017.6.12 geojsonの座標並びが逆だった・・・
 	for ( var docId in GISgeometries ){
 		var layerGeoms = GISgeometries[docId];

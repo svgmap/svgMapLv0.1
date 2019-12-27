@@ -34,6 +34,7 @@
 // 2018/03/05 polylineを編集できる機能をおおよそ実装
 // 2019/03/12 POIのアイコン定義が1個しかない場合はアイコン選択UI省略
 // 2019/03/12 タイリングされたレイヤーに対して処理可能にする(制約としては、タイルにあるオブジェクトを編集したものは保持されない。新規のオブジェクトはレイヤルートに設置。メタデータスキーマ・アイコン定義は、共通のものをレイヤールートにも設置必要)
+// 2019/12/27 refreshScreen後コールバック処理の精密化
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -443,7 +444,8 @@ function editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat ){
 	svgMap.refreshScreen();
 //		console.log("editConfPhase2: toolsCbFunc?:",toolsCbFunc);
 	if ( toolsCbFunc ){
-		toolsCbFunc(confStat, toolsCbFuncParam);
+		callAfterRefreshed(toolsCbFunc,confStat,toolsCbFuncParam);
+//		toolsCbFunc(confStat, toolsCbFuncParam);
 	}
 }
 
@@ -698,10 +700,11 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 			uiMapping.editingLayerId,
 			directPutPoiParams.id
 		);
-		svgMap.refreshScreen();
+		svgMap.refreshScreen(); 
 		if ( toolsCbFunc ){
-			toolsCbFunc(true, toolsCbFuncParam);
-		}
+			callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
+//			toolsCbFunc(true, toolsCbFuncParam); // refreshが完了してから呼ばないと行儀が悪く、問題が出るようになった(2019/12/27)
+}
 	}
 	
 	// メタデータで緯度経度重複のあるdisabled formに値をコピー
@@ -720,6 +723,18 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 		}
 	} 
 }
+
+function callAfterRefreshed(cbf,cbfParam0,cbfParam1){ // refreshが完了してから呼ぶための関数(2019/12/27)
+	window.addEventListener('screenRefreshed', (function(cbf,cbfParam0,cbfParam1) {
+		return function f() {
+//			console.log("catch screenRefreshed call:",cbf," param:",cbfParam0,cbfParam1)
+			window.removeEventListener('screenRefreshed', f, false);
+			cbf(cbfParam0,cbfParam1);
+		}
+	})(cbf,cbfParam0,cbfParam1), false);
+}
+
+
 
 function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換えの方向
 	targetDiv.addEventListener("click",function(e){
@@ -761,7 +776,8 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 			);
 			svgMap.refreshScreen();
 			if ( toolsCbFunc ){
-				toolsCbFunc(true, toolsCbFuncParam);
+				callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
+//				toolsCbFunc(true, toolsCbFuncParam);
 			}
 		}
 	},false);
