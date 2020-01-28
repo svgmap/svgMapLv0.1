@@ -270,8 +270,8 @@ function listVisiblePoiCoverLayers(e){
 	prevTargetLayers = targetLayers;
 }
 
-function clearPickColors(){
-	console.log("clearPickColors : ", document.getElementById("targetCoverLayer").selectedIndex);
+function setTargets(){
+	console.log("setTargets : ", document.getElementById("targetCoverLayer").selectedIndex);
 	stopContSearch();
 	clearCircles();
 	svgMap.refreshScreen();
@@ -617,12 +617,12 @@ function revertLayerSetup(){
 <b>Target Layer:</b>
 <div>
 POI:
-<select name="targetPoiLayer" id="targetPoiLayer" onChange="clearPickColors()" >
+<select name="targetPoiLayer" id="targetPoiLayer" onChange="setTargets()" >
 </select>
 </div>
 <div>
 Polygon:
-<select name="targetCoverLayer" id="targetCoverLayer" onChange="clearPickColors()">
+<select name="targetCoverLayer" id="targetCoverLayer" onChange="setTargets()">
 </select>
 
 <select style="font-size:10px" name="includedPolygonAttrFlg" id="includedPolygonAttrFlg" onChange="setIncludedPolygonAttrFlg()">
@@ -633,7 +633,7 @@ Polygon:
 </div>
 </div>
 <div style="background-color:#FFFFFF;">
-<input type="button" value="クリア" onClick="clearPickColors()">
+<input type="button" value="クリア" onClick="setTargets()">
 </div>
 <div style="background-color:#E0E0E0;">
 <b>空間検索</b>

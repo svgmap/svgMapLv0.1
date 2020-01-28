@@ -31,6 +31,7 @@
 // 2018.12.26 KMLを直接レンダリングする機能を実装
 // 2019/05/17 getInRangePoints(): Coverageがtransform付きのものをサポート
 // 2019/12/26 効率向上のためのオプション追加(getIncludedPointsのpreCapturedGeometry)
+// 2020/01/14 buildDifference()
 //
 // 
 // ACTIONS:
@@ -59,7 +60,7 @@ var svgMapGIStool = ( function(){
 
 //	console.log("Hello this is svgMapGIStool");
 	
-	if ( jsts ){ // using jsts (JTS javascript edition)
+	if ( jsts ){ // using jsts (JTS javascript edition) https://bjornharrtell.github.io/jsts/
 //		console.log("This apps has jsts (JavaScript Topology Suites)");
 		this.featureReader = new jsts.io.GeoJSONReader();
 		this.featureWriter = new jsts.io.GeoJSONWriter();
@@ -443,10 +444,38 @@ var svgMapGIStool = ( function(){
 		return ( ansCounter -1);
 	}
 	
+	// 下の、buildIntersectionをラップし、"difference" | "union" | "symDifference"　を実行する関数
+	function buildDifference( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "difference"));
+	}
+	/**
+	function buildUnion( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, null, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "union"));
+	}
+	function buildSymDifference( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, null, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "symDifference"));
+	}
+	**/
+	// sourceLayer1,2のintersectionをtargetLayerに生成する。(getResultAsGeoJsonCallbackがあればそちらにもgeojsonを出力する)
+	//
+	// 2020/1/10 processMode: "intersection" | "difference" | "union" | "symDifference"
+	// 今のところ、intersectionだけ処理が違うので注意
 	
-	// sourceLayer1,2のintersectionをtargetLayerに生成する。
-	function buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback){
+	function buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, processMode){
 		halt = false;
+		if (!processMode){
+			processMode="intersection";
+		}
+		
+		var svgImages = svgMap.getSvgImages();
+		var svgImage = svgImages[targetId];
+		var resultGroup = svgImage.getElementById("resultGroup");
+		if ( !resultGroup ){
+			resultGroup = svgImage.createElement("g");
+			resultGroup.setAttribute("id","resultGroup");
+			svgImage.documentElement.appendChild(resultGroup);
+		}
+		
 		var params = {
 			sourceId1: sourceId1,
 			sourceId2: sourceId2,
@@ -454,14 +483,32 @@ var svgMapGIStool = ( function(){
 			strokeColor: strokeColor,
 			strokeWidth: strokeWidth,
 			fillColor: fillColor,
-			progrssCallback: progrssCallback
+			progrssCallback: progrssCallback,
+			addMetadata: addSourceMetadata, // source1,2のメタデータをintersectionのfeatureに付与する 2020/1/8
+			getResultAsGeoJsonCallback: getResultAsGeoJsonCallback, // 2020/1/8
+			getResultAsGeoJsonCallbackParam: getResultAsGeoJsonCallbackParam,
+			processMode:processMode,
+			resultGroup:resultGroup
 		}
 		
 		if ( progrssCallback ){
 			progrssCallback( 0 );
 		}
 		
-		svgMap.captureGISgeometries(buildIntersectionS2, params );
+		svgMap.captureGISgeometriesOption(false,true); // 2020/1/8 rectもpolygonとみなす
+		if ( params.processMode == "intersection" ){
+			if ((!params.addMetadata) ){// addMetadataしないintersectionだけこっちで処理する・・・今後整理が必要　TBD
+				svgMap.captureGISgeometries(buildIntersectionS2, params ); 
+//				svgMap.captureGISgeometries(buildIntersectionS2a, params ); // jstsに丸投げするパターン(処理は２倍ほど高速だが・・重くなった時に進捗が取れない) 2020/1/9
+			} else {
+				svgMap.captureGISgeometries(buildIntersectionS2, params ); 
+			}
+		} else if ( params.processMode == "difference" ){
+			svgMap.captureGISgeometries(buildDifferenceS2, params );
+		} else { 
+			// NOP
+		}
+		return ( resultGroup );
 	}
 	
 	function countPoints( sourceLayerIDs , geom ){
@@ -541,9 +588,230 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
+	function buildDifferenceS2( geom, params , loop1Count , loop2Count, fa1, fa2, ansFeatures , ansFeature ,ansFeatureMetadata ){ // 2020/1/10 非同期処理のために、かなりトリッキーですよ
+		var startTime =  new Date().getTime();
+//		console.log( "called buildDifferenceS2:",geom, params );
+		var j = 0;
+		if ( !ansFeatures ){
+			loop1Count = 0;
+			loop2Count = 0;
+			var svgImages = svgMap.getSvgImages();
+			var svgImagesProps = svgMap.getSvgImagesProps();
+			var src1IDs = getChildDocsId( params.sourceId1);
+			var src2IDs = getChildDocsId( params.sourceId2);
+			
+			// Array.prototype.push.apply(array1, array2);
+			// var array = array1.concat(array2);
+			fa1=[];
+			for ( var i = 0 ; i < src1IDs.length ; i++ ){
+				if ( geom[src1IDs[i]] ){
+					fa1 = fa1.concat(geom[src1IDs[i]]);
+				}
+			}
+			fa2=[];
+			for ( var i = 0 ; i < src2IDs.length ; i++ ){
+				if ( geom[src2IDs[i]] ){
+					fa2 = fa2.concat(geom[src2IDs[i]]);
+				}
+			}
+			ansFeatures=[];
+		} else {
+			j = loop2Count;
+		}
+//		console.log("buffered srcgem1:",fa1,"  srcgem2:",fa2);
+		
+		var pm =new jsts.geom.PrecisionModel(1000000);
+		
+		loop1: for (var i = loop1Count ; i < fa1.length ; i++){
+			if ( j == 0 ){
+				console.log("Seed feartureA:",fa1[i]);
+				var featureA = getFeature(fa1[i]);
+				try{
+					featureA = jsts.simplify.DouglasPeuckerSimplifier.simplify(featureA,0.00001);
+					featureA = jsts.precision.GeometryPrecisionReducer.reduce(featureA,pm);
+				} catch (e){
+					continue;
+				}
+				ansFeature = featureA;
+				if ( params.addMetadata ){
+					ansFeatureMetadata = fa1[i].src.getAttribute("content");
+				}
+			}
+			for ( j = loop2Count ; j < fa2.length ; j++){
+				var featureB = getFeature(fa2[j]);
+				try{
+					featureB = jsts.simplify.DouglasPeuckerSimplifier.simplify(featureB,0.00001);
+					featureB = jsts.precision.GeometryPrecisionReducer.reduce(featureB,pm);
+					var difFeature = ansFeature.difference(featureB);
+					if ( difFeature ){
+						ansFeature = jsts.simplify.DouglasPeuckerSimplifier.simplify(difFeature,0.00001);
+						ansFeature = jsts.precision.GeometryPrecisionReducer.reduce(ansFeature,pm);
+					}
+				}catch(e){
+					continue;
+				}
+				
+				// 時間がかかり過ぎたら一旦停止して再開させる再起呼び出し・(ここがトリッキーなポイント)
+				var difTime =  new Date().getTime() - startTime;
+				if ( difTime > 300){
+					if ( params.progrssCallback ){
+						params.progrssCallback(  Math.ceil((i*fa2.length + j) / (fa2.length * fa1.length) * 1000)/10 );
+					}
+					var nextCount2 = j+1;
+					var nextCount1 = i;
+					if ( nextCount2 == fa2.length ){
+						// たまたま内側ループ完了タイミングだった
+						if ( ansFeature ){
+							ansFeatures.push(getGeoJson(ansFeature));
+//							console.log(ansFeature);
+						}
+						nextCount1 = i+1;
+						nextCount2 = 0;
+						if ( nextCount1 == fa1.length ){
+							// たまたま・・完了のタイミングだった
+							break loop1;
+						}
+					}
+					if ( halt == true ){
+						break loop1;
+					}
+//					wait and call buildDifferenceS2 and exit
+					setTimeout(buildDifferenceS2, 20 , geom, params , nextCount1 , nextCount2, fa1, fa2, ansFeatures , ansFeature, ansFeatureMetadata);
+					return;
+				}
+				
+			}
+			j = 0;
+			loop2Count = 0;
+			if ( ansFeature ){
+				var ansGeoJs=getGeoJson(ansFeature);
+				if ( geomHasCoordinates(ansGeoJs)){
+					if ( params.addMetadata ){
+//						console.log("Add metada",ansFeatureMetadata);
+						ansGeoJs.metadata=ansFeatureMetadata;
+					}
+					ansFeatures.push(ansGeoJs);
+//					console.log(ansFeature);
+				}
+			}
+		}
+		
+		halt = false;
+		
+		if ( params.progrssCallback ){
+			params.progrssCallback(  100 );
+		}
+		var geoJsonIntersections = {};
+		geoJsonIntersections.type="GeometryCollection";
+		geoJsonIntersections.geometries = ansFeatures;
+		console.log("ans geojson:",geoJsonIntersections);
+		drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+		svgMap.refreshScreen();
+		
+	}
+	
+	
+	function buildIntersectionS2a( geom, params ){
+		// 2020/1/9 jstsの性能に頼って、全geomをcollectionにしたうえで放り込んで一気に処理してみる
+		// やはり大エリアではリソースを使い切ってしまうし、進捗表示もできないので厳しいかも・・
+		// またメタデータ同一の物（というより、同一のオブジェクトの部分とみなせるもの）だけをcollectionに投入する必要がある（が、今はそれを行ってない。全部入れている）
+		// simplifyは(この方法でなくS2でも)行うべきと思われるが・・
+		console.log( "called buildIntersectionS2a:",geom, params );
+		
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var src1IDs = getChildDocsId( params.sourceId1);
+		var src2IDs = getChildDocsId( params.sourceId2);
+		
+		// Array.prototype.push.apply(array1, array2);
+		// var array = array1.concat(array2);
+		var fa1=[];
+		for ( var i = 0 ; i < src1IDs.length ; i++ ){
+			if ( geom[src1IDs[i]] ){
+				fa1 = fa1.concat(geom[src1IDs[i]]);
+			}
+		}
+		var fa2=[];
+		for ( var i = 0 ; i < src2IDs.length ; i++ ){
+			if ( geom[src2IDs[i]] ){
+				fa2 = fa2.concat(geom[src2IDs[i]]);
+			}
+		}
+		console.log("buffered srcgem1:",fa1,"  srcgem2:",fa2);
+		
+		var jstsFeature1 = getFeature(buildGeoJsonGeometryCollectionFromGeometryArray(fa1));
+		var jstsFeature2 = getFeature(buildGeoJsonGeometryCollectionFromGeometryArray(fa2));
+		var gpr = jsts.precision.GeometryPrecisionReducer;
+//		jstsFeature1 = jstsFeature1.buffer(0);
+//		jstsFeature2 = jstsFeature2.buffer(0);
+		jstsFeature1=jsts.simplify.DouglasPeuckerSimplifier.simplify(jstsFeature1,0.00001);
+		jstsFeature2=jsts.simplify.DouglasPeuckerSimplifier.simplify(jstsFeature2,0.00001);
+		console.log("buffered jstsFeature1:",jstsFeature1,"  jstsFeature2:",jstsFeature2);
+		jstsFeature1 = gpr.reduce(jstsFeature1,new jsts.geom.PrecisionModel(1000000));
+		jstsFeature2 = gpr.reduce(jstsFeature2,new jsts.geom.PrecisionModel(1000000));
+		console.log("GeometryPrecisionReducer:",gpr);
+		var isf;
+		switch (params.processMode){
+		case "intersection":
+			isf = jstsFeature1.intersection(jstsFeature2);
+//			isf = jstsFeature1.intersection(jstsFeature2);
+			break;
+		case "difference":
+			isf = jstsFeature1.difference(jstsFeature2);
+			break;
+		case "union":
+			isf = jstsFeature1.union(jstsFeature2);
+			break;
+		case "symDifference":
+			isf = jstsFeature1.symDifference(jstsFeature2);
+			break;
+		default: // その他の文字列の場合は、jstsのintersectionを使う・・(一応S2のintersectionと使い分けができるけどね・・・)
+			isf = jstsFeature1.intersection(jstsFeature2);
+			break;
+		}
+			
+		var isg=getGeoJson(isf);
+//		var isg= getGeoJson(jstsFeature1);
+		console.log("intersection:",isg);
+		
+		if ( params.getResultAsGeoJsonCallback ){ // 2020/1/8
+			if ( params.getResultAsGeoJsonCallbackParam ){
+				params.getResultAsGeoJsonCallback(isg, getResultAsGeoJsonCallbackParam);
+			} else {
+				params.getResultAsGeoJsonCallback(isg );
+			}
+		}
+		if ( params.strokeColor || params.strokeWidth || params.fillColor){
+			drawGeoJson(isg, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+			svgMap.refreshScreen();
+		}
+	}
+	
+	function buildGeoJsonFeatureCollectionFromGeometryArray( geometryArray ){ // not used
+		var fc = {};
+		fc.type="FeatureCollection";
+		fc.features=[];
+		
+		for ( var i = 0 ; i < geometryArray.length ; i++ ){
+			var feature = {};
+			feature.type="Feature";
+			feature.geometry=geometryArray[i];
+			fc.features.push(feature);
+		}
+		return ( fc );
+	}
+	
+	function buildGeoJsonGeometryCollectionFromGeometryArray( geometryArray ){
+		
+		var gc = {};
+		gc.type="GeometryCollection";
+		gc.geometries=geometryArray;
+		
+		return ( gc );
+	}
 	
 	function buildIntersectionS2( geom, params ){
-//		console.log( "called buildIntersectionS2:",geom, params );
+		console.log( "called buildIntersectionS2:",geom, params );
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
 //		var source1IDs = [], source2IDs = [];
@@ -588,14 +856,16 @@ var svgMapGIStool = ( function(){
 		
 		var src1Features=[];
 		for ( var i = 0 ; i < src1IDs.length ; i++ ){
-			var geoms1 = geom[src1IDs[i]];
-			console.log(geoms1);
+			var src1docID = src1IDs[i];
+			var geoms1 = geom[src1docID];
+//			console.log(geoms1);
 			if ( geoms1 && geoms1.length>0 ){
 				for ( var k = 0 ; k < geoms1.length ; k++ ){
 					var geom1 = geoms1[k];
 					if ( geom1 ){
 						var feature1 = getFeature(geom1);
-						src1Features.push(feature1);
+						feature1=jsts.simplify.DouglasPeuckerSimplifier.simplify(feature1,0.00001);
+						src1Features.push({feature:feature1,docId:src1docID,geomIndex:k}); // mod 2020/1/8 for addMetadata
 					}
 				}
 			}
@@ -617,7 +887,7 @@ var svgMapGIStool = ( function(){
 				}
 			}
 		}
-		console.log(compArray);
+//		console.log(compArray);
 		
 		buildIntersectionS3(src2IDs,src1Features, compArray,geom, params);
 		
@@ -629,9 +899,26 @@ var svgMapGIStool = ( function(){
 		halt = true;
 	}
 	
+	function geomHasCoordinates(geom){ // 2020/1/28 polygonでからのものが入ってしまうのを修正し関数化
+		var hasCrds = false;
+		if ( geom.coordinates.length > 0 ){
+			hasCrds = true;
+			if ( geom.type=="Polygon" ){
+				var polCrds = 0;
+				for ( var i = 0 ; i < geom.coordinates.length ; i++){
+					polCrds += geom.coordinates[i].length;
+				}
+				if ( polCrds == 0 ){
+					hasCrds = false;
+				}
+			}
+		}
+		return ( hasCrds);
+	}
+	
 	// intersectionが重すぎる処理なので・・・
 	function buildIntersectionS3(src2IDs,src1Features, compArray,geom, params, counter , startTime , feature2, intersections){
-		console.log("called buildIntersectionS3:",counter);
+//		console.log("called buildIntersectionS3:",counter);
 		// 再帰処理用内部変数の初期化
 		if ( ! counter ){
 			startTime = new Date().getTime();
@@ -639,21 +926,29 @@ var svgMapGIStool = ( function(){
 			counter = 0;
 		}
 		while ( counter < compArray.length && halt == false){
-			var j = compArray[counter][0];
-			var l = compArray[counter][1];
-			var m = compArray[counter][2];
+			var j = compArray[counter][0]; // src2IDs[j]が src2のdocID
+			var l = compArray[counter][1]; // geomIndexが、src2のgeomIndex
+			var m = compArray[counter][2]; // src1Featuresのindex
 			
 			var geoms2 = geom[src2IDs[j]];
 			if ( m == 0 ){
 				var geom2 = geoms2[l];
 				feature2 = getFeature(geom2);
+				feature2=jsts.simplify.DouglasPeuckerSimplifier.simplify(feature2,0.00001);
 			}
-			var featureA = src1Features[m];
+			var featureA = src1Features[m].feature;
 			try{
 				var isf = featureA.intersection(feature2);
 				if ( isf ){
 					var isGeom = getGeoJson(isf);
-					if ( isGeom.coordinates.length > 0 ){
+					if ( geomHasCoordinates(isGeom) ){
+						if ( params.addMetadata ){ // 2020/1/8
+							var docIdA = src1Features[m].docId;
+							var geomIndexA = src1Features[m].geomIndex;
+							var meta1 = (geom[docIdA])[geomIndexA].src.getAttribute("content"); // 重ければ一括前処理で効率化できる
+							var meta2 = geoms2[l].src.getAttribute("content"); // 同上
+							isGeom.metadata=meta1+","+meta2;
+						}
 						intersections.push(isGeom);
 					}
 				}
@@ -663,7 +958,7 @@ var svgMapGIStool = ( function(){
 			var currentTime =  new Date().getTime();
 			++ counter;
 			if ( currentTime - startTime > 500 ){ // 0.3秒以上たったらちょっと(30ms)休憩
-				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
+//				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
 				if ( params.progrssCallback ){
 					params.progrssCallback( Math.ceil(1000 * counter /  compArray.length) / 10 );
 				}
@@ -681,8 +976,17 @@ var svgMapGIStool = ( function(){
 			geoJsonIntersections.type="GeometryCollection";
 			geoJsonIntersections.geometries = intersections;
 			console.log("svgmapGIS:geoJsonIntersections",geoJsonIntersections);
-			drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor);
-			svgMap.refreshScreen();
+			if ( params.getResultAsGeoJsonCallback ){ // 2020/1/8
+				if ( params.getResultAsGeoJsonCallbackParam ){
+					params.getResultAsGeoJsonCallback(geoJsonIntersections, getResultAsGeoJsonCallbackParam);
+				} else {
+					params.getResultAsGeoJsonCallback(geoJsonIntersections );
+				}
+			}
+			if ( params.strokeColor || params.strokeWidth || params.fillColor){
+				drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+				svgMap.refreshScreen();
+			}
 		}
 	}
 	
@@ -827,6 +1131,9 @@ var svgMapGIStool = ( function(){
 		
 		// computeInRangePoints経由で再帰実行されるgetImagePixDataを呼び出し処理を進める
 		var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+		fileGetOverhead = 0;
+		computingOverhead = 0;
+		overheadPrevTimeInt = Date.now();
 		if ( targetCoverage && targetCoverage.href ){
 			var targetCoverageURL = targetCoverage.href;
 			getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
@@ -835,6 +1142,9 @@ var svgMapGIStool = ( function(){
 			superParam.cbFunc(superParam.ans, superParam.param);
 		}
 	}
+	
+	// getInRangePointsS2の性能の統計用
+	var fileGetOverhead, computingOverhead , overheadPrevTimeInt;
 	
 	function getNextIntersectedCoverage(targetCov, targetPoisBbox, currentIndex){
 		var cindex = currentIndex+1;
@@ -887,6 +1197,9 @@ var svgMapGIStool = ( function(){
 	
 	
 	function computeInRangePoints( pixData , pixWidth , pixHeight , superParam ){
+		var now = Date.now();
+		fileGetOverhead += now - overheadPrevTimeInt;
+		overheadPrevTimeInt = now;
 //		console.log("computeInRangePoints: coverageData:",pixData.length , pixWidth, pixHeight,"  targetPois.length:",superParam.targetPois.length);
 		// var extent = superParam.targetCoverages[superParam.coverageIndex].coordinates;
 		
@@ -956,10 +1269,14 @@ var svgMapGIStool = ( function(){
 		if ( halt == true || superParam.coverageIndex == superParam.targetCoverages.length ){
 			// complete computation
 			halt = false;
+			console.log("Processing overhead[ms]: fileFetch:",fileGetOverhead,"  computing:", computingOverhead, "   comp.Ratio[%]:", Math.floor(10000*computingOverhead / (computingOverhead+fileGetOverhead))/100 );
 			superParam.cbFunc(superParam.ans, superParam.param);
 		} else {
 			// compute next coverage
 			var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+			now = Date.now();
+			computingOverhead += now - overheadPrevTimeInt;
+			overheadPrevTimeInt = now;
 			if ( targetCoverage && targetCoverage.href ){
 				var targetCoverageURL = targetCoverage.href;
 				getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
@@ -1010,25 +1327,51 @@ var svgMapGIStool = ( function(){
 		return ( false );
 	}
 	
+	// 2020/1/23 ブラウザネイティブのキャッシュが効いてない？？　Imageのためのキャッシュ(FIFO)を構築 
+	// オートパイロットで特に高速化したと思う。
+	var imageCacheMaxSize=100; // FIFOキャッシュの数
+	var imageCache = [];
+	var imageCacheQueue=[];
+	function addImageCache(hashKey,img){
+		imageCache[hashKey] = img;
+		imageCacheQueue.push(hashKey);
+		if (imageCacheQueue.length == imageCacheMaxSize){
+			var delImageHash = imageCacheQueue.shift();
+			delete imageCache[delImageHash];
+		}
+	}
+	
 	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams){
-		var img = new Image();
-		if ( anonProxy ){
-			img.crossOrigin = "anonymous";
+		var imageURL_int = getImageURL(imageUrl);
+		if ( imageCache[imageURL_int]){
+			console.log("Hit imageCache");
+			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
+		} else {
+			var img = new Image();
+			if ( anonProxy ){
+				img.crossOrigin = "anonymous";
+			}
+			console.log("Fetch image : ", imageUrl);
+			img.src = imageURL_int;
+			img.onload = function() {
+				returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
+				addImageCache(imageURL_int, img);
+			}
 		}
-		img.src =getImageURL(imageUrl);
-		img.onload = function() {
-			var canvas = document.createElement("canvas");
-			canvas.width  = img.width;
-			canvas.height = img.height;
-			var cContext = canvas.getContext('2d');
-			cContext.mozImageSmoothingEnabled = false;
-			cContext.webkitImageSmoothingEnabled = false;
-			cContext.msImageSmoothingEnabled = false;
-			cContext.imageSmoothingEnabled = false;
-			cContext.drawImage(img, 0, 0);
-			var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
-			callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
-		}
+	}
+	
+	function returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams){
+		var canvas = document.createElement("canvas");
+		canvas.width  = img.width;
+		canvas.height = img.height;
+		var cContext = canvas.getContext('2d');
+		cContext.mozImageSmoothingEnabled = false;
+		cContext.webkitImageSmoothingEnabled = false;
+		cContext.msImageSmoothingEnabled = false;
+		cContext.imageSmoothingEnabled = false;
+		cContext.drawImage(img, 0, 0);
+		var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
+		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
 	}
 	
 	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
@@ -1056,7 +1399,7 @@ var svgMapGIStool = ( function(){
 				// Do nothing (Direct Connection)
 			} else {
 				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
-				console.log("via proxy url:",imageUrl);
+//				console.log("via proxy url:",imageUrl);
 			}
 		} else {
 			// Do nothing..
@@ -1143,12 +1486,17 @@ var svgMapGIStool = ( function(){
 	
 	// geoJsonレンダラ系
 	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm){
-		console.log("called svgMapGisTool drawGeoJson");
+//		console.log("called svgMapGisTool drawGeoJson");
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
 		var svgImage = svgImages[targetSvgDocId];
 		var svgImagesProp = svgImagesProps[targetSvgDocId];
 		var crs = svgImagesProp.CRS;
+		
+		if ( geojson.metadata){ // 2020/1/8
+			metadata=geojson.metadata;
+//			console.log("Set metadata on drawGeoJson:",metadata)
+		} // ISSUE 2020.1.14 本来のgeojsonでは、 properties type:Featureオブジェクト下の "properties"プロパティに{KV,..}としてメタデータを入れる仕様　これをサポートするべき
 		
 		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
 			for ( var i = 0 ; i < geojson.length ; i++ ){
@@ -1179,23 +1527,29 @@ var svgMapGIStool = ( function(){
 			}
 		} else if ( geojson.type == "MultiPolygon" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
-			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
+			if ( geojson.coordinates.length >0){
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putPolygon(geojson.coordinates[i], svgImage, crs, fillColor, metadata, parentElm);
+				}
 			}
 		} else if ( geojson.type == "Polygon" ){
 			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
 		} else if ( geojson.type == "MultiLineString" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
-			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+			if ( geojson.coordinates.length >0){			
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+				}
 			}
 		} else if ( geojson.type == "LineString" ){
 			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
 			
 		} else if ( geojson.type == "MultiPoint" ){
 			// グループで囲んで一括でmetadataつけたほうが良いと思うが・・
-			for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-				putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+			if ( geojson.coordinates.length >0){
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+				}
 			}
 		} else if ( geojson.type == "Point" ){
 			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
@@ -1374,10 +1728,14 @@ var svgMapGIStool = ( function(){
 		} else {
 			svgImage.documentElement.appendChild( pe );
 		}
+//		console.log("putLineString:",pe);
 		return (pe);
 	}
 	
 	function putPolygon(coordinates, svgImage, crs, fillColor, metadata, parentElm){
+		if ( coordinates.length ==0){
+			return;
+		}
 		if ( !fillColor ){
 			strokeColor = "orange";
 		}
@@ -1405,6 +1763,9 @@ var svgMapGIStool = ( function(){
 	}
 	
 	function getPathD( geoCoords , crs ){
+		if ( geoCoords.length ==0){
+			return(" ");
+		}
 		var ans ="M";
 		var svgc = getSVGcoord(geoCoords[0],crs);
 		ans += svgc.x + "," + svgc.y + " L";
@@ -1450,6 +1811,9 @@ return { // svgMapGIStool. で公開する関数のリスト
 	getIncludedPoints : getIncludedPoints,
 	getExcludedPoints : getExcludedPoints,
 	buildIntersection : buildIntersection,
+	buildDifference : buildDifference,
+	// buildUnion : buildUnion,
+	// buildSymDifference : buildSymDifference,
 	haltComputing : haltComputing,
 	drawGeoJson : drawGeoJson,
 	drawKml : drawKml,

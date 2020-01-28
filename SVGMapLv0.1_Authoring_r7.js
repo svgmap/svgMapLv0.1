@@ -35,6 +35,7 @@
 // 2019/03/12 POIのアイコン定義が1個しかない場合はアイコン選択UI省略
 // 2019/03/12 タイリングされたレイヤーに対して処理可能にする(制約としては、タイルにあるオブジェクトを編集したものは保持されない。新規のオブジェクトはレイヤルートに設置。メタデータスキーマ・アイコン定義は、共通のものをレイヤールートにも設置必要)
 // 2019/12/27 refreshScreen後コールバック処理の精密化
+// 2020/01/21 同上マイナー修正
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -436,17 +437,18 @@ function setEditConfEvents( targetDoc , poiDocId){
 }
 
 function editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat ){
+//	console.log("editConfPhase2:",confStat,"   toolsCbFunc:",toolsCbFunc);
 	uiMapping.selectedPointsIndex = -1;
 	uiMapping.insertPointsIndex = -1;
 	clearForms(targetDoc);
 	poiCursor.removeCursor();
 	polyCanvas.removeCanvas();
-	svgMap.refreshScreen();
 //		console.log("editConfPhase2: toolsCbFunc?:",toolsCbFunc);
 	if ( toolsCbFunc ){
 		callAfterRefreshed(toolsCbFunc,confStat,toolsCbFuncParam);
 //		toolsCbFunc(confStat, toolsCbFuncParam);
 	}
+	svgMap.refreshScreen();
 }
 
 function delConfModal(index,opt){
@@ -700,11 +702,11 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 			uiMapping.editingLayerId,
 			directPutPoiParams.id
 		);
-		svgMap.refreshScreen(); 
 		if ( toolsCbFunc ){
 			callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
 //			toolsCbFunc(true, toolsCbFuncParam); // refreshが完了してから呼ばないと行儀が悪く、問題が出るようになった(2019/12/27)
-}
+		}
+		svgMap.refreshScreen(); 
 	}
 	
 	// メタデータで緯度経度重複のあるdisabled formに値をコピー
@@ -774,11 +776,11 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 				uiMapping.editingLayerId,
 				params.id
 			);
-			svgMap.refreshScreen();
 			if ( toolsCbFunc ){
 				callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
 //				toolsCbFunc(true, toolsCbFuncParam);
 			}
+			svgMap.refreshScreen();
 		}
 	},false);
 }
@@ -1416,7 +1418,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 		toolsCbFuncParam = null;
 	}
 	
-//	console.log("initPolygonTools : isPolylineMode:",isPolylineMode);
+	console.log("initPolygonTools : isPolylineMode:",isPolylineMode,  "  toolsCbFunc:",toolsCbFunc);
 	
 	removeChildren( targetDiv );
 	
@@ -1698,6 +1700,14 @@ function getMetaSchema(docId){ // 同じ文が大量にあるので関数化 201
 	}
 	return ( metaSchema)
 }
+
+function clearTools_with_UI(){
+	console.log("clearTools_with_UI:",uiMapping.uiPanel);
+	clearTools();
+	if ( uiMapping.uiPanel && (uiMapping.uiPanel).nodeType && (uiMapping.uiPanel).nodeType===1 ){
+		removeChildren(uiMapping.uiPanel);
+	}
+}
 	
 return { // svgMapGIStool. で公開する関数のリスト
 	editPoint: editPoint,
@@ -1705,7 +1715,8 @@ return { // svgMapGIStool. で公開する関数のリスト
 	initPOIregistTool: initPOIregistTool,
 	initPolygonTools: initPolygonTools,
 	setTargetObject: setTargetObject,
-	isEditingGraphicsElement: isEditingGraphicsElement
+	isEditingGraphicsElement: isEditingGraphicsElement,
+	clearTools: clearTools_with_UI // 2020/1/24 ツールのUIも消去してくれるようにした
 }
 })();
 

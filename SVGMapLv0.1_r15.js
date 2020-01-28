@@ -868,7 +868,7 @@ function getNoCacheRequest( originalUrl ){
 function loadSVG( path , id , parentElem , parentSvgDocId) {
 //	console.log("called loadSVG  id:",id, " path:",path);
 	if ( !svgImages[id] ){ 
-//		console.log("call loadSVG");
+//		console.log("call loadSVG  create svgImagesProps id:",id);
 		svgImagesProps[id] = new function(){}; //  2014.5.27
 		
 		// 2014.5.27 canvas統合用に、rootLayerPropに、"root"のレイヤーのidを子孫のレイヤーに追加
@@ -940,6 +940,13 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //	console.log("httpRes:",httpRes);
 	if (( httpRes.readyState == 4 ) ){
 //			console.log("called handleResult and ready  id:",docId);
+		if ( !svgImagesProps[docId]){
+			// 読み込み途中でそのタイルが不要になるケースがある(高速にスクロールすると、removeUnused..で消される) 2020/1/24
+			console.log("NO svgImagesProps[docId] : docId:",docId, "  skip processing");
+			delete loadingImgs[docId];
+			checkLoadCompleted();
+			return;
+		}
 		if ( httpRes.status == 403 || httpRes.status == 404 || httpRes.status == 500 || httpRes.status == 503 ){
 			delete loadingImgs[docId]; // debug 2013.8.22
 			console.log( "File get failed: Err:",httpRes.status," Path:",docPath);
@@ -994,6 +1001,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		console.log("docLoc:",svgImages[docId].location);
 //		console.log("docPath:" ,docPath, " doc:",svgImages[docId],"   id:docRoot?:",svgImages[docId].getElementById("docRoot"));
 //		svgImagesProps[docId] = new function(){}; // move to loadSVG()  2014.5.27
+//				console.log("docId:",docId," svgImagesProps[docId]:",svgImagesProps[docId]," docPath:",docPath);
 		svgImagesProps[docId].Path = docPath;
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] );
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
@@ -3132,6 +3140,9 @@ function removeUnusedDocs(){
 		if ( !usedImages[key] ){
 			delete svgImages[key];
 			delete svgImagesProps[key];
+			if ( GISgeometries ){
+				delete GISgeometries[key]; // 2020/01/23 added
+			}
 			delKeys.push(key);
 		}
 	}

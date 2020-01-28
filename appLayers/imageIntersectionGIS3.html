@@ -22,6 +22,7 @@
 // もうちょっとラスタのトレース処理速くならないかな？
 // オートパイロットのベクタとの共通フレームワーク化
 // 
+// http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/rev13/SVGMapper_r15_GISr2.html#xywh=global:138.43,35.20,0.1,0.1
 //
 // layerID
 // svgMap
@@ -58,7 +59,14 @@ function halt(){
 }
 
 function initSvgMapGIStool(){
-	// svgMapGIStool.setImageProxy("SvgMapProxy.php?file=",null,false); // you should set proper proxy path for cross domain bitimage processing
+	svgMapGIStool.setImageProxy("../cesiumSvgMap/cesiumSvgMapProxy.php?file=",null,false);
+}
+
+function searchInRangePointsSingle(){
+	searchInRangePoints(function(ans){
+		markInRangePoints(ans);
+		svgMap.refreshScreen();
+	});
 }
 
 function searchInRangePoints(cbf,preCapturedGeometry){
@@ -595,7 +603,7 @@ Coverage:
 </div>
 <div style="background-color:#E0E0E0;">
 <b>空間検索</b>
-<input type="button" value="単発検索" onClick="searchInRangePoints()"/>
+<input type="button" value="単発検索" onClick="searchInRangePointsSingle()"/>
 <input id="contSearchBtn"  type="button" value="連続検索開始" onClick="toggleContSearch()"/>
 <input id="allSearchBtn"  type="button" value="一括検索" onClick="searchAll()"/>
 <input type="button" id="hlt" value="中止" onClick="halt()" disabled/>
