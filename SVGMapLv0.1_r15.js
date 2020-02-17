@@ -162,6 +162,8 @@
 // 2019/11/14 : ビットイメージにもキャッシュ不使用オプション有効化
 // 2019/11/14 : editableレイヤーでも、レイヤ非表示にしたら、DOMを消去することに仕様変更
 // 2019/12/26 : refreshScreen()の効率化 主にcaptureGisGeometries()->vectorGISの高性能化を図るため
+// 2020/01/30 : ラスターGISの高速化等を行うため、bitimageについてもproxy経由で取得させる機能を実装(svgMap.setProxyURLFactory)
+// 2020/02/13 : ERR404やGETに時間がかかり過ぎたときのエラーアウト処理を強化(LayerUIも)
 //
 //
 // Issues:
@@ -214,11 +216,13 @@ var location = window.location;
 
 var svgMap = ( function(){ // 2014.6.6
 
-
 var zoomRatio = 1.7320508; // ZoomUp,Downボタンのズームレシオ
 var devicePixelRatio = 1.0; // zoom計算時のみに用いる たとえば２にするとzoom値が本来の２分の１になる(2014/07/16)
 
 var summarizeCanvas = true; // added 2014.5.27 レイヤ単位でcanvas2dを統合
+
+var loadingTransitionTimeout = 7000; // LODの読み込み遷移中のホワイトアウト防止処理や。XMLロード処理のタイムアウト[msec]（この時間を超えたらbitImageもSVGdoc(2020/2/13)もスキップする
+
 
 var mapx=138;
 var mapy=37;
@@ -229,8 +233,6 @@ var isIE = false; // IE11で互換性があがったので、ロジックにい�
 var isSP = false; // スマホの場合設定される
 var verIE = 100; // IEの場合にそのバージョンが設定される。それ以外は100...　そろそろ IE10以下をObsoluteする予定
 var uaProp; // 上の三つのパラメータをそろそろ整理統合しようと思っています Edge対応に際して導入 2018/4/6
-	
-var loadingTransitionTimeout = 7000; // LODの読み込み遷移中のホワイトアウト防止処理のタイムアウト[msec]
 
 var resume = false; // 2016/10/26 resume機能
 var resumeSpan = 3; // resumeの有効期限 (日)
@@ -876,7 +878,7 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 		setLayerDivProps( id, parentElem, parentSvgDocId );
 		
 //		var httpObj = createXMLHttpRequest( function(){ return handleResult(id , path , parentElem , this); } );
-		var httpObj = createXMLHttpRequest( function(){ handleResult(id , path , parentElem , this , parentSvgDocId ) } );
+		var httpObj = createXMLHttpRequest( function(){ handleResult(id , path , parentElem , this , parentSvgDocId ) } , function(){handleErrorResult(id,path,this)});
 		
 		if ( httpObj ) {
 //			console.log(" path:" + path);
@@ -894,6 +896,9 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 				httpObj.open("GET", getSvgReq(pxPath) , true );
 			} else {
 				httpObj.open("GET", getSvgReq(rPath) , true );
+			}
+			if ( uaProp.MS && httpObj.ontimeout ){ // MS(IEだけ？)のXHRはopen後にtimeoutを設定しないとエラーになる
+				httpObj.timeout = loadingTransitionTimeout;
 			}
 			httpObj.send(null);
 		}
@@ -936,8 +941,19 @@ function getControllerSrc( resTxt , svgImageProps ){ // 2017.2.21
 
 var ns_svg = "http://www.w3.org/2000/svg";
 
+function handleErrorResult( docId , docPath, httpRes){
+	// ERR404時や、timeout時に行う処理(2020/2/13 timeout処理を追加)
+	delete loadingImgs[docId]; // debug 2013.8.22
+	console.log( "File get failed: Err:",httpRes.status," Path:",docPath," id:",docId);
+	if ( svgImagesProps[docId] ){ // 2020/2/13 removeUnusedDocs() により恐らく以下の処理は不要
+		svgImagesProps[docId].Path = "ERR"; // ERR404例外処理 2017.8.29
+	}
+	checkLoadCompleted();
+	return;
+}
+
 function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId ){
-//	console.log("httpRes:",httpRes);
+//	console.log("httpRes:id,res:",docId,httpRes);
 	if (( httpRes.readyState == 4 ) ){
 //			console.log("called handleResult and ready  id:",docId);
 		if ( !svgImagesProps[docId]){
@@ -948,11 +964,14 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			return;
 		}
 		if ( httpRes.status == 403 || httpRes.status == 404 || httpRes.status == 500 || httpRes.status == 503 ){
+			handleErrorResult(docId , docPath, httpRes);
+			/**
 			delete loadingImgs[docId]; // debug 2013.8.22
 			console.log( "File get failed: Err:",httpRes.status," Path:",docPath);
 			svgImagesProps[docId].Path = "ERR"; // ERR404例外処理 2017.8.29
 			checkLoadCompleted();
 			return;
+			**/
 		}
 //		console.log("called HandleResult id,path:" + docId+" , " +docPath);
 //		console.log("End loading");
@@ -1588,10 +1607,10 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 //						console.log("AlreadyLoadedBitimage:" + imageId + " dispay:" + imgElem.style.display);
 						// x,y,w,hを書き換える
-						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
+						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
 					} else if ( childCategory == TEXT ){ // 2014.7.22
-						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling );
-					} else { // animation|iframe要素の場合
+						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId);
+					} else { // animation|iframe要素の場合(svgTile/Layer)
 //						console.log("id:" + imageId );
 //						console.log( " ISsvgImages:" + svgImages[imageId]);
 //						console.log( " isDocElem:" + svgImages[imageId].documentElement );
@@ -1890,7 +1909,9 @@ function parseSVGwhenLoadCompleted(svgImages , imageId , imgElem , ct){
 		if ( ct < 20 ){
 			++ct;
 //			console.log("no doc retry:",ct);
-			setTimeout( parseSVGwhenLoadCompleted , 200 , svgImages , imageId , imgElem , ct );
+			setTimeout( parseSVGwhenLoadCompleted , 50 , svgImages , imageId , imgElem , ct );
+		} else {
+			console.log("FAIL: document load : imageId:",imageId);
 		}
 	}
 }
@@ -2240,18 +2261,15 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 		href = getNoCacheRequest(href);
 	}
 	
-	if ( verIE > 8 ){
-//		console.log("el",href);
-		img.addEventListener('load', handleLoadSuccess); // for Safari
-		img.addEventListener('error', timeoutLoadingImg ); // 2016.10.28 for ERR403,404 imgs (especially for sloppy tiled maps design)
-		img.src = href;
-	} else {
-		img.attachEvent('onload', handleLoadSuccess);
-		img.setAttribute("href",href); // IE8のバグの対策のため・・hrefはDOM追加後につけるんです
-		img.style.filter = "inherit"; // 同上 (http://www.jacklmoore.com/notes/ie-opacity-inheritance/)
+	if ( typeof getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
+		href = getUrlViaImageProxy(href);
+		if ( getUrlViaImageProxyCrossOriginAnonymous ){
+			img.crossOrigin="anonymous";
+		}
 	}
-	setTimeout( timeoutLoadingImg , loadingTransitionTimeout , img);
-	loadingImgs[id] = true;
+	
+	setLoadingImagePostProcessing(img,href,id);
+	
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
 //		console.log("set opacity: ","Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
@@ -2295,6 +2313,25 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 //	console.log("create Img",id,img.style.display);
 	
 	return ( img );
+}
+
+function setLoadingImagePostProcessing(img, href, id, forceSrcIE){
+	if ( verIE > 8 ){
+//		console.log("el",href);
+		img.addEventListener('load', handleLoadSuccess); // for Safari
+		img.addEventListener('error', timeoutLoadingImg ); // 2016.10.28 for ERR403,404 imgs (especially for sloppy tiled maps design)
+		img.src = href;
+	} else {
+		img.attachEvent('onload', handleLoadSuccess);
+		if ( forceSrcIE ){
+			img.src = href;
+		} else {
+			img.setAttribute("href",href); // IE8のバグの対策のため・・hrefはDOM追加後につけるんです
+		}
+		img.style.filter = "inherit"; // 同上 (http://www.jacklmoore.com/notes/ie-opacity-inheritance/)
+	}
+	setTimeout( timeoutLoadingImg , loadingTransitionTimeout , img);
+	loadingImgs[id] = true;
 }
 
 function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , style , areaHeight , nonScaling){ // 2014.7.22
@@ -2342,7 +2379,7 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	return ( img );
 }
 
-function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment ){
+function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id ){
 	if ( ! cdx ){
 		cdx = 0;
 	}
@@ -2370,9 +2407,16 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.width = width;
 		img.height = height;
 	}
+	if ( !txtFlg &&  href!="" && typeof getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
+		href = getUrlViaImageProxy(href);
+		if ( getUrlViaImageProxyCrossOriginAnonymous ){
+			img.crossOrigin="anonymous";
+		}
+	}
 	if ( !txtFlg && img.src && href && isHrefChanged(img.getAttribute("src"), href)  ){ // firefoxでは(同じURLかどうかに関わらず)srcを書き換えるとロードしなおしてしまうのを抑制 2014.6.12 絶対パスになってバグが出てない？2015.7.8 getAttrで取れば絶対パスにならないで破たんしない。
 //		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
-		img.src = href;
+//		img.src = href; // これは下で行う(2020.2.4)
+		setLoadingImagePostProcessing(img,href,id , true); 
 	}
 	if ( transform ){ // ま、とりあえず 2014.6.18
 		img.style.transform = "matrix(" + transform.a + ","  + transform.b + "," + transform.c + "," + transform.d + "," + transform.e + "," + transform.f + ")";
@@ -3024,13 +3068,15 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 
 
 // HTTP通信用、共通関数
-function createXMLHttpRequest(cbFunc){
+function createXMLHttpRequest(cbFunc, timeoutFunc){
 //	console.log("createXMLHttpRequest:" + cbFunc);
 	var XMLhttpObject = null;
 	try{
 		XMLhttpObject = new XMLHttpRequest();
 //		console.log("use standard ajax");
 	}catch(e){
+		alert("Too old browsers: not supported");
+		/**
 		try{
 			XMLhttpObject = new ActiveXObject("Msxml2.XMLHTTP");
 //			console.log("use Msxml2.XMLHTTP");
@@ -3042,9 +3088,16 @@ function createXMLHttpRequest(cbFunc){
 				return null;
 			}
 		}
+		**/
 	}
 	if (XMLhttpObject) XMLhttpObject.onreadystatechange = cbFunc;
 //	XMLhttpObject.withCredentials = true; // 認証情報をCORS時に入れる(ちょっと無条件は気になるが・・ CORSがワイルドカードだとアクセス失敗するので一旦禁止) 2016.8.23
+	if ( timeoutFunc ){ // 2020/2/13 timeout処理機能を追加
+		if ( !uaProp.MS ){ // 2020/2/17 IEはエラーになるためopen後に実行する
+			XMLhttpObject.timeout = loadingTransitionTimeout;
+		}
+		XMLhttpObject.ontimeout  = timeoutFunc;
+	}
 	return XMLhttpObject;
 }
 
@@ -4495,7 +4548,7 @@ function setImgViewport(target, href_fragment){
 	
 }
 
-function handleLoadSuccess(obj){
+function handleLoadSuccess(obj){ // (bitImage)画像の読み込み完了処理
 
 	var target = obj.target || obj.srcElement;
 //	console.log("call handle load success",target);
@@ -4517,13 +4570,13 @@ function handleLoadSuccess(obj){
 	checkLoadCompleted();
 }
 
-function timeoutLoadingImg(obj){ // ロード失敗した画像を強制的に読み込み完了とみなしてしまう処理
+function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,403)した画像(bitImage)を強制的に読み込み完了とみなしてしまう処理
 	var target;
 	if ( obj.id ){
 		target = obj;
 	} else { // added 2016.10.28 ( for err403,404 imgs )
 		target = obj.target || obj.srcElement;
-//		console.log ("probably err403,404 :",target);
+//		console.log ("probably err403,404 :",target, " id:",target.id);
 	}
 	if ( loadingImgs[target.id] ){
 //		console.log("LoadImg TimeOut!!!!!");
@@ -6666,7 +6719,11 @@ function refreshScreen(noRetry, parentCaller, isRetryCall){
 		return;
 	}
 	
-	var rsCaller = ((refreshScreen.caller).toString()).substring(0,20);
+	var rsCaller = ((refreshScreen.caller).toString()).substring(0,25);
+	if ( rsCaller.indexOf(")")>0){
+		rsCaller = rsCaller.substring(0,rsCaller.indexOf(")")+1);
+	}
+	rsCaller = rsCaller.substring(0,rsCaller.indexOf(")")+1);
 	console.log("called refreshScreen: caller:",rsCaller, " parentCaller:",parentCaller);
 	if ( loadCompleted == false){ // loadCompletedしてないときに実行すると破綻するのを回避 2019/11/14
 		if ( !noRetry ){
@@ -7257,6 +7314,29 @@ function removeChildren( targetElem ){
 
 }
 
+var getUrlViaImageProxy;
+var getUrlViaImageProxyCrossOriginAnonymous = false;
+//, getUrlViaProxy;
+function setProxyURLFactory( documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous ){ // 2020/1/30 proxyURL生成のsetterを設けるとともに、ビットイメージに対するproxyも設定できるように
+	if ( documentURLviaProxyFunction ){
+		getUrlViaProxy = documentURLviaProxyFunction;
+	} else {
+		getUrlViaProxy = null;
+	}
+	
+	if ( imageURLviaProxyFunction ){
+		getUrlViaImageProxy = imageURLviaProxyFunction;
+	} else {
+		getUrlViaImageProxy = null;
+	}
+	if ( imageCrossOriginAnonymous ){
+		getUrlViaImageProxyCrossOriginAnonymous = true;
+	} else {
+		getUrlViaImageProxyCrossOriginAnonymous = false;
+	}
+	console.log("called setProxyURLFactory: docProxy, imgProxy:",getUrlViaProxy,getUrlViaImageProxy);
+}
+
 return { // svgMap. で公開する関数のリスト 2014.6.6
 	// まだ足りないかも？
 	// http://d.hatena.ne.jp/pbgreen/20120108/1326038899
@@ -7364,8 +7444,6 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	setMapCanvas : function( mc ){ mapCanvas = mc },
 	setMapCanvasCSS : setMapCanvasCSS,
 	setMapCanvasSize : function( mcs ){ mapCanvasSize = mcs },
-	setSmoothZoomInterval : setSmoothZoomInterval,
-	setSmoothZoomTransitionTime : setSmoothZoomTransitionTime,
 	setResume : function( stat ){
 //		console.log("setResume:",stat,"   ck:", Object.keys(svgImagesProps).length,svgImagesProps);
 		resume = stat;
@@ -7376,9 +7454,12 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	setRootLayersProps : setRootLayersProps,
 	setRootViewBox : function( rvb ){ rootViewBox = rvb },
 	setShowPoiProperty : setShowPoiProperty, 
+	setSmoothZoomInterval : setSmoothZoomInterval,
+	setSmoothZoomTransitionTime : setSmoothZoomTransitionTime,
 	setSummarizeCanvas : function( val ){ summarizeCanvas = val },
 //	setTestClicked : function( ck ) { testClicked = ck}, // Obsolute 2018.2.2
 	setUpdateCenterPos : setUpdateCenterPos,
+	setProxyURLFactory : setProxyURLFactory,
 	setZoomRatio : function( ratio ){ zoomRatio = ratio },
 	showModal : showModal,
 	showPage : showPage,

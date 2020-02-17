@@ -32,7 +32,17 @@
 // 2019/05/17 getInRangePoints(): Coverageがtransform付きのものをサポート
 // 2019/12/26 効率向上のためのオプション追加(getIncludedPointsのpreCapturedGeometry)
 // 2020/01/14 buildDifference()
-//
+// 2020/01/30 ラスターGISの高速化に着手：getImagePixData 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
+// 2020/02/14 ラスターGISの高速化・大分完成 残るはcrossorigin anonymousをどうするか
+// 2020/02/17 ラスターGISの高速化。多分これで完成しました (naturalWidth/Height, crossorigin拡張 on BaseFW)
+
+// --- これらはFixedとなったかな？
+// !!!!! On going ISSUE 使い続けているとUncaught TypeError: Cannot read property 'points' of undefined at getInRangePointsS2 (SVGMapLv0.1_GIS_r2.js:110x)？？ R15のテストで、避難所と土石流危険渓流とRasterGISで、連続検索実行でテスト可能になってる
+// 
+// 今行っているところ、L1361 同一||CORS設定ドメインからの取得
+// setImageProxyで設定したドメインのURLもしくは・・・って感じが良いと思う
+// --- 
+
 // 
 // ACTIONS:
 // ・ポリゴン包含、ポリラインクロス等の基本関数(jtsのような) done
@@ -42,6 +52,7 @@
 // ・カラーピッカーになりえるもの done
 // ・ベクタプロパティの利用 done
 // ・オートパイロット機能のフレームワーク化(vectorGisLayer/rasterGisLayerの実装の改善と取り込み)
+// ・svgMap.setProxyURLFactoryを個々で統合的に設定するようにした方が良いと思う
 //
 // ・入力：
 // 　・マウスポインタ―ベースの対話的に生成されたオブジェクトと指定したレイヤー
@@ -1095,7 +1106,10 @@ var svgMapGIStool = ( function(){
 		var targetPois = [];
 		var targetCoverages = [];
 		// ここでcanvasに入れたimageとpoisで、いろいろやる感じ
-//		console.log("getInRangePointsS2  geom:",geom);
+//		console.log("getInRangePointsS2  geom:",geom, "  superParam:",superParam);
+		if ( ! geom ){
+			console.log("processing conflict?? exit");
+		}
 		var svgImagesProps = svgMap.getSvgImagesProps();
 		if ( superParam.points ){
 			targetPois = superParam.points;
@@ -1136,7 +1150,7 @@ var svgMapGIStool = ( function(){
 		overheadPrevTimeInt = Date.now();
 		if ( targetCoverage && targetCoverage.href ){
 			var targetCoverageURL = targetCoverage.href;
-			getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
+			getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
 		} else {
 			halt = false;
 			superParam.cbFunc(superParam.ans, superParam.param);
@@ -1279,7 +1293,7 @@ var svgMapGIStool = ( function(){
 			overheadPrevTimeInt = now;
 			if ( targetCoverage && targetCoverage.href ){
 				var targetCoverageURL = targetCoverage.href;
-				getImagePixData(targetCoverageURL, computeInRangePoints, superParam);
+				getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
 			} else {
 				halt = false;
 				superParam.cbFunc(superParam.ans, superParam.param);
@@ -1341,29 +1355,42 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
-	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams){
+	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
+		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
+//		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
 		var imageURL_int = getImageURL(imageUrl);
 		if ( imageCache[imageURL_int]){
 			console.log("Hit imageCache");
 			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
 		} else {
-			var img = new Image();
-			if ( anonProxy ){
-				img.crossOrigin = "anonymous";
-			}
-			console.log("Fetch image : ", imageUrl);
-			img.src = imageURL_int;
-			img.onload = function() {
-				returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
-				addImageCache(imageURL_int, img);
+			var documentImage = document.getElementById(imageIID);
+			var imgSrcURL = documentImage.getAttribute("src");
+			if ( imgSrcURL.indexOf("http")!=0 || isDirectURL(imgSrcURL)){
+				console.log("use image element's image :", documentImage); 
+				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
+				addImageCache(imageURL_int, documentImage);
+			} else {
+				
+				var img = new Image();
+				if ( anonProxy ){
+					img.crossOrigin = "anonymous";
+				}
+				console.log("Fetch image : ", imageUrl);
+				img.src = imageURL_int;
+				img.onload = function() {
+					returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
+					addImageCache(imageURL_int, img);
+				}
 			}
 		}
 	}
 	
 	function returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams){
 		var canvas = document.createElement("canvas");
-		canvas.width  = img.width;
-		canvas.height = img.height;
+//		canvas.width  = img.width;
+		canvas.width  = img.naturalWidth;
+//		canvas.height = img.height;
+		canvas.height = img.naturalHeight;
 		var cContext = canvas.getContext('2d');
 		cContext.mozImageSmoothingEnabled = false;
 		cContext.webkitImageSmoothingEnabled = false;
@@ -1371,20 +1398,26 @@ var svgMapGIStool = ( function(){
 		cContext.imageSmoothingEnabled = false;
 		cContext.drawImage(img, 0, 0);
 		var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
+//		console.log("pixData:",pixData);
 		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
 	}
 	
 	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
-	var proxyUrl;
+	var proxyUrl="";
 	var anonProxy = false;
 	var directURLlist = [];
-	function setImageProxy( url , directURLls , useAnonProxy){
-		proxyUrl = url;
+	function setImageProxy( pxUrl , directURLls , useAnonProxy){
+		proxyUrl = pxUrl;
 		if ( directURLls ){
 			directURLlist = directURLls;
 		} else {
 			directURLlist = [];
 		}
+		if ( pxUrl.indexOf("http")==0){
+			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
+			directURLlist.push(pxDomain);
+		}
+		
 		if ( useAnonProxy ){
 			anonProxy = true;
 		} else {
@@ -1395,7 +1428,7 @@ var svgMapGIStool = ( function(){
 	
 	function getImageURL(imageUrl){
 		if ( proxyUrl && imageUrl.indexOf("http") == 0){
-			if (isDirefcURL(imageUrl)){
+			if (isDirectURL(imageUrl)){
 				// Do nothing (Direct Connection)
 			} else {
 				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
@@ -1407,7 +1440,7 @@ var svgMapGIStool = ( function(){
 		return (imageUrl);
 	}
 	
-	function isDirefcURL(url){
+	function isDirectURL(url){
 		// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
 		var ans = false;
 		for ( var i = 0 ; i < directURLlist.length ; i++ ){
@@ -1810,6 +1843,7 @@ return { // svgMapGIStool. で公開する関数のリスト
 	captureGeometries : captureGeometries,
 	getIncludedPoints : getIncludedPoints,
 	getExcludedPoints : getExcludedPoints,
+	imageUrlEncoder: getImageURL,
 	buildIntersection : buildIntersection,
 	buildDifference : buildDifference,
 	// buildUnion : buildUnion,

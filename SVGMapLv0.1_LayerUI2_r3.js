@@ -95,14 +95,14 @@ function getGroupFoldingStatus( groupName ){ // グループ折り畳み状況�
 }
 
 function updateLayerTable(){
-	console.log("CALLED updateLayerTable");
+//	console.log("CALLED updateLayerTable");
 	var tb = document.getElementById("layerTable");
 	removeAllLayerItems(tb);
 	setLayerTable(tb);
 }
 
 function setLayerTable(tb){
-	console.log("call setLayerTable:",tb);
+//	console.log("call setLayerTable:",tb);
 	var groups = new Object(); // ハッシュ名のグループの最後のtr項目を収めている
 	var lps = svgMap.getRootLayersProps();
 //	console.log(lps);
@@ -252,12 +252,14 @@ function getLayerTR(title, id ,visible,hasLayerList,groupName){
 }
 
 
+var hasUnloadedLayers = false;
 
 function checkLayerList(count){
+//	console.log("checkLayerList:");
 	// レイヤーの読み込み完了まで　レイヤーリストのチェックを行い、レイヤ固有UIを設置する
 	if ( !count ){count=1}
 	var layerProps=svgMap.getRootLayersProps();
-	var hasUnloadedLayers = false;
+	hasUnloadedLayers = false;
 	for ( var i = 0 ; i < layerProps.length ; i++ ){
 		if ( layerProps[i].visible ){
 //			console.log("chekc for layerui existence :  svgImageProps:",layerProps[i].svgImageProps , "   hasDocument:",layerProps[i].hasDocument);
@@ -272,8 +274,16 @@ function checkLayerList(count){
 		}
 	}
 //	console.log( "hasUnloadedLayers:",hasUnloadedLayers,count);
-	if ( hasUnloadedLayers && count < 20){ // 念のためリミッターをかけておく
+	/** 2020/2/13このループは、unloadedLayersUIupdateを動かすことで不要にできたはず
+	if ( hasUnloadedLayers && count < 5){ // 念のためリミッターをかけておく
 		setTimeout(checkLayerList,200,count+1);
+	}
+	**/
+}
+
+function unloadedLayersUIupdate(){ // 2020/2/13 ロードの遅延が大きいレイヤーのレイヤUIボタンが出現しないケースの対策
+	if ( hasUnloadedLayers ){
+		checkLayerList();
 	}
 }
 
@@ -468,7 +478,7 @@ function MouseWheelListenerFunc(e){
 var layerListMaxHeightStyle, layerListMaxHeight, layerListFoldedHeight , layerSpecificUiDefaultStyle = {} , layerSpecificUiMaxHeight = 0;
 	
 function initLayerList(){
-	console.log("CALLED initLayerList");
+//	console.log("CALLED initLayerList");
 	layerGroupStatus = new Object();
 	layerList = document.getElementById("layerList");
 //	console.log("ADD EVT");
@@ -553,6 +563,8 @@ function initLayerListStep2(llUItop){ // レイヤリストのレイアウト待
 //	console.log("LL dim:",layerListMaxHeightStyle,layerListFoldedHeight);
 	
 	layerList.style.height = layerListFoldedHeight + "px";
+	addEventListener("zoomPanMap",unloadedLayersUIupdate,false); // 2020/2/13
+	addEventListener("screenRefreshed",unloadedLayersUIupdate,false); // ^
 	checkLayerList(); // 2017.9.8 この関数の先にあるcheckControllerで#loadTiming=layerLoad|uiAppear(default) を起動時処理する
 }
 

@@ -15,6 +15,7 @@
 // Rev1 2018/08/01 オートパイロット(一括検索)
 // Rev3 2019/12/27 附番変更した
 // Rev3 2019/12/27 (in DEV) 2019/12/26版フレームワーク対応・高性能化 (vectorGISと同じ効率化処理を導入) 
+// Rev4 2020/02/13 連続・一括取得のケースで、そもそもSVGMap.jsが表示するコンテンツ自身もProxy経由にすることでさらに高性能化させる
 // 
 // ToDo
 // ALREADY 検索したHue値を追加記載する(SV値は？)
@@ -36,17 +37,32 @@ var svgImages,svgImagesProps;
 var sourceCoverId,sourcePoiId;
 var contSearchBtn;
 
+var proxyPath = "../cesiumSvgMap/cesiumSvgMapProxy.php?file=";
+
 onload=function(){
 	console.log("onload:");
 	setTimeout(initColorPicker,10);
 	setTimeout(initSvgMapGIStool,10);
 	setTimeout(listVisiblePoiCaverLayers,10);
 	document.addEventListener("screenRefreshed", listVisiblePoiCaverLayers , false);
+	document.addEventListener("closeFrame", closeFrameProcess , false);
+	document.addEventListener("appearFrame", appearFrameProcess , false);
 	contSearchBtn = document.getElementById("contSearchBtn");
+}
+
+function closeFrameProcess(){
+	console.log("closeFrameProcess");
+	stopContSearch();
+	halt();
+}
+
+function appearFrameProcess(){
+	console.log("appearFrameProcess");
 }
 
 function halt(){
 	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
+	svgMap.setProxyURLFactory(null,null,false);
 	svgMapGIStool.haltComputing();
 	if ( allSearching ){ // 一括検索時には表示レイヤとビューポートをもとに戻す
 		allSearching = false;
@@ -59,14 +75,16 @@ function halt(){
 }
 
 function initSvgMapGIStool(){
-	svgMapGIStool.setImageProxy("../cesiumSvgMap/cesiumSvgMapProxy.php?file=",null,false);
+	svgMapGIStool.setImageProxy(proxyPath, null, true);
+	// ISSUE: 上の3番目のanonymous設定が下記では継承されてないSVGMap.jsの改修が必要
+	getImageProxy = function(path){return svgMapGIStool.imageUrlEncoder(path)}; 
 }
 
+var getImageProxy; // svgMap.jsが全てのコンテンツをsvgMapGIStoolのimageUrlEncoderでエンコードしたURL(Proxy経由のURL)で取得させるための変換関数=SVGMapGIStoolのimageUrlEncoder 2020/2/13
+
+
 function searchInRangePointsSingle(){
-	searchInRangePoints(function(ans){
-		markInRangePoints(ans);
-		svgMap.refreshScreen();
-	});
+	searchInRangePoints();
 }
 
 function searchInRangePoints(cbf,preCapturedGeometry){
@@ -81,20 +99,29 @@ function searchInRangePoints(cbf,preCapturedGeometry){
 	sourcePoiId = getTargetLayerId("targetPoiLayer");
 	
 	var getInRangePointsCallback;
+	var stepCompletedMessage="";
 	if ( cbf ){
-		getInRangePointsCallback = cbf;
+		getInRangePointsCallback = cbf; // 一括検索では、searchAllS3が呼ばれる
 	} else {
 		getInRangePointsCallback = markInRangePoints;
+		stepCompletedMessage = "complete computation";
+		document.getElementById("hitcount").innerText="StartCoputing";
 	}
 	
 	console.log("Search : sourceCoverId:",sourceCoverId,svgImages[sourceCoverId],"  sourcePoiId:",sourcePoiId,svgImages[sourcePoiId], " thisLayerId:",layerID );
 	
-	svgMapGIStool.getInRangePoints( sourcePoiId, sourceCoverId , targetRange, getInRangePointsCallback , null , progrssCallback , preCapturedGeometry);
+	svgMapGIStool.getInRangePoints( sourcePoiId, sourceCoverId , targetRange, getInRangePointsCallback , stepCompletedMessage , progrssCallback , preCapturedGeometry);
 }
 
-function markInRangePoints(ans){
-	console.log("complete computation... ",ans);
+function markInRangePoints(ans,message){ // 端末検索完了時の処理
+	console.log("complete computation... ",ans,message);
 	var printedIndex = prepareResultAndPrintcsv(ans);
+	if ( message ){
+		document.getElementById("hitcount").innerText=message;
+		setTimeout(function(){
+			document.getElementById("hitcount").innerText="　";
+		},1000);
+	}
 //	clearCircles();
 //	var svgDoc = svgImages[layerID];
 	var svgDoc = svgImage
@@ -109,6 +136,9 @@ function markInRangePoints(ans){
 		svgImageRoot.appendChild(circle);
 //		console.log(circle);
 	}
+	
+	svgMap.refreshScreen();
+	
 	/** 廃止
 	if ( cbf ){
 		cbf();
@@ -118,6 +148,22 @@ function markInRangePoints(ans){
 	**/
 }
 
+function markAllInRangePoints(){ // 一括検索完了時の処理
+	var svgDoc = svgImage;
+	var svgImageRoot = svgDoc.documentElement;
+	for ( var ansHash in csvSource){
+		var POI = csvSource[ansHash];
+		var circle = svgDoc.createElement("circle");
+		circle.setAttribute("transform","ref(svg,"+POI.lng*100+","+(-POI.lat*100)+")");
+		circle.setAttribute("cx","0");
+		circle.setAttribute("cy","0");
+		circle.setAttribute("r","10");
+		circle.setAttribute("fill","red");
+		svgImageRoot.appendChild(circle);
+//		console.log(circle);
+	}
+	revertLayerSetup();
+}
 
 var csvAppendMode = false;
 var csvSource = {};
@@ -142,7 +188,7 @@ function prepareResultAndPrintcsv(ans){
 			csvSource[hashKey] = {title:title,lat:lat,lng:lng,meta:meta,hue:hue};
 			printedIndex.push(i);
 		} else {
-			console.log("match hash skip output");
+//			console.log("match hash skip output");
 		}
 	}
 	ta.value += csvTxt;
@@ -155,24 +201,6 @@ function printCsvSchema(){
 	var csvTxt = "title,latitude,longitude,hue,"+ getPoiSchema()+"\n";
 	ta.value = csvTxt;
 }
-
-function markAllInRangePoints(){ // 一括検索完了時の処理
-	var svgDoc = svgImage;
-	var svgImageRoot = svgDoc.documentElement;
-	for ( var ansHash in csvSource){
-		var POI = csvSource[ansHash];
-		var circle = svgDoc.createElement("circle");
-		circle.setAttribute("transform","ref(svg,"+POI.lng*100+","+(-POI.lat*100)+")");
-		circle.setAttribute("cx","0");
-		circle.setAttribute("cy","0");
-		circle.setAttribute("r","10");
-		circle.setAttribute("fill","red");
-		svgImageRoot.appendChild(circle);
-//		console.log(circle);
-	}
-	revertLayerSetup();
-}
-
 
 function getPoiSchema(){
 	svgImagesProps = svgMap.getSvgImagesProps();
@@ -338,6 +366,7 @@ function toggleContSearch(){
 }
 
 function startContSearch(){
+	svgMap.setProxyURLFactory(null,getImageProxy,true); // 2020.1.30 for testing
 	contSearch = true;
 	contSearchBtn.value="連続検索終了";
 	csvAppendMode = true;
@@ -348,6 +377,7 @@ function startContSearch(){
 }
 
 function stopContSearch(){
+	svgMap.setProxyURLFactory(null,null,false); // 2020.1.30 for testing
 	contSearch = false;
 	contSearchBtn.value="連続検索開始";
 	csvAppendMode = false;
@@ -368,6 +398,8 @@ var depthLimitter = 5;
 var allSearching = false; // 現在一括検索中フラグ
 var totalHitCount;
 function searchAll(){
+	stopContSearch();
+	svgMap.setProxyURLFactory(null,getImageProxy,true);
 	document.getElementById("hlt").disabled=false;
 	document.getElementById("progress").innerHTML="Start computing.";
 	clearCircles();
@@ -470,11 +502,12 @@ function prepareNextArea(currentLevelPos){
 		document.getElementById("hlt").disabled=true;
 		allSearching = false;
 		markAllInRangePoints();
+		svgMap.setProxyURLFactory(null,null,false);
 		svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
 	}
 }
 
-var APzoomPanListener = function (event){
+var APzoomPanListener = function (event){ // オートパイロット駆動用のイベントリスナ
 	console.log("APzoomPanListener");
 	svgMap.captureGISgeometriesOption(true); 
 	svgMap.captureGISgeometries(searchAllS2 );
