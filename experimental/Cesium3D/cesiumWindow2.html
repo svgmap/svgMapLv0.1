@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<!-- 2018.04.05 jsを外部ライブラリ化して、環境依存の定数のみを残しました -->
+	<!-- Use correct character set. -->
+	<meta charset="utf-8">
+	<!-- Tell IE to use the latest, best version. -->
+	<meta http-equiv="X-UA-Compatible" content="IE=edge">
+	<!-- Make the application on mobile take up the full browser screen and disable user scaling. -->
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no">
+	<title>SVGMap3DView using CESIUM</title>
+	<!--
+	<style>
+		@import url(https://cesiumjs.org/Cesium/Build/Cesium/Widgets/widgets.css);
+		html, body, #cesiumContainer {
+			width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+		}
+	</style>
+	<script src="https://cesiumjs.org/releases/1.60/Build/Cesium/Cesium.js"></script>	-->
+<!-- ?? いつからか(2019/8/1?)バージョン指定でアクセスする格好に変わった？？ これにしないとGeoJsonが表示されない。コード見てもライセンストークン部以外下と変わらないが・・2019/8/22-->
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.62/Build/Cesium/Cesium.js"></script>
+  <link href="https://cesium.com/downloads/cesiumjs/releases/1.62/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+  <style>
+		html, body, #cesiumContainer {
+			width: 100%; height: 100%; margin: 0; padding: 0; overflow: hidden;
+		}
+  </style>
+<!--	<script src="https://cesiumjs.org/Cesium/Build/Cesium/Cesium.js"></script>-->
+<!--  <script src="JapanGSITerrainProvider.js"></script> -->
+	<script src="JapanGSITerrainProviderImg.js"></script>
+	<script type="text/javascript" src="cesiumWindow2.js"></script>
+	<script>
+		// 環境依存定数
+		reldir2imageUrl = "../../rev15/"; // このSVGMapコンテンツのルートコンテナのあるディレクトリへ相対パス　（なので、本来は呼び元から提供すべきだが・・）
+		directURLlist = ["magicWordsURL0","magicWordsURL1"]; // プロキシへ接続しなくて良いデータのURLのキーワード
+		cesiumProxyURL = "../cesiumSvgMapProxy.php?file="; // プロキシ―サーバの相対パス
+	</script>
+</head>
+<body>
+	<div id="cesiumContainer"></div>
+</body>
+</html>
