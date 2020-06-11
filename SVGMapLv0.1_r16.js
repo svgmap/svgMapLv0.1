@@ -165,6 +165,9 @@
 // 2020/01/30 : ラスターGISの高速化等を行うため、bitimageについてもproxy経由で取得させる機能を実装(svgMap.setProxyURLFactory)
 // 2020/02/13 : ERR404やGETに時間がかかり過ぎたときのエラーアウト処理を強化(LayerUIも)
 // 2020/03/26 : Rev16 データがLatLngで表示がメルカトルの表示モードを実装
+// 2020/05/20 : DevicePixelRatioをレイヤーごとに設定できる機能を実装（PWAでオフラインモード時、DLしていないズームレンジで白紙表示になるのを抑制する目的を持っている）
+// 2020/06/09 : svgImagesProps[layerID].preRenderControllerFunction, preRenderSuperControllerFunction, svgMap.setPreRenderController() そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出す関数(eval撤去準備工事) (なお、preRenderControllerFunctionは、レイヤ固有UIのscriptで予約関数名preRenderFunctionを定義するだけでも設置される
+//
 //
 // Issues:
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
@@ -217,7 +220,8 @@ var location = window.location;
 var svgMap = ( function(){ // 2014.6.6
 
 var zoomRatio = 1.7320508; // ZoomUp,Downボタンのズームレシオ
-var devicePixelRatio = 1.0; // zoom計算時のみに用いる たとえば２にするとzoom値が本来の２分の１になる(2014/07/16)
+var commonDevicePixelRatio = 1.0; // zoom計算時のみに用いる たとえば２にするとzoom値が本来の２分の１になる(2014/07/16)
+var layerDevicePixelRatio = []; // 2020/5/13 レイヤーIDの連想配列 レイヤーごとの値(commonDevicePixelRatioにさらに掛け算で効く)
 
 var summarizeCanvas = true; // added 2014.5.27 レイヤ単位でcanvas2dを統合
 
@@ -1063,7 +1067,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		console.log("call getScript");
 		svgImagesProps[docId].script = getScript( svgImages[docId] ); 
 		if ( svgImagesProps[docId].script ){
-			var zoom = getZoom(getRootSvg2Canvas( rootViewBox , mapCanvasSize )); 
+			var zoom = getZoom(getRootSvg2Canvas( rootViewBox , mapCanvasSize ),docId); 
 			var child2root = getConversionMatrixViaGCS( svgImagesProps[docId].CRS, rootCrs );
 			svgImagesProps[docId].script.scale =  zoom * child2root.scale; // patch 2018.5.18 なんか汚い・・・
 			svgImagesProps[docId].script.CRS = svgImagesProps[docId].CRS;
@@ -1171,7 +1175,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 	
 }
 
-function handleScript( docId , zoom , child2root ){
+function handleScript( docId , zoom , child2root){
 	svgImagesProps[docId].script.location = getSvgLocation( svgImagesProps[docId].Path ); // added 2017.9.5 ハッシュが書き換わる可能性を加味
 	svgImagesProps[docId].script.scale = zoom * child2root.scale;
 //	console.log("set scale:",svgImagesProps[docId].script.scale,"  docId:",docId,"   svgImageProps:",svgImagesProps[docId]);
@@ -1201,11 +1205,31 @@ function handleScript( docId , zoom , child2root ){
 	}
 }
 
+var preRenderSuperControllerFunction = null;
+function handlePreRenderControllerScript(docId , zoom , child2root, isSuperController){ // 2020/6/8  svg要素内のscriptをevalで実行するのをやめる前準備
+	var vc = viewBoxChanged("prc_"+docId); // この関数(viewBoxChanged)は、あまりにも出来が悪い処理に思う・・
+	var svgDocStatus ={ // この辺の値は後々整理が必要
+		docId: docId,
+		location: getSvgLocation( svgImagesProps[docId].Path ),
+		scale: zoom * child2root.scale,
+		rootScale: zoom,
+		c2rScale : child2root.scale,
+		actualViewBox: getTransformedBox( rootViewBox , getInverseMatrix( child2root ) ),
+		geoViewBox: geoViewBox,
+		viewChanged: vc
+	}
+	if ( isSuperController ){
+		preRenderSuperControllerFunction(svgDocStatus);
+	} else {
+		svgImagesProps[docId].preRenderControllerFunction(svgDocStatus);
+	}
+}
+
+/**
 // check viewBoxChange
 var prevGeoViewBox={}; // ワンステップ前のgeoViewBoxが設定される。viewBoxChanged()用変数 handleScript()専用 : added 2016.10.7 for deleting action val  ++  2017.3.16 viewbox変化によって出るイベントが変わる処理のために追加使用 ::  2018.6.19 onzoom()でrefreshscreen()すると破綻するのでレイヤ個別化＆設定場所を移動
 		
-function viewBoxChanged(docId){
-//	console.log("geoViewBox:",geoViewBox);
+function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8 geoViewBoxのheightは単なるスクロールでも図法があれなので増減しちゃう rootViewBox使わないとダメ
 	if ( !docId ){
 		docId = "allMaps";
 	}
@@ -1217,8 +1241,34 @@ function viewBoxChanged(docId){
 	} else {
 		ans = false
 	}
+	console.log("viewBoxChanged geoViewBox:",geoViewBox,"  docId:",docId,"  prevGeoViewBox[docId]:",prevGeoViewBox[docId]," ans:",ans);
+	if ( prevGeoViewBox[docId] ){
+		console.log( "comp:" , prevGeoViewBox[docId].width != geoViewBox.width , prevGeoViewBox[docId].height != geoViewBox.height);
+	}
 	prevGeoViewBox[docId] = { x: geoViewBox.x , y: geoViewBox.y , width: geoViewBox.width , height: geoViewBox.height };
-//	console.log("viewBoxChanged: docId:",docId,"  ans:",ans);
+	return ( ans );
+}
+**/
+		
+var prevRootViewBox={}; // ワンステップ前のrootViewBoxが設定される。
+
+function viewBoxChanged(docId){ //  2020/6/8 修正 ただ、この関数、あまり筋が良いとは言えないので改修すべき・・
+	if ( !docId ){
+		docId = "allMaps";
+	}
+	var ans;
+	if ( !prevRootViewBox[docId] || prevRootViewBox[docId].width != rootViewBox.width || prevRootViewBox[docId].height != rootViewBox.height ){
+		ans = "zoom";
+	} else if ( prevRootViewBox[docId].x != rootViewBox.x || prevRootViewBox[docId].y != rootViewBox.y ){
+		ans = "scroll";
+	} else {
+		ans = false
+	}
+//	console.log("viewBoxChanged rootViewBox:",rootViewBox,"  docId:",docId,"  prevRootViewBox[docId]:",prevRootViewBox[docId]," ans:",ans);
+	if ( prevRootViewBox[docId] ){
+//		console.log( "comp:" , prevRootViewBox[docId].width != rootViewBox.width , prevRootViewBox[docId].height != rootViewBox.height);
+	}
+	prevRootViewBox[docId] = { x: rootViewBox.x , y: rootViewBox.y , width: rootViewBox.width , height: rootViewBox.height };
 	return ( ans );
 }
 
@@ -1269,8 +1319,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	
 	var beforeElem = null;
 	var s2c = getRootSvg2Canvas( rootViewBox , mapCanvasSize ); // ルートSVG⇒画面変換マトリクス
-	var zoom = getZoom(s2c); // ルートSVGの、画面に対するズーム率
-	
+	var zoom = getZoom(s2c,docId); // ルートSVGの、画面に対するズーム率 (docIdはレイヤーごとにdevicePixelRatioを変化させるための(副次的な)もの)
 //	console.log("S2C.a:" + s2c.a + " S2C.d:" + s2c.d);
 //	console.log(parentElem);
 // svgElemはsvg文書のルート要素 , docPathはこのSVG文書のパス eraseAll==trueで対応要素を無条件消去	
@@ -1281,13 +1330,22 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	var svgNodes = svgElem.childNodes;
 	var crs = svgImagesProps[docId].CRS;
 	var child2root = getConversionMatrixViaGCS( crs, rootCrs );
+	svgImagesProps[docId].scale =  zoom * child2root.scale; // この値、多くのケースで必要だと思う 2020.5.18
 	
 	var child2canvas;
 	child2canvas = matMul( child2root , s2c ); // 子SVG⇒画面座標へのダイレクト変換行列 2013.8.8
 	var nextStyleUpdate = false; // 次要素スタイルを新たに設定する必要の有無
-	if ( svgElem.nodeName=="svg" && svgImagesProps[docId].script ){ // added 2013/01 for dynamic layer's convinience
-//		console.log("svgElem:",svgElem.nodeName); // debug 下と同じ問題、ルートの要素を通過するときのみ呼ばないとまずいでしょ 2017.3.9
-		handleScript( docId , zoom , child2root );
+	if ( svgElem.nodeName=="svg"){
+		if (svgImagesProps[docId].script ){ // added 2013/01 for dynamic layer's convinience
+//			console.log("svgElem:",svgElem.nodeName); // debug 下と同じ問題、ルートの要素を通過するときのみ呼ばないとまずいでしょ 2017.3.9
+			handleScript( docId , zoom , child2root );
+		}
+		if ( typeof(svgImagesProps[docId].preRenderControllerFunction)=="function" ){ // 2020/6/8  svg要素内のscriptをevalで実行するのをやめる前準備
+			handlePreRenderControllerScript(docId , zoom , child2root);
+		}
+		if ( typeof(preRenderSuperControllerFunction)=="function" ){
+			handlePreRenderControllerScript(docId , zoom , child2root , true);
+		}
 	}
 	
 	if ( GISgeometriesCaptureFlag && ! GISgeometries[docId] ){
@@ -2911,7 +2969,7 @@ function transform( x , y , mat , calcSize , nonScaling){
 }
 
 function getConversionMatrixViaGCS( fromCrs , toCrs ){
-	// Child 2 Roorのzoomを計算できるよう、ちゃんとした式を算出するように変更 2012/11/2
+	// Child 2 Rootのzoomを計算できるよう、ちゃんとした式を算出するように変更 2012/11/2
 	var icCrs = getInverseMatrix(fromCrs);
 	
 	if ( toCrs.transform){ // マトリクスの代わりに関数を返却する 2020.3.17
@@ -2927,10 +2985,17 @@ function getConversionMatrixViaGCS( fromCrs , toCrs ){
 			var ans = transform(globalCrds.x, globalCrds.y, fromCrs);
 			return ( ans );
 		}
+		var scale;
+		if ( icCrs.inverse ){
+//			scale = (1/icCrs.scale) * toCrs.scale; // インバースのインバースになってる・これはバグだと思う 2020/6/9
+			scale = icCrs.scale * toCrs.scale;
+		} else {
+			scale = Math.sqrt( Math.abs(icCrs.a * icCrs.d - icCrs.b * icCrs.c ) ) * toCrs.scale;
+		}
 		return {
 			transform: conversionFunc,
 			inverse: inverseFunc,
-			scale: Math.sqrt( Math.abs(icCrs.a * icCrs.d - icCrs.b * icCrs.c ) ) * toCrs.scale
+			scale: scale
 		};
 	}
 	
@@ -3038,7 +3103,8 @@ function getInverseMatrix( matrix ){
 	if ( matrix.inverse ){
 		return { 
 			transform: matrix.inverse,
-			inverse: matrix.transform
+			inverse: matrix.transform,
+			scale: 1/matrix.scale
 		};
 	} else {
 		var det = matrix.a * matrix.d - matrix.b * matrix.c;
@@ -3065,6 +3131,7 @@ function inZoomRange( ip , zoom , c2rScale ){
 		return ( true );
 	} else {
 //		console.log("EVAL ZOOM : zoom:" + zoom + " min:" + ip.minZoom + " max:" + ip.maxZoom);
+//		console.log("EVAL ZOOM : zoom*c2rScale:" + (zoom*c2rScale) + " min:" + ip.minZoom + " max:" + ip.maxZoom+"  :: zoom:"+zoom+"  c2rScale:"+c2rScale);
 		if ( ip.minZoom && zoom * c2rScale < ip.minZoom ){
 //			console.log("out of zoom range" , zoom * c2rScale , ip.minZoom);
 			return(false);
@@ -3086,15 +3153,54 @@ function isVisible(ip){
 }
 
 // まだrootSVGにのみ対応している・・
-function getZoom( s2c ){
+function getZoom( s2c , docId){ // 2020/5/13 docId(というよりレイヤーID)によって、演算パラメータを変化させる機能を実装
+	var ans ;
+	var layerId = svgImagesProps[docId].rootLayer;
+	if ( layerDevicePixelRatio[layerId]!= undefined){
+		ans = ( Math.abs(s2c.a) + Math.abs(s2c.d) ) / ( 2.0 * layerDevicePixelRatio[layerId] );
+	} else {
+		ans = ( Math.abs(s2c.a) + Math.abs(s2c.d) ) / ( 2.0 * commonDevicePixelRatio );
+	}
+//	console.log("getZoom:",ans,"  layerId:",layerId,"  layerDPR:",layerDevicePixelRatio[layerId]);
+	return ( ans );
+		
 	// 本当は、 Math.sqrt(Math.abs(s2c.a * s2c.d - s2c.b * s2c.c ) )
 //		return ( Math.sqrt(Math.abs(s2c.a * s2c.d - s2c.b * s2c.c ) ) );
-		return ( ( Math.abs(s2c.a) + Math.abs(s2c.d) ) / ( 2.0 * devicePixelRatio ) );
+//		return ( ( Math.abs(s2c.a) + Math.abs(s2c.d) ) / ( 2.0 * commonDevicePixelRatio ) );
 }
 
-function setDevicePixelRatio( dpr ){
-	if ( dpr > 0 ){
-		devicePixelRatio = dpr;
+function setDevicePixelRatio( dpr , layerId ){
+//	console.log("setDevicePixelRatio: ratio:",dpr,"  layerId:",layerId);
+	// 2020/5/13 layerId毎に指定するlayerDevicePixelRatio設定＆クリア機能を追加
+	if( layerId ){
+		if ( dpr > 0 ){
+			layerDevicePixelRatio[layerId] = dpr;
+		} else if ( !dpr ){
+			delete layerDevicePixelRatio[layerId];
+		}
+	} else {
+		if ( dpr > 0 ){
+			commonDevicePixelRatio = dpr;
+		} else if ( !dpr ){
+			commonDevicePixelRatio = 1;
+			layerDevicePixelRatio = [];
+		}
+	}
+}
+
+function getDevicePixelRatio(docId){
+	if ( !docId ){
+		return {
+			commonDevicePixelRatio:commonDevicePixelRatio,
+			layerDevicePixelRatio:layerDevicePixelRatio
+		};
+	} else {
+		var layerId = svgImagesProps[docId].rootLayer;
+		if ( layerDevicePixelRatio[layerId]!= undefined){
+			return ( layerDevicePixelRatio[layerId] );
+		} else {
+			return ( commonDevicePixelRatio );
+		}
 	}
 }
 
@@ -5243,7 +5349,7 @@ function showPage( hyperLink ){
 	}
 }
 
-function getSvgLocation( hrefS ){ // svgImagesのhrefからlocation相当変数を得る　作らなくても在る気もするのだが・・
+function getSvgLocation( hrefS ){ // svgImagesのhrefからlocation相当変数を得る　作らなくても在る気もするのだが・・（newUR(..)Lオブジェクトでちゃんとしたのが作れるよ）　hrefSは、document.locationからのパスでないとダメ
 	var hash ="", search="", path="";
 	var hashPos = hrefS.length;
 	var searchPos = hashPos;
@@ -7748,12 +7854,28 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	screen2Geo : screen2Geo,
 	setCustomModal : setCustomModal,
 	setDevicePixelRatio : setDevicePixelRatio,
+	getDevicePixelRatio : getDevicePixelRatio,
 	setGeoCenter : setGeoCenter,
 	setGeoViewPort : setGeoViewPort,
 	setLayerVisibility : setLayerVisibility,
 	setMapCanvas : function( mc ){ mapCanvas = mc },
 	setMapCanvasCSS : setMapCanvasCSS,
 	setMapCanvasSize : function( mcs ){ mapCanvasSize = mcs },
+	setPreRenderController( layerId, pcf ){
+		if ( typeof(pcf)=="function"){
+			if ( layerId ){
+				svgImagesProps[layerId].preRenderControllerFunction=pcf;
+			} else {
+				preRenderSuperControllerFunction = pcf;
+			}
+		} else {
+			if ( layerId ){
+				delete (svgImagesProps[layerId].preRenderControllerFunction);
+			} else {
+				preRenderSuperControllerFunction = null;
+			}
+		}
+	},
 	setResume : function( stat ){
 //		console.log("setResume:",stat,"   ck:", Object.keys(svgImagesProps).length,svgImagesProps);
 		resume = stat;

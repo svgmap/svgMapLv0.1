@@ -7,9 +7,15 @@
 // 2020/04/22 : 最初の動作
 // 2020/04/23 : 最初にアクセスしたものをindexedDBのキャッシュする機構　＆同機構の設定解除機能
 // 2020/05/07 : messageによるやり取りを精密化した
+// 2020/05/26 : processPostMessageを汎化
+// 2020/05/27 : fetchイベントに伴うキャッシュメカニズムを改善
+// 2020/06/01 : iOS safariの動作不具合(地図タイルが使われないことに端を発し、setBaseResourcesでグローバル変数が設定されていないことが原因の模様)をパッチ充てられたかも。
+// 2020/06/04 : SVGMap独自キャッシュのスコープをservice workerのスコープから独立させた(完全に　baseResources.jsonのmapCacheTargetに沿うようになった)
 
 // インストール時にロードさせるリソース
 // 注意: このリストのリソースがないとそこで止まってしまうようです・・
+var baseResources = [];
+/**
 var baseResources = [
 "./", 
 "index.html",
@@ -29,20 +35,47 @@ var baseResources = [
 "imgs/zoomup_s.png",
 "Container_mercator_org.svg"
 ];
+**/
 
+var mapCacheTargetPath="svgmap.org/devinfo/devkddi/lvl0.1/svgMapPWA";
 
+// この関数をcache.addAllの前に呼び出す必要がある iOS safariでは、これがまともに機能していない。
+async function setBaseResources(){
+	try{
+	var response = await fetch("./baseResources.json");
+	var rjson = await response.json();
+	if ( rjson.src){
+		baseResources = rjson.src;
+	}
+	if ( rjson.mapCacheTarget){
+		mapCacheTargetPath = (new URL(rjson.mapCacheTarget, location)).pathname;
+		// mapCacheTargetPath = rjson.mapCacheTarget; // これが設定されないための不具合だった・・・ iOS safari
+	}
+	return(rjson);
+	} catch ( err ){
+		// do nothing...
+	}
+}
 
 
 self.addEventListener('install', function(event) {
 	console.log('[ServiceWorker] Install');
 	event.waitUntil(
-		caches.open('v1').then(function(cache) {
-			return cache.addAll(baseResources);
+		caches.open('v1')
+		.then(async function(cache){
+			var json = await setBaseResources();
+			console.log("BaseResourcesJson:",json);
+			return (cache);
+		})
+		.then(function(cache) {
+			console.log("baseResources:",baseResources);
+			return cache.addAll(baseResources); // iOS safariもこれでbaseResourcesがキャッシュは読み込まれているようだが、workerのグローバル変数がなくなるように見える
 		})
 		.then(self.skipWaiting.bind(self)) // control clients ASAP
 	);
 });
 
+setBaseResources(); // iOS safari: そのため、これをもう一度起動時に呼び出すようにした・・ オフライン状態での立ち上げではダメか indexedDBからの読み込みフォールバック必要かも？
 
 self.addEventListener('activate', function(e) {
 	console.log('[ServiceWorker] Activate');
@@ -68,37 +101,65 @@ var cacheMode = deafultCacheMode;
 
 self.addEventListener('fetch', function(event) {
 	var reqURL =  new URL(event.request.url);
+	console.log("fetch",reqURL);
+	var dbgMsg = "Fetch:"+reqURL +":";
+//	sendDebugMessage("Fetch:"+reqURL);
 	switch (cacheMode){
-	case "cacheFirst":
-		if ( reqURL.href.indexOf("svgmap.org/devinfo/devkddi/lvl0.1/svgMapPWA")>0){
+	case "cacheFirst": // cacheFirstモード(デフォルト)
+//		if ( reqURL.href.indexOf(mapCacheTargetPath)>0){} // なんかこの処理どう書こうか・・・
+		if ( reqURL.href.indexOf(registration.scope)>=0){ // まずservice worker自身のスコープ内にあるかを確認し、
 			event.respondWith( async function(){
 				var response = await caches.match(event.request,{ignoreVary:true});
-				if ( response ){
+				if ( response ){ // ネイティブキャッシュにあればそれを返す
 					console.log("response by Cache:",reqURL.href);
+//					sendDebugMessage ( dbgMsg+" nativeCache");
 					return (response);
-				} else {
-					var dbRes = await getIndexedDbCacheResponse(reqURL.href);
-					if ( dbRes ){
-						console.log("response by indexedDB:",reqURL.href);
-						return ( dbRes );
-					} else {
-						console.log("response by fetch and store indexedDB:",reqURL.href);
-						var fetchedResponse = await fetch(event.request)
-						store2IndexedDbCache(reqURL.href,fetchedResponse.clone());
-						return (fetchedResponse);
-					}
+				} else if ( reqURL.href.indexOf(mapCacheTargetPath)>0){ // mapCacheTargetPathがiOS safariで設定されておらず不具合出てた(fixed)
+					return ( await respondAndStoreSvgMapCache(event, reqURL) );
+				} else { // 独自マップスコープを外れたスコープ内のコンテンツは、無条件で可能ならfetchし、キャッシュに入れることなく返却する
+//					sendDebugMessage ( "is in scope?:"+reqURL.href.indexOf(mapCacheTargetPath)+"  req:" + reqURL.href + " mctp:" + mapCacheTargetPath+"  br.len:"+baseResources.length);
+					console.log("Skip servie worker cache: unmatch native cache and local Map: force fetch:",reqURL.href);
+					var fetchedResponse = await fetch(event.request);
+//					sendDebugMessage ( dbgMsg+" only fetch");
+					return (fetchedResponse);
 				}
 			}());
-		} else {
-			console.log("Skip servie worker: unmatch href:",reqURL.href);
+		} else { // service workerスコープ外は・・
+			if ( reqURL.href.indexOf(mapCacheTargetPath)>0){ // SVGMap独自キャッシュ機構はservice wworkerとは独立したキャッシュスコープを持てることにする
+				event.respondWith( async function(){
+					return (await respondAndStoreSvgMapCache(event, reqURL));
+				}());
+			} else { // それにも入っていなければ当然スルー
+				// スルー（ネイティブの取得機構に任す）
+				console.log("Skip servie worker: unmatch href:",reqURL.href);
+//				sendDebugMessage ( dbgMsg+" ummatch href scope skip SW");
+			}
 		}
 		break;
-	default:
+	default: // それ以外ではスルー（ネイティブの取得機構に任す）
 		console.log("Skip servie worker: cacheFirst false:",reqURL.href);
+//		sendDebugMessage ( dbgMsg+" totally skip SW");
 		// pass
 	}
 
 });
+
+// SVGMap独自キャッシュメカニズムのレスポンス生成関数
+async function respondAndStoreSvgMapCache(event, reqURL){
+//		sendDebugMessage ( "is in scope?:"+reqURL.href.indexOf(mapCacheTargetPath)+"  req:" + reqURL.href + " mctp:" + mapCacheTargetPath+"  br.len:"+baseResources.length);
+	var dbRes = await getIndexedDbCacheResponse(reqURL.href);
+	if ( dbRes ){ // キャッシュにあれば返却
+		console.log("response by indexedDB:",reqURL.href);
+//		sendDebugMessage ( dbgMsg+" HIT indexedDB");
+		return ( dbRes );
+	} else { // なければネットからのfetchを試み、結果をIndexedDBに投入するとともにクライアントに返す
+		console.log("response by fetch and store indexedDB:",reqURL.href);
+		var fetchedResponse = await fetch(event.request)
+		store2IndexedDbCache(reqURL.href,fetchedResponse.clone());
+//		sendDebugMessage ( dbgMsg+" try fetch store iDB");
+		return (fetchedResponse);
+	}
+}
 
 self.addEventListener('message', function(e){
 	var clientId = e.source.id 
@@ -118,7 +179,7 @@ self.addEventListener('message', function(e){
 	}
 });
 
-self.addEventListener('sync', async function(event){
+self.addEventListener('sync', async function(event){ // SyncManagerはiOS Safariでは動かないし、さらにFormDataもsafariはservice workerで動かないので、遅延ポスト機能をservice workerで動かさず、全部メインのjsに組み込んでみることにする。
 	console.log("Got sync event on service worker:",event,"  syncSource:", event.source ); // どのWindowがこのイベントを登録したのかわからないの？？？
 	if (event.tag.indexOf('outbox:')==0) {
 		var postId = parseInt(event.tag.substring(7));
@@ -131,17 +192,51 @@ self.addEventListener('sync', async function(event){
 
 async function processPostMessage(postId){
 	// try catch エラー処理必要じゃない? async awaitでreject相当処理ってどう書いたらいい？書かなくても勝手にエラーになる？
+	// これぐらい汎用化すればなんでもPOSTできると思われる：https://qiita.com/legokichi/items/801e88462eb5c84af97d
+	// すなわち、fetchやRequestの二番目のパラメータ(initオブジェクト(https://developer.mozilla.org/ja/docs/Web/API/Request/Request))相当のもの
+	// さらに言えばmethodも汎用化してしまえるが・・一応post関数ということなのでデフォルトはPOSTとする
 	await postDB.connect();
 	var postContent = await postDB.get(postId);
-	var formData = new FormData();
-	formData.append('pid', postId);
-	formData.append('content', postContent.data);
 	var clientId = postContent.clientId;
-	console.log("processPostMessage:, clientId:",clientId);
-	var postRequest = new Request(
-		postContent.url,
-		{method: 'POST', body: formData, credentials: 'include'}
-	);
+	console.log("processPostMessage:, clientId:",clientId,"   postContent:",postContent);
+	var postRequest;
+	if ( postContent.body ){
+		var reqBody;
+		if ( postContent.body.type && postContent.body.type == "FormData"){
+			// FormDataがIndexedDBに入れられない(シリアライズ不可能なオブジェクト)なのを回避するパッチ・・・
+			var formData = new FormData();
+			for ( var fk in postContent.body.data ){
+				formData.append(fk,(postContent.body.data)[fk]);
+			}
+			reqBody = formData;
+		} else {
+			reqBody = postContent.body;
+		}
+		var method = 'POST';
+		if ( postContent.method ){
+			method = postContent.method;
+		}
+		var reqInit={ 
+			method: method,
+			body: reqBody,
+			credentials: 'include'
+		};
+		if ( postContent.headers ){
+			reqInit.headers = postContent.headers;
+		}
+		postRequest = new Request(
+			postContent.url,
+			reqInit
+		);
+	} else {
+		var formData = new FormData();
+		formData.append('pid', postId);
+		formData.append('content', postContent.data);
+		postRequest = new Request(
+			postContent.url,
+			{method: 'POST', body: formData, credentials: 'include'}
+		);
+	}
 //	console.log("virtual post:",postRequest, " postData:",formData,"  pid:",postId,"  content:",postContent.data);
 	var res;
 	console.log("Actual post:",postRequest);
@@ -168,6 +263,10 @@ async function sendMessage(message, clientId){
 			client.postMessage(message);
 		}
 	});
+}
+
+function sendDebugMessage(txt){
+	sendMessage(txt);
 }
 
 async function store2IndexedDbCache(cUrl,response){

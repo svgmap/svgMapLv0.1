@@ -31,7 +31,9 @@
 // 2020/05/20 : 未DLレベル代替表示機構を実装
 // 2020/05/20 : zipパッケージのルートにlayer.json(下記参照)がある場合、その.layer, .minScale(, maxScale)を読み取り、オフライン時代替表示機構メタデータに設定する (maxScale,minScaleはコンテンツと同じく"%"表記)
 //              layer.json example: {"layer":"/devinfo/devkddi/lvl0.1/svgMapPWA/svgMapPWA4/localMaps/GSI/container_6_12.svg","maxScale":"100","minScale":"10"}
-// 
+// 2020/05/27 : postMessageWhenConnectedを汎化　詳細は関数を見て
+// 2020/05/29 : 遅延ポスト機能をsafari(含iOS)でも動くようにした
+// 2020/06/09 : 代替表示機能を新設したsvgImagesProps[docId].preRenderControllerFunction(svgDocStatus)仕様を使って改善してみる
 //
 //
 // TODO:
@@ -44,18 +46,47 @@
 // モダンブラウザのみ対応。IE, Edge(edge engine)はサポート外
 
 // 仕組み：
+// serviceWorkerPath グローバル変数があると、それのpathのjsをサービスワーカーとして登録する。
+//
 // svgMapServiceWorker_r0はsvgMap用のservice worker
 // installフェーズ以降、cacheでは、必要なライブラリや、ルートのhtml文書、ボタン類イメージなどだけのロードと永続化を行う
 // SVGMapのコンテンツは、fetchイベントをキャプチャし、このライブラリと連携して、indexedDBに保存した地図コンテンツを提供する
 // これでiOS等でもcache50MB制限を回避したり、メインルーチン側でコンテンツを掌握できたりするようにする
 
+
+// TIPS:
+// https://blog.capilano-fw.com/?p=5404　オレオレ証明書サイトでPWA試す方法・・Chrome  iOS safariはどうなのかな
+// start chrome --ignore-certificate-errors --unsafely-treat-insecure-origin-as-secure=https:(IPaddress) --allow-insecure-localhost --user-data-dir=(workDir)
+
+
+
+// var serviceWorkerPath = '/svgMapServiceWorker_r4.js'; // なお、serviceWorkerのjsはこのSVGMapPWA.jsと同じディレクトリにある必要がある
+
+var currentSrc = (function() {
+    if (document.currentScript) {
+        return document.currentScript.src;
+    } else {
+        var scripts = document.getElementsByTagName('script'),
+        script = scripts[scripts.length-1];
+        if (script.src) {
+            return script.src;
+        }
+    }
+})();
+var currentURL = (new URL(currentSrc,location.href));
+console.log("this js's src:",currentURL);
+
 document.addEventListener('DOMContentLoaded', async (e) => {
 	console.log(e);
-	console.log("svgMapServiceWorker*.js を登録します");
-	var registration = await navigator.serviceWorker.register('svgMapServiceWorker_r4.js')
-	await navigator.serviceWorker.ready;
-	console.log("serviceWorker?:",navigator.serviceWorker);
-	
+	if ( typeof(serviceWorkerPath)!= "undefined" ){
+		console.log(serviceWorkerPath + " のservice workerを登録します");
+	//	var registration = await navigator.serviceWorker.register(new URL('svgMapServiceWorker_r4.js',currentURL),{scope: "/"});
+	//	var registration = await navigator.serviceWorker.register(new URL('svgMapServiceWorker_r4.js',currentURL));
+	//	var registration = await navigator.serviceWorker.register('svgMapServiceWorker_r4.js');
+		var registration = await navigator.serviceWorker.register(serviceWorkerPath);
+		await navigator.serviceWorker.ready;
+		console.log("serviceWorker?:",navigator.serviceWorker,"  registration:",registration);
+	}
 });
 
 
@@ -134,6 +165,15 @@ var svgMapPWA = ( function(){
 			});
 		}
 		
+		async function getAllKeys(){
+			return new Promise((resolve, reject) => {
+				const docs = db.transaction([DOCNAME, ]).objectStore(DOCNAME);
+				const req = docs.getAllKeys();
+				req.onsuccess = () => resolve(req.result);
+				req.onerror = reject;
+			});
+		}
+		
 		async function deleteRecord(id){
 			return new Promise((resolve, reject) => {
 				const docs = db.transaction([DOCNAME], 'readwrite').objectStore(DOCNAME);
@@ -160,6 +200,7 @@ var svgMapPWA = ( function(){
 			get: get,
 			put: put,
 			getAll: getAll,
+			getAllKeys: getAllKeys,
 			connect: connectDB,
 			clear: clear,
 			delete: deleteRecord,
@@ -284,6 +325,8 @@ var svgMapPWA = ( function(){
 		// TBD
 	}
 	
+	
+	// この辺、遅延ポスト機能の実装が入り込んでる・・
 	function sendMessage(message) {
 		navigator.serviceWorker.controller.postMessage(message);
 	}
@@ -317,9 +360,13 @@ var svgMapPWA = ( function(){
 		if ( messageGetObj[messageGetObjHash] ){
 			messageGetObj[messageGetObjHash].cbf(message.data.content);
 			delete messageGetObj[messageGetObjHash];
+		} else {
+			alert ( " msgFrmSW:"+message.data);
 		}
 	});
 	
+	
+	// この辺から、地図コンテンツのZIPパッケージを登録する仕組み
 	async function getStorageUsage(){
 		var est = await navigator.storage.estimate();
 		return ( est );
@@ -367,6 +414,7 @@ var svgMapPWA = ( function(){
 		var maxScale = (Number(jsonData.maxScale)-1)/100; // ちょっと1%調整・・・
 		var geoArea = null;
 		await setCachedLayerMeta(layerContainerPath, minScale, maxScale, geoArea);
+		await updateCacheIndex();
 		console.log("success setCachedLayerMeta:",jsonData);
 	}
 	
@@ -416,19 +464,67 @@ var svgMapPWA = ( function(){
 	
 	
 	// オフライン遅延POSTフレームワーク
+	// serviceWorkerのsync eventからキックされるprocessPostMessage()に送っている
+	// ISSUE: safariとかfirefoxでsyncManagerはサポートされてないし、safariだとFormDataもworkerで動かない
+	//        FIXED ので、このjsでメインプロセス内で同じことを実行することにする！！
+	// 
 	var clientId=null;
-	async function postMessageWhenConnected(URL, postStringData, postCompleteCBF){
+	var postReq = "postResponse";
+	async function postMessageWhenConnected(URL, postData, postCompleteCBF){
 		// ネット接続があったらメッセージを指定のURLにPOSTで送る
 		// https://qiita.com/horo/items/28bc624b8a26ffa09621 とか参考にして・・
-		console.log("postMessageWhenConnected: URL:",URL," postStringData:", postStringData);
+		// postData
+		// fetchやRequestの二番目のパラメータ(initオブジェクト)相当、.bodyが含まれたオブジェクトを投入する
+		// optionalとしてmethod、headersも入れられる・・(POSTじゃなくてGETにするとか)
+		// 参考1：https://developer.mozilla.org/ja/docs/Web/API/Request/Request
+		// 参考2：https://qiita.com/legokichi/items/801e88462eb5c84af97d
+		// 参考3：(bodyにformDataを設定する場合) https://ja.javascript.info/formdata
+		// postDataに単なる文字列を入れた場合、form-dataによる決め打ちのリクエストになる(FormDataでcontentに
+		
+		console.log("postMessageWhenConnected: URL:",URL," postData:", postData);
 		if ( !clientId ){
 			clientId = await getClientId();
 		}
 		console.log("clientId:",clientId);
 		await postDB.connect();
-		var result = await postDB.put({url:URL,data:postStringData,clientId:clientId}); // keyはオートインクリメントに任すか・・
+		
+		var postContent;
+		if ( typeof(postData) == "string" ){
+			postContent = {
+				url : URL,
+				data : postData,
+				clientId : clientId
+			};
+		} else if ( postData.body ){
+			var pBody;
+			if ( postData.body instanceof FormData ){
+				var sf = {};
+				for ( var fk of (postData.body).keys()){
+					console.log(fk, (postData.body).get(fk));
+					sf[fk]=(postData.body).get(fk);
+				}
+				pBody = {type:"FormData",data:sf};
+				
+			} else {
+				pBody = postData.body;
+			}
+			
+			postContent = {
+				url : URL,
+//				headers : postData.headers,
+				body : pBody,
+				clientId : clientId
+			};
+			if ( postData.headers ){
+				postContent.headers = postData.headers;
+			}
+			if ( postData.method && typeof(postData.method)=="string" ){
+				postContent.method = postData.method;
+			}
+		}
+		
+		var result = await postDB.put(postContent); // keyはオートインクリメントに任すか・・
 		console.log("add indexed db result:",result);
-		var postReq = "postResponse";
 		var postSer = result.idCol;
 		var messageGetObjHash = postReq + postSer;
 		try{
@@ -440,14 +536,106 @@ var svgMapPWA = ( function(){
 				messageGetObj[messageGetObjHash].ser = postSer; // 冗長・・
 				messageGetObj[messageGetObjHash].cbf = postCompleteCBF;
 			}
-			
 			var registration = await navigator.serviceWorker.ready;
-			await registration.sync.register('outbox:'+result.idCol);
-			console.log('sync registration success');
+			if ( false ){ // ちゃんとsyncを動かすには、registration.syncだよ
+				await registration.sync.register('outbox:'+result.idCol);
+				console.log('sync registration success');
+			} else {
+//				alert('navigator.serviceWorker is NOT.... alter it');
+				console.log('navigator.serviceWorker is NOT.... alter it');
+				processPostQueue();
+			}
 		} catch ( error ){
 			console.log('sync registration error', error);
 		}
 	}
+	
+	setInterval(processPostQueue,3000);
+	
+	async function processPostQueue(){
+		if ( window.navigator.onLine ){
+			await postDB.connect();
+			var pIds = await postDB.getAllKeys();
+			for ( var i = 0 ; i < pIds.length ; i++ ){
+				console.log("Post postponed content:",pIds[i]);
+				var resText = await processPostMessage(pIds[i]);
+				var messageGetObjHash = postReq + pIds[i];
+				messageGetObj[messageGetObjHash].cbf(resText);
+				delete messageGetObj[messageGetObjHash];
+			}
+		}
+	}
+	
+	async function processPostMessage(postId){ // この関数は、postMessageWhenConnectedの処理をServiceWorkerのsyncイベントで起動されるものだが、sasfariではsyncもFormDataもServiceWorkerで使えないので、メインプロセスで動かすことにする　なのでこのjsが呼ばれてないと当然動きません・・・
+		// try catch エラー処理必要じゃない? async awaitでreject相当処理ってどう書いたらいい？書かなくても勝手にエラーになる？
+		// これぐらい汎用化すればなんでもPOSTできると思われる：https://qiita.com/legokichi/items/801e88462eb5c84af97d
+		// すなわち、fetchやRequestの二番目のパラメータ(initオブジェクト(https://developer.mozilla.org/ja/docs/Web/API/Request/Request))相当のもの
+		// さらに言えばmethodも汎用化してしまえるが・・一応post関数ということなのでデフォルトはPOSTとする
+		await postDB.connect();
+		var postContent = await postDB.get(postId);
+		var clientId = postContent.clientId;
+		console.log("processPostMessage:, clientId:",clientId,"   postContent:",postContent);
+		var postRequest;
+		if ( postContent.body ){
+			var reqBody;
+			if ( postContent.body.type && postContent.body.type == "FormData"){
+				// FormDataがIndexedDBに入れられない(シリアライズ不可能なオブジェクト)なのを回避するパッチ・・・
+				var formData = new FormData();
+				for ( var fk in postContent.body.data ){
+					formData.append(fk,(postContent.body.data)[fk]);
+				}
+				reqBody = formData;
+			} else {
+				reqBody = postContent.body;
+			}
+			var method = 'POST';
+			if ( postContent.method ){
+				method = postContent.method;
+			}
+			var reqInit={ 
+				method: method,
+				body: reqBody,
+				credentials: 'include'
+			};
+			if ( postContent.headers ){
+				reqInit.headers = postContent.headers;
+			}
+			postRequest = new Request(
+				postContent.url,
+				reqInit
+			);
+		} else {
+			var formData = new FormData();
+			formData.append('pid', postId);
+			formData.append('content', postContent.data);
+			postRequest = new Request(
+				postContent.url,
+				{method: 'POST', body: formData, credentials: 'include'}
+			);
+		}
+	//	console.log("virtual post:",postRequest, " postData:",formData,"  pid:",postId,"  content:",postContent.data);
+		var res;
+		console.log("Actual post:",postRequest);
+		res = await fetch(postRequest);
+		var responseText = await res.text();
+		console.log("res.text:",responseText);
+		await postDB.delete(postId);
+	//	await sendMessage({req:"postResponse", ser:postId, content:responseText},clientId); // 2020/5/7
+		return ( responseText ); // これと上の2行だげがserviceWorkerのコードで違うのみ
+	}
+	
+	
+	async function getPostQueue(){
+		var postDB = getDB({dbName:"svgMapPwaPostDB",tableName:"postQueue"});
+		await postDB.connect();
+		var result = await postDB.getAll();
+		console.log("result:",result);
+		return ( result );
+	}
+	
+	
+	
+	
 	
 	// スケールトリミング機構(DL済みのレイヤーに対して、スケールレンジを超えたときに仮想的にスケールが下のコンテンツで代替表示する仕組み)
 	// cacheIndexを使っている
@@ -461,9 +649,64 @@ var svgMapPWA = ( function(){
 		svgMap.setDevicePixelRatio();
 //		svgMap.refreshScreen();
 	}
-	var prevRootScale=1;
-	var prevVisibleLayersLength=0;
-	var trimmed=[];
+	
+	
+	document.addEventListener('zoomPanMap', registScaleTrimmer); // 最初の描画完了時に、scaleTrimmerを登録する
+	async function registScaleTrimmer(){
+		updateCacheIndex();
+		document.removeEventListener('zoomPanMap', registScaleTrimmer);
+		console.log("regist SVGMap's preRenderSuperControllerFunction");
+		var svgImagesProps=svgMap.getSvgImagesProps();
+		svgMap.setPreRenderController( null, scaleTrimmer); // nullの場合はsuperなのを設定する
+	}
+	
+	var cacheIndex;
+	async function updateCacheIndex(){
+		cacheIndex = await getCachedLayerMeta();
+//		console.log("updateCacheIndex:",cacheIndex);
+	}
+	
+	function scaleTrimmer(meta){ // 新設した仕様：svgMapのpreRenderSuperControllerFunctionを使ったscaleTrimmer
+		// これによって、設定後にrefreshScreen()するような非効率がなくなった。
+//		console.log("svgMapPWA preRenderSuperControllerFunction on :",meta.docId, "meta:",meta);
+		if ( scaleTrimEnabled && !window.navigator.onLine ){ // 有効化&&オフライン時のみ発動
+		} else {
+			updateCacheIndex(); // このタイミング(有線状態)でキャッシュの情報を更新しておこう
+//			if ( trimmed.length>0){ // 無効化||復帰したときは必要に応じDPRを初期化する
+//				trimmed =[];
+//				svgMap.setDevicePixelRatio();
+//			}
+			return;
+		}
+		var svgImagesProps=svgMap.getSvgImagesProps();
+		var currentDPR = svgMap.getDevicePixelRatio(meta.docId);
+		var docURL = (new URL(svgImagesProps[meta.docId].Path,document.location.href)).href;
+		
+//		console.log("doc's URL:",docURL, "   cacheIndex:",cacheIndex);
+		
+		// そのlayerIDのレイヤがcacheIndexに登録されているのかを確認する
+		for ( var i = 0 ; i < cacheIndex.length ; i++ ){ // cacheIndexは絶対パスをKEYにしてキャッシュされてるデータのメタデータが履いている
+			var targetCache = cacheIndex[i];
+			if ( docURL == cacheIndex[i].idCol ){
+				var currentLayerPScale = currentDPR * svgImagesProps[meta.docId].scale; // DPR=1と見立てたDPRの効果がないときのscale値 これはちゃんと計算された後だから大丈夫なはず (ただ、devicePixelRation分割り増しされてるんじゃないか？　currentDPRを使わないとダメなはず)
+//				console.log("svgMapPWA preRenderSuperControllerFunction : is scaleTrim target:",meta.docId  ,"  targetCache.maxScale:",targetCache.maxScale,"   currentLayerPScale:",currentLayerPScale, "  currentDPR:",currentDPR,"  doc's scale:", svgImagesProps[meta.docId].scale);
+				if ( targetCache.maxScale < currentLayerPScale ){
+					var scaleTrim = 1.0 * currentLayerPScale  /  targetCache.maxScale;
+//					console.log("Do Scale Trimm: DPR:",scaleTrim);
+					svgMap.setDevicePixelRatio(scaleTrim,meta.docId);
+//					trimmed.push(targetLayers[i].title);
+				} else {
+					svgMap.setDevicePixelRatio(null,meta.docId); 
+				}
+			}
+		}
+	}
+	
+	/** Obsoluted Functions.... (by scaleTrimmer()dp )
+	
+//	var prevRootScale=1;
+//	var prevVisibleLayersLength=0;
+//	var trimmed=[];
 	function getPhysicalScale_int(layerId,currentScales,currentDPR){ // DPRをかける前のscaleを求める
 		var ans;
 		if ( currentDPR.layerDevicePixelRatio[layerId] ){
@@ -473,7 +716,74 @@ var svgMapPWA = ( function(){
 		}
 		return ans;
 	}
-	document.addEventListener('zoomPanMap', async function(){
+	
+	function scaleTrimmerRoot(meta){ // 新設した仕様：svgMapのpreRenderControllerFunctionを使ったscaleTrimmer
+		// これは、"root"文書パース直前に子レイヤー分を一気に設定しようと試みたものだが、いろいろ必要な変数が設定前の状態を回避しようとするとカオスになるのでやめた
+		console.log("svgMapPWA preRenderControllerFunction on :",meta.docId, meta:",meta);
+		return;
+		if ( scaleTrimEnabled && !window.navigator.onLine ){ // 有効化&&オフライン時のみ発動
+		} else {
+			if ( trimmed.length>0){ // 無効化||復帰したときは必要に応じDPRを初期化する
+				trimmed =[];
+				svgMap.setDevicePixelRatio();
+			}
+			return;
+		}
+		var svgImagesProps=svgMap.getSvgImagesProps();
+		
+		var currentDPR = svgMap.getDevicePixelRatio();
+		var currentScales = getScales();
+		var visibleLayers = getVisibleLayers();
+		// レイヤー構成が変わった時 or 縮尺が変わった時のみ以下の処理を行えば良い"はず"
+		if ( meta.viewChanged != "zoom" && visibleLayers.length == prevVisibleLayersLength){
+			return;
+		}
+		prevVisibleLayersLength = visibleLayers.length;
+		
+		// cacheIndexと突き合わせるために表示されているレイヤーの(絶対パスによる)ハッシュテーブルを準備している(ちょっと冗長？)
+		var visibleLayersHash ={};
+		for ( var i = 0 ; i< visibleLayers.length ; i++ ){
+			visibleLayersHash[visibleLayers[i].absPath] = {title:visibleLayers[i].title,id:visibleLayers[i].id};
+		}
+		var targetLayers =[]; // 今表示されているレイヤーのなかでcacheに入っているものをtargetLayersに入れている
+		for ( var i = 0 ; i < cacheIndex.length ; i++ ){ // cacheIndexは絶対パスをKEYにしてキャッシュされてるデータのメタデータが履いている
+			if ( visibleLayersHash[cacheIndex[i].idCol]){
+				targetLayers.push({
+					layerId : visibleLayersHash[cacheIndex[i].idCol].id,
+					title : visibleLayersHash[cacheIndex[i].idCol].title,
+					absPath : cacheIndex[i].idCol,
+					maxScale: cacheIndex[i].maxScale,
+					minScale: cacheIndex[i].minScale,
+					geoArea : cacheIndex[i].geoArea,
+					
+				});
+			}
+		}
+		console.log("DLコンテンツのスケールオーバー非表示回避処理 targetLayers:",targetLayers,"  currentScales:",currentScales,"  currentDPR:",currentDPR);
+		svgMap.setDevicePixelRatio(); // これでいったん完全初期化
+		trimmed=[];
+		for ( var i = 0 ; i < targetLayers.length ; i++ ){
+			var layerId = targetLayers[i].layerId;
+//			var currentLayerPScale = getPhysicalScale_int(layerId,currentScales,currentDPR); // この演算がたぶんメルカトルで合わなくなっている・・
+//			var currentLayerPScalePrev = svgImagesProps[layerId].scale; // これはひとつ前のものが入っちゃうのでダメ(rootの演算時は子ドキュメントの演算は完了してないので)
+//			console.log("TTTTEEEESSSSTTTT:",svgImagesProps[layerId].CRS,svgImagesProps["root"].CRS);
+			var currentLayerPScale = meta.rootScale * (svgMap.getConversionMatrixViaGCS( svgImagesProps[layerId].CRS, svgImagesProps["root"].CRS )).scale; // getConversionMatrixViaGCS...のほうの値は基本的に定数なので一度計算したらそれを使えば良いはずだけど・まいいか ・・・しかしそもそもそのレイヤのCRSはそのレイヤのParseが終わってないと生成されていないので、rootの読み込みparse前タイミングでは、最初のロードが終わってない限り取れないよね。
+			
+			console.log("layerId:",layerId,"  currentLayerPScale:",currentLayerPScale);
+			if ( targetLayers[i].maxScale < currentLayerPScale ){
+				console.log("maxScale:",targetLayers[i].maxScale ,"  currentScale:",currentLayerPScale);
+				var scaleTrim = 2 * currentLayerPScale  /  targetLayers[i].maxScale;
+				svgMap.setDevicePixelRatio(scaleTrim,layerId);
+				trimmed.push(targetLayers[i].title);
+//			} else {
+//				svgMap.setDevicePixelRatio(null,targetLayers[i].layerId); // これは完全初期化してるので不要
+			}
+		}
+	}
+	
+	
+	async function registScaleTrimmer(){
+		// この方法はrefreshScreenによるちらつきが生じるし非効率なのでやめた
 		console.log("zoomPanMap:",getScales());
 		if ( scaleTrimEnabled && !window.navigator.onLine ){ // 有効化&&オフライン時のみ発動
 		} else {
@@ -535,10 +845,11 @@ var svgMapPWA = ( function(){
 		}
 		if ( trimmed.length > 0 ){
 			console.log(" >> DLコンテンツのスケールオーバー非表示回避設定実施 : ", );
-			svgMap.refreshScreen();
+			svgMap.refreshScreen(); // これがいろいろダメだった　特にiOS safariでは描画タイミングが合ってないのか？表示されなかったり・・
 		}
 		
-	});
+	};
+	**/
 	
 	
 	// バッチ（オートパイロット）によるキャッシュレイヤーのメタデータ管理機構 2020/5/14-
@@ -583,22 +894,25 @@ var svgMapPWA = ( function(){
 		var mapLayers = svgMap.getRootLayersProps(); // [].visible, .href
 //		var rootDocPath = document.location.pathname;
 //		var rootDocDirPath = rootDocPath.substring(0,rootDocPath.lastIndexOf("/")+1);
-		var rootDocPath = document.location.href;
+		var rootHtmlPath = document.location.href;
+		var svgImagesProps=svgMap.getSvgImagesProps();
+		var rootSvgPath = svgImagesProps["root"].Path;
+		var rootSvgURL = new URL(rootSvgPath,location.href);
 		var visLayers =[];
 		for ( var i = 0 ; i < mapLayers.length ; i++){
 			if ( mapLayers[i].visible ){
 				var lId = mapLayers[i].id;
-				var rPath = svgImagesProps[lId].Path;
+//				var rPath = svgImagesProps[lId].Path; // これが得られない問題・・
 				var href = mapLayers[i].href;
 				var title = mapLayers[i].title;
 //				var absPath = rootDocDirPath+rPath;
-				var layerURL = new URL(rPath, rootDocPath);
+				var layerURL = new URL(href, rootSvgURL);
 //				var absPath = layerURL.pathname;
 				var absPath = layerURL.href; // フルURLの方が統一感があって良いかも？　変数名がurlもしくはhrefの方が良いけど・・・
 				visLayers.push({
 					id: lId,
-					href: href, // これはrootLayerSVGがhtmlと同じディレクトリにないと相対パスが一致しなくなる(多分不要)
-					path: rPath, // こっちはそういうことがない(同上)
+//					href: href, // これはrootLayerSVGがhtmlと同じディレクトリにないと相対パスが一致しなくなる(多分不要)
+//					path: rPath, // こっちはそういうことがない(同上)
 					absPath: absPath, // この値をindexedDBに保持する
 					url: layerURL,
 					title:title
@@ -830,6 +1144,7 @@ var svgMapPWA = ( function(){
 		disableCache: disableCache, // これはserviceWorkerのネイティブのキャッシュ機構とIndexedDBのキャッシュ機構を丸ごとDisableする
 		enableCache: enableCache, // 同Enable
 		getCachedLayerMeta: getCachedLayerMeta, // バッチ（オートパイロット）によるキャッシュレイヤーのメタデータアクセス
+		getPostQueue: getPostQueue,
 		getRootScale: getRootScale, // svgMap.jsのルートコンテナ座標とスクリーン座標との間のスケールを返却する
 		getScales: getScales, // 読み込み済み文書全てのスケールを返す(hashKeyはdocID)
 		getVisibleLayers: getVisibleLayers,
@@ -840,6 +1155,7 @@ var svgMapPWA = ( function(){
 		sendMessage: sendMessage, //tmp
 		setCachedLayerMeta: setCachedLayerMeta, // バッチ（オートパイロット）によるキャッシュレイヤーのメタデータアクセス
 		setScaleTrim: setScaleTrim,
+		updateCacheIndex: updateCacheIndex,
 	}
 })();
 	

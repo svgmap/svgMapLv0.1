@@ -41,6 +41,7 @@
 // 2019/02/19 : ^>v等のボタンをビットイメージ化　wheel系イベントをモダンに
 // 2019/11/26 : CORSがあれば、別ドメインのレイヤーでもLayerUIframeが動作できるようになった（かも）
 // 2019/12/05 : SVGMap.jsのグローバルエリア"globalMesasge" span要素がある場合、そこに(調停付きで)レイヤー固有UIframeからメッセージを出せるフレームワーク putGlobalMessage()
+// 2020/06/09 : レイヤ固有UIiframeのscriptに、preRenderFunction　という名の関数があると、そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出される。
 //
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
@@ -901,6 +902,10 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 //			console.log("add svgMapAuthoringTool to iframe");
 		iframe.contentWindow.svgMapAuthoringTool = svgMapAuthoringTool;
 	}
+	if ( typeof svgMapPWA != "undefined" ){ // 2020/5/14
+//			console.log("add svgMapPWA to iframe");
+		iframe.contentWindow.svgMapPWA = svgMapPWA;
+	}
 	
 	iframe.contentWindow.svgMapLayerUI=svgMapLayerUI;
 	iframe.contentWindow.putGlobalMessage = putGlobalMessageForLayer(lid); // added 2019/12/05 今後、この種の"そのレイヤーに対するAPI"が増えると思うが、もう少しきれいにまとめたい。(TBD)
@@ -913,6 +918,10 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[lid], false);
 	} else {
 		transferCustomEvent2iframe[lid] = transferCustomEvent4layerUi(lid);
+	}
+	if ( typeof(iframe.contentWindow.preRenderFunction)=="function"){ // 2020/6/8 再描画の前に実行される関数を登録(これで、svg文書のscriptの中のonzoom, onscroll関数のような挙動がだせるかと・・)
+		console.log("Register preRenderControllerFunction for layerID:",lid);
+		(svgMap.getSvgImagesProps())[lid].preRenderControllerFunction = iframe.contentWindow.preRenderFunction;
 	}
 	document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
 	document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);

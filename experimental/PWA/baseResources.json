@@ -1,0 +1,25 @@
+{
+"src": [
+
+"index.html",
+"Container_mercator_org.svg",
+"SVGMapLv0.1_PWA_r5.js",
+
+"js/SVGMapLv0.1_r16.js",
+"js/SVGMapLv0.1_LayerUI2_r3.js",
+"js/SVGMapLv0.1_GIS_r2.js",
+"js/SVGMapLv0.1_Authoring_r7.js",
+"js/jsts.min.js",
+
+"imgs/gps.png",
+"imgs/gps_s.png",
+"imgs/Xcursor.png",
+"imgs/zoomdown.png",
+"imgs/zoomdown_s.png",
+"imgs/zoomup.png",
+"imgs/zoomup_s.png",
+"imgs/mappin.png"
+
+],
+"mapCacheTarget":"localMaps/"
+}
