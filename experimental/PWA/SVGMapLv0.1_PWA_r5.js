@@ -34,6 +34,7 @@
 // 2020/05/27 : postMessageWhenConnectedを汎化　詳細は関数を見て
 // 2020/05/29 : 遅延ポスト機能をsafari(含iOS)でも動くようにした
 // 2020/06/09 : 代替表示機能を新設したsvgImagesProps[docId].preRenderControllerFunction(svgDocStatus)仕様を使って改善してみる
+// 2020/06/23 : zipパッケージ読み込み機能のバグ修正　他　少し改良
 //
 //
 // TODO:
@@ -264,9 +265,17 @@ var svgMapPWA = ( function(){
 		var zrdr = await getZipReader(abuf);
 		var zURL = new URL(zip_url,location.href);
 		var parentDirURL = (zURL.href).substring(0,((zURL.href).lastIndexOf("/"))) + "/";
-		await storeContents(zrdr,parentDirURL);
+		var storeResult = await storeContents(zrdr,parentDirURL, progressCallBack);
+		var storedCount = 0;
+		for ( var i = 0 ; i < storeResult.length ; i++ ){
+			if ( storeResult[i].result=="success"){
+				++ storedCount;
+			}
+		}
+//		console.log("all contents stored : ",storeResult);
 		await sendMessage({cacheMode:"cacheFirst"}); // キャッシュを使うように戻す
 		loading = false;
+		return ( storedCount );
 	}
 	
 	async function enableCache(){
@@ -383,25 +392,39 @@ var svgMapPWA = ( function(){
 	}
 	// Use the reader to read each of the files inside the zip
 	// and put them into the offline cache.
-	function storeContents(reader, parentDirURL) {
+	function storeContents(reader, parentDirURL, progressCallBack) {
 		return new Promise(function(fulfill, reject) {
 			reader.getEntries(function(entries) {
+				var entLen = entries.length;
+				var storeCount=0;
 				console.log('Installing', entries.length, 'files from zip');
-				Promise.all(entries.map(function(entry){storeEntryToIDB(entry,parentDirURL);})).then(fulfill, reject);
+				Promise.all(
+					entries.map(
+						async function(entry){ // asyncが無くて動きがおかしくなっていたのを修正 2020/6/23
+							var ret = await storeEntryToIDB(entry,parentDirURL);
+							++ storeCount;
+							if ( progressCallBack ){
+								progressCallBack( storeCount / entLen );
+							}
+							
+							return ( ret );
+						}
+					)
+				).then(fulfill, reject);
 			});
 		});
 	}
 	
 	async function storeEntryToIDB(entry,parentDirURL){
-		if (entry.directory) { return };
+			if (entry.directory) { return({result:"skip"}) };
 		var cBlob = await getUnzippedData(entry);
-		console.log("dir:",parentDirURL," fName:",entry.filename," contentBlob:",cBlob);
+//		console.log("dir:",parentDirURL," fName:",entry.filename," contentBlob:",cBlob);
 		var cURL = parentDirURL + entry.filename;
 		if ( entry.filename == "layer.json"){ // 2020/5/19 代替表示機構用拡張
 			console.log("Found layer.json");
 			await registCachedLayerMetaFromJsonBlob(cBlob);
 		}
-		var ret = await cacheDB.put({idCol:cURL, contentBlob:cBlob});
+		var ret = await cacheDB.put({result:"success", idCol:cURL, contentBlob:cBlob});
 		return ( ret );
 	}
 	
@@ -420,7 +443,7 @@ var svgMapPWA = ( function(){
 	
 	function getUnzippedData(entry){
 		return new Promise(function(resolve){
-			console.log("entry:",entry);
+//			console.log("entry:",entry);
 			entry.getData(new zip.BlobWriter(getContentType(entry.filename)),resolve);
 		});
 	}
