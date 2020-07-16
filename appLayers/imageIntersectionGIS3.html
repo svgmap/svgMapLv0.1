@@ -77,7 +77,11 @@ function halt(){
 function initSvgMapGIStool(){
 	svgMapGIStool.setImageProxy(proxyPath, null, true);
 	// ISSUE: 上の3番目のanonymous設定が下記では継承されてないSVGMap.jsの改修が必要
-	getImageProxy = function(path){return svgMapGIStool.imageUrlEncoder(path)}; 
+	getImageProxy = function(path){
+		var ans = svgMapGIStool.imageUrlEncoder(path);
+//		console.log("getImageProxy inp:",path,"  ans:",ans);
+		return ans;
+	}; 
 }
 
 var getImageProxy; // svgMap.jsが全てのコンテンツをsvgMapGIStoolのimageUrlEncoderでエンコードしたURL(Proxy経由のURL)で取得させるための変換関数=SVGMapGIStoolのimageUrlEncoder 2020/2/13
@@ -371,9 +375,15 @@ function startContSearch(){
 	contSearchBtn.value="連続検索終了";
 	csvAppendMode = true;
 	printCsvSchema();
-	searchInRangePoints();
+//	searchInRangePoints(); // これは同様に不作法　setProxyURLFactoryしたならば読み込み安定させてから実行しないとダメです
 	document.removeEventListener("zoomPanMap",APzoomPanListener,false);
 	document.addEventListener("zoomPanMap", doContSearch , false);
+	document.addEventListener("screenRefreshed", startContSearchPh2 , false);
+	svgMap.refreshScreen();
+}
+function startContSearchPh2(){ // ↑の不作法への対応 2020/7/16
+	document.removeEventListener("screenRefreshed",startContSearchPh2,false);
+	searchInRangePoints();
 }
 
 function stopContSearch(){
@@ -399,7 +409,8 @@ var allSearching = false; // 現在一括検索中フラグ
 var totalHitCount;
 function searchAll(){
 	stopContSearch();
-	svgMap.setProxyURLFactory(null,getImageProxy,true);
+	svgMap.setProxyURLFactory(null,getImageProxy,true); // これが設定されているとテスト用(土石流も同様)ｘhinanjoで最初の検索が止まる・・ これは、まだビットイメージが読み込まれていない状態でcaptureしようとするから弾かれてしまうのが原因
+//	svgMap.setProxyURLFactory(null,getImageProxy,false); // 第三パラメータ(anonymous)がfalseなら大丈夫なんだ・・？？
 	document.getElementById("hlt").disabled=false;
 	document.getElementById("progress").innerHTML="Start computing.";
 	clearCircles();
@@ -418,15 +429,26 @@ function searchAll(){
 	
 	console.log("SearchAll:",sourcePoiId, "   geoVB:",initialViewBox);
 	currentLevelPos = [];
-	var superParam = {	}
+	var superParam = {};
 	contDepth = 0;
 	prevImage = false;
+	svgMap.refreshScreen();
+	document.addEventListener("screenRefreshed",searchAllS1,false); // vv なので、ちゃんと読み込みを安定させてからsearchAllS1で処理する
+	/** ここが不作法 ～　setProxyURLFactoryでビットイメージの読み込み先が変化し、ビットイメージ読み込みの最中になったときcaptureGISgeometriesすると、そのビットイメージのgeometry(coverage)が生成されない仕様 ( SVGMap.jsのGISgeometries[docId].push(GISgeometry)　あたりを参照して
 	svgMap.captureGISgeometriesOption(true); 
 	svgMap.captureGISgeometries(searchAllS2 , superParam );	
+	**/
+}
+
+function searchAllS1(){
+	console.log("called searchAllS1:");
+	document.removeEventListener("screenRefreshed",searchAllS1,false);
+	svgMap.captureGISgeometriesOption(true); 
+	svgMap.captureGISgeometries(searchAllS2 );	
 }
 
 function searchAllS2(geom , superParam ){
-	console.log(geom,  currentLevelPos , initialViewBox , sourcePoiLayerId);
+	console.log(geom,  currentLevelPos , initialViewBox , sourcePoiLayerId,   svgMap.getSvgImagesProps());
 	
 	var hasPoiLowResI = hasPoiLowResImage(geom,sourcePoiLayerId)
 	console.log("hasPoiLowResImage:", hasPoiLowResI, "  in ",sourcePoiLayerId);
