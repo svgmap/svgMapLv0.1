@@ -36,6 +36,7 @@
 // 2019/03/12 タイリングされたレイヤーに対して処理可能にする(制約としては、タイルにあるオブジェクトを編集したものは保持されない。新規のオブジェクトはレイヤルートに設置。メタデータスキーマ・アイコン定義は、共通のものをレイヤールートにも設置必要)
 // 2019/12/27 refreshScreen後コールバック処理の精密化
 // 2020/01/21 同上マイナー修正
+// 2020/07/17 redis用でブランチしていた機能を取り込み(poiToolsの帰り値オプション)
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -64,7 +65,7 @@ var action = "none"; // 起こしたアクションがなんなのか（かな�
 
 
 // 開いている編集UIに関するグローバル情報を入れているオブジェクト
-// uiMapping = {uiPanel,editingLayerId,editingMode,uiDoc,editingGraphicsElement,modifyTargetElement}
+// uiMapping = {uiPanel,editingLayerId,editingMode,uiDoc,editingGraphicsElement,modifyTargetElement,toolsCbFunc,toolsCbFuncParam}
 // uiPanel : オーサリングUIを発生させる(layer specific UI iframe中などの)div要素
 // editingLayerId : 編集中のSVG文書のレイヤーID(svgMapProps[]などの)
 // editingMode : POI,POLYLINE,POIreg...
@@ -72,6 +73,8 @@ var action = "none"; // 起こしたアクションがなんなのか（かな�
 // editingGraphicsElement : 図形要素を編集中かどうか(boolean)
 // modifyTargetElement : 既存図形要素を改変中かどうか(そうならばその要素のNode)
 // selectedPointsIndex,insertPointsIndex: Poly*用の編集対象ポイント ない場合は-1
+// toolsCbFunc : コールバック 2019/3/12
+// toolsCbFuncParam : コールバック関数の任意パラメータ
 var uiMapping = {};
 
 
@@ -131,7 +134,7 @@ function clearTools( e ){
 	
 	var targetDoc = uiMapping.uiDoc;
 	var confStat = "Cancel";
-	editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat );
+	editConfPhase2( targetDoc, uiMapping.toolsCbFunc, uiMapping.toolsCbFuncParam, confStat );
 	
 	// 以下editConfPhase2で済み
 //	poiCursor.removeCursor();
@@ -158,7 +161,7 @@ function setTools( e ){
 
 // 特定POINTオブジェクトの登録ツール・座標入力ツール　特定のIDを持ったuse要素を登録（上書き）複数設置できる
 // 座標の登録のみ　アイコンやプロパティの編集は出来ない(init時にあらかじめの設定は可能)
-function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc,cbFuncParam,getPointOnly){
+function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc,cbFuncParam,getPointOnly,returnSvgElement){
 	
 	var uiDoc = targetDiv.ownerDocument;
 	
@@ -179,13 +182,6 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 		uiDoc.addEventListener('closeFrame',clearTools);
 		uiDoc.addEventListener('appearFrame',setTools);
 		
-		if ( cbFunc ){
-			toolsCbFunc = cbFunc;
-			toolsCbFuncParam = cbFuncParam;
-		} else {
-			toolsCbFunc = null;
-			toolsCbFuncParam = null;
-		}
 		uiMapping = {
 			uiPanel : [],
 			editingLayerId : poiDocId,
@@ -194,7 +190,16 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 			editingGraphicsElement: false,
 			modifyTargetElement: null,
 			poiParams:[],
+			returnSvgElement:returnSvgElement,
+			selectedPointsIndex:-1
 		} ;
+		if ( cbFunc ){
+			uiMapping.toolsCbFunc = cbFunc;
+			uiMapping.toolsCbFuncParam = cbFuncParam;
+		} else {
+			uiMapping.toolsCbFunc = null;
+			uiMapping.toolsCbFuncParam = null;
+		}
 		
 	}
 	uiMapping.uiPanel.push(targetDiv);
@@ -244,15 +249,8 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 
 // POINTオブジェクト(use)の"編集"ツール 新規追加、削除、変更などが可能　ただし一個しか設置できない
 var svgImages, svgImagesProps;
-function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly){
+function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly,returnSvgElement){
 	// getPointOnlyuse: useは作るものの　作った後に座標を取得してすぐに捨てるような使い方(アイコンを打つわけではない)
-	if ( cbFunc ){
-		toolsCbFunc = cbFunc;
-		toolsCbFuncParam = cbFuncParam;
-	} else {
-		toolsCbFunc = null;
-		toolsCbFuncParam = null;
-	}
 	
 	removeChildren(targetDiv);
 	
@@ -337,8 +335,17 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly){
 		editingMode : "POI",
 		uiDoc: uiDoc,
 		editingGraphicsElement: false,
-		modifyTargetElement: null
+		modifyTargetElement: null,
+		returnSvgElement: returnSvgElement,
+		selectedPointsIndex:-1
 	} ;
+	if ( cbFunc ){
+		uiMapping.toolsCbFunc = cbFunc;
+		uiMapping.toolsCbFuncParam = cbFuncParam;
+	} else {
+		uiMapping.toolsCbFunc = null;
+		uiMapping.toolsCbFuncParam = null;
+	}
 	
 	setPoiUiEvents(uiDoc, poiDocId);
 	setMetaUiEvents(uiDoc, poiDocId);
@@ -364,6 +371,15 @@ function getMetaUiData(targetDoc){
 	return ( metaAns );
 }
 
+function getAllAttrs(elem){
+	var attrs = elem.attributes;
+	var ret={};
+	for (var i = 0 ; i < attrs.length; i++) {
+		ret[attrs[i].name]=attrs[i].value;
+	}
+	return ( ret );
+}
+
 function setEditConfEvents( targetDoc , poiDocId){
 	pointAddMode = false;
 	targetDoc.getElementById("editConf").addEventListener("click",function(e){
@@ -373,12 +389,16 @@ function setEditConfEvents( targetDoc , poiDocId){
 			removePointEvents( editPolyPoint );
 		}
 		var confStat;
+		if ( uiMapping.modifyTargetElement ){
+			uiMapping.prevAttrs = getAllAttrs(uiMapping.modifyTargetElement);
+		}
+		var ret=null;
 		switch ( e.target.id ){
 		case"pepok": // 値設定決定用
 			confStat = "OK";
 			if ( uiMapping.editingMode ==="POI"){
 //				clearPoiSelection();
-				var ret = setPoiSvg(readPoiUiParams(targetDoc),poiDocId);
+				ret = setPoiSvg(readPoiUiParams(targetDoc),poiDocId);
 				// 既存アイコンを選択しているものがあれば（ＳＶＧではなく、ＨＴＭＬの方を）元に戻す
 //				console.log(uiMapping.modifyTargetElement,document.getElementById(uiMapping.modifyTargetElement.getAttribute("iid")));
 				if ( uiMapping.modifyTargetElement && document.getElementById(uiMapping.modifyTargetElement.getAttribute("iid"))){
@@ -388,7 +408,7 @@ function setEditConfEvents( targetDoc , poiDocId){
 					}
 				}
 			} else if ( uiMapping.editingMode ==="POLYLINE" || uiMapping.editingMode ==="POLYGON"){
-				setPolySvg(targetDoc,poiDocId);
+				ret = setPolySvg(targetDoc,poiDocId);
 			}
 			uiMapping.modifyTargetElement=null;
 			uiMapping.editingGraphicsElement=false;
@@ -411,7 +431,7 @@ function setEditConfEvents( targetDoc , poiDocId){
 		case"pepdel": // 削除 2017.2.27 delにpolygonの要素ポイントの削除機能を拡張する
 			console.log("pepdel button: selP",uiMapping.selectedPointsIndex, "  insP:",uiMapping.insertPointsIndex);
 			if ( uiMapping.selectedPointsIndex == -1 ){
-				svgMap.setCustomModal("Delete Object?",["YES","Cancel"],delConfModal,{targetDoc:targetDoc,toolsCbFunc:toolsCbFunc,toolsCbFuncParam:toolsCbFuncParam});
+				svgMap.setCustomModal("Delete Object?",["YES","Cancel"],delConfModal,{targetDoc:targetDoc,toolsCbFunc:uiMapping.toolsCbFunc,toolsCbFuncParam:uiMapping.toolsCbFuncParam});
 				/**
 				confStat = "Delete";
 				uiMapping.editingGraphicsElement = false;
@@ -430,8 +450,9 @@ function setEditConfEvents( targetDoc , poiDocId){
 			}
 			break;
 		}
+		uiMapping.editedElement = ret;
 		if ( confStat ){
-			editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat );
+			editConfPhase2( targetDoc, uiMapping.toolsCbFunc, uiMapping.toolsCbFuncParam, confStat );
 		}
 	},false);
 }
@@ -445,7 +466,27 @@ function editConfPhase2( targetDoc, toolsCbFunc, toolsCbFuncParam, confStat ){
 	polyCanvas.removeCanvas();
 //		console.log("editConfPhase2: toolsCbFunc?:",toolsCbFunc);
 	if ( toolsCbFunc ){
-		callAfterRefreshed(toolsCbFunc,confStat,toolsCbFuncParam);
+		var retVal;
+		if ( uiMapping.returnSvgElement){ // 2020/7/17
+			var attrs = null;
+			if ( uiMapping.editedElement ){
+				attrs = getAllAttrs(uiMapping.editedElement);
+			}
+			retVal = 
+				{
+					confStat:confStat,
+					element:uiMapping.editedElement,
+					attrs: attrs,
+					prevAttrs:uiMapping.prevAttrs
+				}
+			uiMapping.prevAttrs = null;
+			uiMapping.editedElement = null;
+			
+		} else {
+			retVal = confStat;
+		}
+		callAfterRefreshed(toolsCbFunc,retVal,toolsCbFuncParam);
+//		callAfterRefreshed(toolsCbFunc,confStat,toolsCbFuncParam);
 //		toolsCbFunc(confStat, toolsCbFuncParam);
 	}
 	svgMap.refreshScreen();
@@ -637,6 +678,7 @@ function setPolySvg(targetDoc,poiDocId){
 		}
 		targetSvgElem.setAttribute("content",metaStr);
 	}
+	return (targetSvgElem);
 }
 
 
@@ -702,8 +744,8 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 			uiMapping.editingLayerId,
 			directPutPoiParams.id
 		);
-		if ( toolsCbFunc ){
-			callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
+		if ( uiMapping.toolsCbFunc ){
+			callAfterRefreshed(uiMapping.toolsCbFunc,true,uiMapping.toolsCbFuncParam);
 //			toolsCbFunc(true, toolsCbFuncParam); // refreshが完了してから呼ばないと行儀が悪く、問題が出るようになった(2019/12/27)
 		}
 		svgMap.refreshScreen(); 
@@ -776,8 +818,8 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 				uiMapping.editingLayerId,
 				params.id
 			);
-			if ( toolsCbFunc ){
-				callAfterRefreshed(toolsCbFunc,true,toolsCbFuncParam);
+			if ( uiMapping.toolsCbFunc ){
+				callAfterRefreshed(uiMapping.toolsCbFunc,true,uiMapping.toolsCbFuncParam);
 //				toolsCbFunc(true, toolsCbFuncParam);
 			}
 			svgMap.refreshScreen();
@@ -1407,18 +1449,11 @@ function updatePointListForm(pep, points){
 }
 
 // POLYGONオブジェクトの"編集"ツール 新規追加、削除、変更などが可能　ただし一個しか設置できない
-var toolsCbFunc;
-var toolsCbFuncParam
+// var toolsCbFunc; // uiMapping.toolsCbFuncに収納変更
+// var toolsCbFuncParam; // 同上
 function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
-	if ( cbFunc ){
-		toolsCbFunc = cbFunc;
-		toolsCbFuncParam = cbFuncParam;
-	} else {
-		toolsCbFunc = null;
-		toolsCbFuncParam = null;
-	}
 	
-	console.log("initPolygonTools : isPolylineMode:",isPolylineMode,  "  toolsCbFunc:",toolsCbFunc);
+	console.log("initPolygonTools : isPolylineMode:",isPolylineMode,  "  uiMapping.toolsCbFunc:",uiMapping.toolsCbFunc);
 	
 	removeChildren( targetDiv );
 	
@@ -1488,6 +1523,13 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 		insertPointsIndex : -1
 
 	};
+	if ( cbFunc ){
+		uiMapping.toolsCbFunc = cbFunc;
+		uiMapping.toolsCbFuncParam = cbFuncParam;
+	} else {
+		uiMapping.toolsCbFunc = null;
+		uiMapping.toolsCbFuncParam = null;
+	}
 //	polyCanvas.initCanvas();
 	setPolyUiEvents(uiDoc, poiDocId);
 	setMetaUiEvents(uiDoc, poiDocId);
