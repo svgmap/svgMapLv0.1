@@ -1,0 +1,2918 @@
+// 
+// Description:
+// SVGMap GIS Module for >rev13 of SVGMap Lv0.1 framework
+// Programmed by Satoru Takagi
+// 
+//  Programmed by Satoru Takagi
+//  
+//  Copyright (C) 2016-2016 by Satoru Takagi @ KDDI CORPORATION
+//  
+// License: (GPL v3)
+//  This program is free software: you can redistribute it and/or modify
+//  it under the terms of the GNU General Public License version 3 as
+//  published by the Free Software Foundation.
+//  
+//  This program is distributed in the hope that it will be useful,
+//  but WITHOUT ANY WARRANTY; without even the implied warranty of
+//  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//  GNU General Public License for more details.
+//  
+//  You should have received a copy of the GNU General Public License
+//  along with this program.  If not, see <http://www.gnu.org/licenses/>.
+// 
+// History:
+// 2016.12.02 コアにGeoJSONパース機能実装、それを用いたPolygon内のPoitns包含チェック初期実装
+// 2016.12.07 JSTS implementation
+// 2016.12.16 Totally Asynchronus Proecssing　ほぼ満足する機能が入ったと思われる。＞初期リリースとする
+// 2017.06.12 Geojsonの並びが逆(基本フレームワークも)だったのを修正のうえ、こちらも修正(getSVGcoord)、drawGeoJson(geoJson->SVG変換の上描画)の完成度を高め公開関数へ
+// 2018.01.04 Geojsonファイル内にプロパティが含まれている場合、埋め込むよう実装
+// 2018/06/21 Rev2 : ラスターGIS＝ビットイメージのimageをcanvasに読み込み、bitImage(画像処理)を用いたGIS機能～～　Web上で公開されている主題情報の多くがラスターなので・・
+// 2018/08/01 Add pointOnly option / get(Included/Excluded)Points
+// 2018.12.26 KMLを直接レンダリングする機能を実装
+// 2019/05/17 getInRangePoints(): Coverageがtransform付きのものをサポート
+// 2019/12/26 効率向上のためのオプション追加(getIncludedPointsのpreCapturedGeometry)
+// 2020/01/14 buildDifference()
+// 2020/01/30 ラスターGISの高速化に着手：getImagePixData 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
+// 2020/02/14 ラスターGISの高速化・大分完成 残るはcrossorigin anonymousをどうするか
+// 2020/02/17 ラスターGISの高速化。多分これで完成しました (naturalWidth/Height, crossorigin拡張 on BaseFW)
+// 2020/07/08 ラスターGIS: Polyline実装
+// 2020/07/10 ラスターGIS: Plygon実装  - これでRev3の重要機能完成
+// 2020/07/15 ラスターGIS(Polygon)結果のビットイメージ可視化用関数　＆　コード整理
+// 2020/07/27 Rev3 : ラスターGIS: 非対角成分あるラスターカバレッジでもPolyline,Polygonサポート
+//
+//
+// ISSUES:
+//
+// --- これらはFixedとなったかな？
+// !!!!! On going ISSUE 使い続けているとUncaught TypeError: Cannot read property 'points' of undefined at getInRangePointsS2 (SVGMapLv0.1_GIS_r2.js:110x)？？ R15のテストで、避難所と土石流危険渓流とRasterGISで、連続検索実行でテスト可能になってる
+// 
+// 今行っているところ、L1361 同一||CORS設定ドメインからの取得
+// setImageProxyで設定したドメインのURLもしくは・・・って感じが良いと思う
+// --- 
+
+// 
+// ACTIONS:
+// ・ポリゴン包含、ポリラインクロス等の基本関数(jtsのような) done
+// ・ポイント（マウスポインタ―）と、ポイント、ポリライン、ポリゴンヒットテスト（既存のクリッカブルオブジェクト同等動作）：　ただし、ポイント、ポリラインはバッファが必要なので後回しか？ done
+// ・ラインと、ライン、ポリゴンのヒットテスト done
+// ・ポリゴンと、ポイント、ライン、ポリゴンのヒットテスト done
+// ・カラーピッカーになりえるもの done
+// ・ベクタプロパティの利用 done
+// ・オートパイロット機能のフレームワーク化(vectorGisLayer/rasterGisLayerの実装の改善と取り込み)
+// ・svgMap.setProxyURLFactoryを個々で統合的に設定するようにした方が良いと思う
+//
+// ・入力：
+// 　・マウスポインタ―ベースの対話的に生成されたオブジェクトと指定したレイヤー
+// 　　⇒　マウスポインタ―によるポイント、ライン、ポリゴンの生成ＵＩ
+// 　　⇒　結果的にインタラクティブなオーサリングシステム
+// 　・指定したレイヤー１と、指定したレイヤー２（および　指定したSVG文書１とSVG文書２）
+// ・出力：対象レイヤーのスタイル変更、新規レイヤー生成
+
+( function ( window , undefined ) { 
+var document = window.document;
+var navigator = window.navigator;
+var location = window.location;
+
+
+var svgMapGIStool = ( function(){ 
+
+//	console.log("Hello this is svgMapGIStool");
+	
+	if ( jsts ){ // using jsts (JTS javascript edition) https://bjornharrtell.github.io/jsts/
+//		console.log("This apps has jsts (JavaScript Topology Suites)");
+		this.featureReader = new jsts.io.GeoJSONReader();
+		this.featureWriter = new jsts.io.GeoJSONWriter();
+		this.getFeature = function( geojs ){
+			if ( geojs.type=="MultiLineString"){
+				for ( var i = geojs.coordinates.length-1 ; i >= 0 ; i-- ){
+					if ( geojs.coordinates[i].length <2 ){
+						geojs.coordinates.splice(i,1);
+					}
+				}
+			} else if ( geojs.type=="Polygon"){
+				for ( var i = geojs.coordinates.length-1 ; i >= 0 ; i-- ){
+					if ( geojs.coordinates[i].length <3 ){
+						geojs.coordinates.splice(i,1);
+					}
+				}
+			}
+			return (featureReader.read(geojs));
+		}
+		this.getGeoJson = function( feature ){
+			return (featureWriter.write(feature));
+		}
+	}
+	
+//	console.log(featureReader, featureWriter, getFeature, getGeoJson);
+	
+	// http://stackoverflow.com/questions/22521982/js-check-if-point-inside-a-polygon
+	function inside(point, vs) {
+	    // ray-casting algorithm based on
+	    // http://www.ecse.rpi.edu/Homepages/wrf/Research/Short_Notes/pnpoly.html
+
+	    var x = point[0], y = point[1];
+
+	    var inside = false;
+	    for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+	        var xi = vs[i][0], yi = vs[i][1];
+	        var xj = vs[j][0], yj = vs[j][1];
+
+	        var intersect = ((yi > y) != (yj > y))
+	            && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+	        if (intersect) inside = !inside;
+	    }
+		
+	    return inside;
+	};
+	
+	// サブパス(ドーナツ)がある場合がある"ポリゴン"に対する内包判定
+	function insidePolygon( point , polygon ){
+		var ans = inside ( point , polygon[0] );
+		
+		if ( ans && polygon.length > 1 ){
+			for ( var i = 1 ; i < polygon.length ; i++ ){
+				if ( inside( point , polygon[i] ) ){
+					ans = false;
+					break;
+				}
+			}
+		}
+		
+//		console.log( ans );
+		return ( ans );
+	}
+	
+	
+	//http://kone.vis.ne.jp/diary/diaryb09.html
+	
+	
+	// 線分abと、線分cdが交錯しているかどうかの判定。
+	// http://qiita.com/ykob/items/ab7f30c43a0ed52d16f2
+	function isIentersected(ax, ay, bx, by, cx, cy, dx, dy) {
+		var ta = (cx - dx) * (ay - cy) + (cy - dy) * (cx - ax);
+		var tb = (cx - dx) * (by - cy) + (cy - dy) * (cx - bx);
+		var tc = (ax - bx) * (cy - ay) + (ay - by) * (ax - cx);
+		var td = (ax - bx) * (dy - ay) + (ay - by) * (ax - dx);
+		return tc * td < 0 && ta * tb < 0;
+	};
+	
+	// https://github.com/bjornharrtell/jsts
+	// http://stackoverflow.com/questions/27683931/mongodb-geospatial-intersection-of-two-polygon
+	// http://qiita.com/amay077/items/7a99df1c0da881cc47f6
+	// https://github.com/mapbox/lineclip
+	// https://github.com/mapbox/concaveman
+	// https://github.com/mapbox/geojson-extent
+	// https://github.com/mapbox/linematch
+	// clip https://github.com/mapbox/lineclip
+	
+	// Javascript Clipper
+	// https://sourceforge.net/projects/jsclipper/
+
+	// weiler-athertonアルゴリズム 
+	// https://github.com/morganherlocker/weiler-atherton
+	
+	
+	// 画面中の、指定したレイヤのポリゴンに包含されている指定したレイヤのPOIを検索する
+	// poiID : POIのレイヤID（その子供の文書も対象）、polyID: ポリゴンのレイヤID
+	function getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , inverse , pointOnly ,getIncludedPolygonAttr , preCapturedGeometry){
+	// 2019.12.26 : preCapturedGeometry あらかじめ別に取得済みのgeom.を流用したいときに指定 : 今後同様オプションをcaptureGISgeometries実行しているロジックに入れていくだろう
+		var superParam = {
+			pointsDocTreeID: poiID,
+			polygonsDocTreeID: polyID,
+			cbFunc: cbFunc,
+			param: param,
+			progrssCallback: progrssCallback,
+			inverse: inverse,
+			pointOnly : pointOnly,
+			getIncludedPolygonAttr : getIncludedPolygonAttr
+		}
+		var pointsDocTreeID = poiID;
+		var polygonsDocTreeID = polyID;
+		console.log( "called getIncludedPoints:", pointsDocTreeID, polygonsDocTreeID);
+//		svgMap.captureGISgeometries(getIncludedPointsS2 , superParam );
+		if ( ! preCapturedGeometry ){
+			svgMap.captureGISgeometries(getIncludedPointsS2a , superParam ); // まずはGIS Geomを取得し、それから包含判定を行う(非同期)
+		} else {
+			console.log("getIncludedPoints: USE preCapturedGeometry");
+			getIncludedPointsS2a(preCapturedGeometry,superParam); // あらかじめキャプチャしてあるgeometryがある場合は飛ばす
+		}
+	}
+	
+	function getExcludedPoints(poiID, polyID, cbFunc, param , progrssCallback , pointOnly ){
+		getIncludedPoints(poiID, polyID, cbFunc, param , progrssCallback , true , pointOnly );
+	}
+	
+	
+	// PolygonやMultiLineStringの中心(実際はbboxの中心)をPointと見做すための処理
+	function getCenterPoint( coordinates ){
+		var minX=60000,minY=60000,maxX=-60000,maxY=-60000;
+		for ( var i = 0 ; i < coordinates.length ; i++ ){
+			for ( var j = 0 ; j < coordinates[i].length ; j++ ){
+				if (coordinates[i][j][0] < minX ){
+					minX = coordinates[i][j][0];
+				}
+				if ( coordinates[i][j][0] > maxX ){
+					maxX = coordinates[i][j][0];
+				}
+				if (coordinates[i][j][1] < minY ){
+					minY = coordinates[i][j][1];
+				}
+				if ( coordinates[i][j][1] > maxY ){
+					maxY = coordinates[i][j][1];
+				}
+			}
+		}
+		var cx = (minX + maxX )/ 2;
+		var cy = (minY + maxY )/ 2;
+		return [cx,cy];
+	}
+	
+	function getIncludedPointsS2( geom , superParam ){
+		
+		// extract from superParams
+		var pointsDocTreeID = superParam.pointsDocTreeID;
+		var polygonsDocTreeID = superParam.polygonsDocTreeID;
+		var cbFunc = superParam.cbFunc;
+		var param = superParam.param;
+		var progrssCallback = superParam.progrssCallback;
+		var inverse = superParam.inverse;
+		
+		console.log("Searched geom:",geom);
+		if ( inverse && inverse == true ){
+		} else {
+			inverse = false;
+		}
+		
+		var cdi = getChildDocsId(pointsDocTreeID,polygonsDocTreeID)
+		var pointsDocTreeIDs = cdi.childrenId1;
+		var polygonsDocTreeIDs = cdi.childrenId2;
+		var totalPoiCount = 0;
+		var ansPois = new Array();
+		for ( var poiDocC = 0 ; poiDocC < pointsDocTreeIDs.length ; poiDocC++ ){
+		
+	//		console.log("searchedGeom:",geom, "   inverse?:",inverse);
+			if ( geom[pointsDocTreeIDs[poiDocC]]  ){
+				var inclPi = [];
+				
+				var poiDoc = geom[pointsDocTreeIDs[poiDocC]];
+				
+				console.log("poi:",poiDoc);
+				
+				totalPoiCount +=  poiDoc.length;
+				for ( var pic = 0 ; pic < poiDoc.length ; pic++ ){
+					var point;
+					if ( poiDoc[pic].type === "Point" ){
+						point = poiDoc[pic].coordinates;
+					} else if (poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString"){
+						console.log(poiDoc[pic]);
+						point = getCenterPoint(poiDoc[pic].coordinates);
+					} else {
+						continue;
+					}
+						
+					loop: for ( var polDocC = 0 ; polDocC < polygonsDocTreeIDs.length ; polDocC++ ){
+						
+						if ( geom[polygonsDocTreeIDs[polDocC]] ){
+							var polDoc = geom[polygonsDocTreeIDs[polDocC]];
+							
+							console.log("pol:",polDoc);
+							
+							for ( var plc = 0 ; plc < polDoc.length ; plc ++ ){
+								if ( polDoc[plc].type != "Polygon" ){
+									continue;
+								}
+								polygon = polDoc[plc].coordinates;
+								if ( !inverse ){ // 内包判定
+									if ( insidePolygon( point , polygon ) ){
+										// 一個でも内包してたらそれで内包判断完了
+										ansPois.push(poiDoc[pic]);
+										break loop;
+									}
+								} else { // 非内包判定
+									if ( insidePolygon( point , polygon ) ){
+										break loop; // 一個でも内包してたらそれでアウト
+									} else if ( plc == polDoc.length - 1 ){
+										// 最後まで検索できていて内包してなければOK
+										ansPois.push(poiDoc[pic]);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		cbFunc(ansPois , totalPoiCount , param ); // 検索したPOIを全部Arrayとして返す。一個パラメータを渡せる
+	}
+	
+	// 非同期での包含判定のための前処理　包含判定に必要な全組み合わせを構築する (指定したレイヤのPOI全部 × 指定したレイヤのポリゴン全部 の組み合わせをArrayに投入)
+	// 重くなることがあるので、非同期処理版を作る・・・
+	function getIncludedPointsS2a( geom , superParam ){
+		console.log("getIncludedPointsS2a called : ",geom);
+//		var cdi = getChildDocsId(superParam.pointsDocTreeID, superParam.polygonsDocTreeID)
+		var pointsDocTreeIDs = getChildDocsId(superParam.pointsDocTreeID);
+		superParam.pointsDocTreeIDs = pointsDocTreeIDs;
+		var polygonsDocTreeIDs = getChildDocsId(superParam.polygonsDocTreeID);
+		superParam.polygonsDocTreeIDs = polygonsDocTreeIDs;
+		var totalPoiCount = 0;
+		var ansPois = new Array();
+		
+		var compArray = [];
+		for ( var poiDocC = 0 ; poiDocC < pointsDocTreeIDs.length ; poiDocC++ ){
+			if ( geom[pointsDocTreeIDs[poiDocC]]  ){
+				var poiDoc = geom[pointsDocTreeIDs[poiDocC]];
+				totalPoiCount +=  poiDoc.length;
+				for ( var pic = 0 ; pic < poiDoc.length ; pic++ ){
+					for ( polDocC = 0 ; polDocC < polygonsDocTreeIDs.length ; polDocC++ ){ // Loop:seki point
+						if ( geom[polygonsDocTreeIDs[polDocC]] ){
+							var polDoc = geom[polygonsDocTreeIDs[polDocC]];
+//							console.log("polDoc:",polDoc);
+							for ( plc = 0 ; plc < polDoc.length ; plc ++ ){
+								compArray.push([poiDocC,pic,polDocC,plc]);
+							}
+						}
+					}
+				}
+			}
+		}
+		superParam.totalPoiCount = totalPoiCount;
+		
+		// console.log("call getIncludedPointsS3 :" , compArray);
+		getIncludedPointsS3( geom, superParam , compArray); // 組み合わせが構築出来たら実際の包含判定に進む(非同期)
+	}
+	
+	// 非同期処理での包含判定演算の実体
+	// すべての組み合わせに対して実施
+	function getIncludedPointsS3( geom , superParam , compArray , counter , startTime , ansPois ){
+		
+		
+		if ( ! counter ){
+			startTime = new Date().getTime();
+			ansPois = [];
+			counter = 0;
+		}
+		while ( counter < compArray.length && halt == false){
+			
+//			console.log("counter:",counter);
+			//
+			var poiDocC = compArray[counter][0];
+			
+			var poiDoc = geom[superParam.pointsDocTreeIDs[poiDocC]];
+			
+			
+			//
+			var pic = compArray[counter][1];
+			
+			var point;
+			if ( poiDoc[pic].type === "Point" ){
+				point = poiDoc[pic].coordinates;
+			} else if (!superParam.pointOnly && ( poiDoc[pic].type === "Polygon" || poiDoc[pic].type === "MultiLineString" ) ){
+//				console.log(poiDoc[pic]);
+				point = getCenterPoint(poiDoc[pic].coordinates);
+			} else {
+				counter = skipPOIcounter(compArray, counter) ;  // picを一個増加させる・スキップさせる処理
+				// これはまずいのではないか？　結局nullのpointで、下を回してしまうような気がする。
+				// ので以下の処理を入れてみたが・・・バグ出るかも 2016.12.28
+				++ counter;
+				continue;
+			}
+			
+			//
+			var polDocC = compArray[counter][2];
+			
+			var polDoc = geom[superParam.polygonsDocTreeIDs[polDocC]];
+			
+			//
+			var plc = compArray[counter][3];
+			
+			if ( polDoc[plc].type != "Polygon" ){
+				// 2016/12/28 debug 結構残念なバグ・・
+				if ( superParam.inverse && plc == polDoc.length - 1 ){
+					ansPois.push(poiDoc[pic]);
+				}
+				++ counter;
+				continue;
+			}
+			polygon = polDoc[plc].coordinates;
+			if ( !superParam.inverse ){ // 内包判定
+				if ( insidePolygon( point , polygon ) ){
+					// 一個でも内包してたらそれで内包判断完了 ⇒こうするかどうかは今後選択にすべき(複数のポリゴンに内包されてて、そのポリゴンはどんな属性なのかを知りたいケースがある)2019/12/19
+					if ( superParam.getIncludedPolygonAttr ){ // 2019/12/19
+//						console.log("polygon:",polDoc[plc],"  point:",poiDoc[pic]);
+						poiDoc[pic].includedPolygonAttr = polDoc[plc].src.getAttribute("content");
+					}
+					ansPois.push(poiDoc[pic]);
+//					console.log("PUSH");
+					counter = skipPOIcounter(compArray, counter);
+				}
+			} else { // 非内包判定
+				if ( insidePolygon( point , polygon ) ){
+					counter = skipPOIcounter(compArray, counter); // 一個でも内包してたらそれでアウト picを一個増加させる
+				} else if ( plc == polDoc.length - 1 ){
+					// 最後まで検索できていて内包してなければOK
+					console.log("PUSH");
+					ansPois.push(poiDoc[pic]);
+				}
+			}
+			//
+			
+//			console.log("step:",counter,"  comp end");
+			
+			var currentTime =  new Date().getTime();
+			++ counter;
+			if ( currentTime - startTime > 500 ){ // 0.5秒以上たったらちょっと(20ms)休憩
+				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
+				if ( superParam.progrssCallback ){
+					superParam.progrssCallback( Math.ceil(1000 * counter /  compArray.length) / 10 );
+				}
+				startTime = new Date().getTime();
+				setTimeout(getIncludedPointsS3, 20 , geom, superParam, compArray , counter , startTime , ansPois);
+				break;
+			}
+		}
+		halt = false;
+		if ( counter == compArray.length ) {
+			if ( superParam.progrssCallback ){
+				superParam.progrssCallback( 100 );
+			}
+			console.log("Completed!",ansPois );
+			
+			superParam.cbFunc(ansPois , superParam.totalPoiCount , superParam.param );
+			
+		}
+	}
+	
+	// getIncludedPointsS3における、そのPOIに対する評価のためのcompArrayカウンター分をスキップするカウンター値生成
+	function skipPOIcounter(compArray, counter){
+//		console.log("called:skipPOIcounter:",counter);
+		var ansCounter = counter;
+		var currentPoiC = compArray[counter][1]; // [1]がPOIの値？じゃないよ・・・
+		var currentPoiDC = compArray[counter][0]; // [0]でPOIのドキュメントの値も評価しないとダメ DEBUG 2019/12/20
+		var poiC = currentPoiC;
+		var poiDC = currentPoiDC;
+		while ( (poiC == currentPoiC && poiDC == currentPoiDC ) ){
+			++ansCounter;
+			if ( ansCounter == compArray.length ){
+//				console.log("BREAK.....");
+				break;
+			}
+			poiC = compArray[ansCounter][1];
+			poiDC = compArray[ansCounter][0];
+		}
+		return ( ansCounter -1);
+	}
+	
+	// 下の、buildIntersectionをラップし、"difference" | "union" | "symDifference"　を実行する関数
+	function buildDifference( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "difference"));
+	}
+	/**
+	function buildUnion( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, null, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "union"));
+	}
+	function buildSymDifference( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam){
+		return (buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, null, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, "symDifference"));
+	}
+	**/
+	// sourceLayer1,2のintersectionをtargetLayerに生成する。(getResultAsGeoJsonCallbackがあればそちらにもgeojsonを出力する)
+	//
+	// 2020/1/10 processMode: "intersection" | "difference" | "union" | "symDifference"
+	// 今のところ、intersectionだけ処理が違うので注意
+	
+	function buildIntersection( sourceId1, sourceId2, targetId , strokeColor, strokeWidth, fillColor, progrssCallback, addSourceMetadata, getResultAsGeoJsonCallback,getResultAsGeoJsonCallbackParam, processMode){
+		halt = false;
+		if (!processMode){
+			processMode="intersection";
+		}
+		
+		var svgImages = svgMap.getSvgImages();
+		var svgImage = svgImages[targetId];
+		var resultGroup = svgImage.getElementById("resultGroup");
+		if ( !resultGroup ){
+			resultGroup = svgImage.createElement("g");
+			resultGroup.setAttribute("id","resultGroup");
+			svgImage.documentElement.appendChild(resultGroup);
+		}
+		
+		var params = {
+			sourceId1: sourceId1,
+			sourceId2: sourceId2,
+			targetId: targetId,
+			strokeColor: strokeColor,
+			strokeWidth: strokeWidth,
+			fillColor: fillColor,
+			progrssCallback: progrssCallback,
+			addMetadata: addSourceMetadata, // source1,2のメタデータをintersectionのfeatureに付与する 2020/1/8
+			getResultAsGeoJsonCallback: getResultAsGeoJsonCallback, // 2020/1/8
+			getResultAsGeoJsonCallbackParam: getResultAsGeoJsonCallbackParam,
+			processMode:processMode,
+			resultGroup:resultGroup
+		}
+		
+		if ( progrssCallback ){
+			progrssCallback( 0 );
+		}
+		
+		svgMap.captureGISgeometriesOption(false,true); // 2020/1/8 rectもpolygonとみなす
+		if ( params.processMode == "intersection" ){
+			if ((!params.addMetadata) ){// addMetadataしないintersectionだけこっちで処理する・・・今後整理が必要　TBD
+				svgMap.captureGISgeometries(buildIntersectionS2, params ); 
+//				svgMap.captureGISgeometries(buildIntersectionS2a, params ); // jstsに丸投げするパターン(処理は２倍ほど高速だが・・重くなった時に進捗が取れない) 2020/1/9
+			} else {
+				svgMap.captureGISgeometries(buildIntersectionS2, params ); 
+			}
+		} else if ( params.processMode == "difference" ){
+			svgMap.captureGISgeometries(buildDifferenceS2, params );
+		} else { 
+			// NOP
+		}
+		return ( resultGroup );
+	}
+	
+	function countPoints( sourceLayerIDs , geom ){
+		var points=0;
+		for ( var i = 0 ; i < sourceLayerIDs.length ; i++ ){
+			var geoms1 = geom[sourceLayerIDs[i]];
+///			console.log(geoms1);
+			if ( geoms1 && geoms1.length > 0 ){
+				for ( var k = 0 ; k < geoms1.length ; k++ ){
+					var geom1 = geoms1[k].coordinates;
+					if ( geom1[0].length ){
+						for ( var j = 0 ; j < geom1.length ; j++ ){
+							points += geom1[j].length;
+						}
+					} else {
+						points += geom1.length;
+					}
+				}
+			}
+		}
+		console.log(points);
+		return ( points );
+	}
+	
+	function getChildDocsIdObs( layerId1 , layerId2 ){
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var childrenId1 =[];
+		var childrenId2 =[];
+		
+		for ( var docId in svgImagesProps ){
+			if ( layerId1 === svgImagesProps[docId].rootLayer ){
+				childrenId1.push( docId );
+			} else if ( layerId2 === svgImagesProps[docId].rootLayer ){
+				childrenId2.push( docId );
+			}
+		}
+		
+		return {
+			childrenId1: childrenId1,
+			childrenId2: childrenId2
+		}
+	}
+	
+	function getChildDocsId( TdocId ){
+		// TdocIdがレイヤーIDだった場合はそのレイヤーに属するものをすべて
+		// 単なる文書Idだった場合はその文書と子孫文書すべて
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var childrenId =[];
+		
+		var hasChildren=false;
+		/**
+		for ( var docId in svgImagesProps ){
+			if ( TdocId === svgImagesProps[docId].rootLayer ){
+				childrenId.push( docId );
+				hasChildren = true;
+			}
+		}
+		**/
+		if ( !hasChildren ){
+			childrenId = [TdocId];
+//			console.log( svgImagesProps[TdocId] );
+			digChild( svgImagesProps[TdocId] , childrenId , svgImagesProps );
+		}
+//		console.log("getChildDocsId searchId:",TdocId,"  ans childrenId:",childrenId);
+		return (childrenId);
+	}
+	
+	
+	function digChild( svgImagesProp , ans , svgImagesProps ){
+//		console.log(svgImagesProp);
+		if ( svgImagesProp ){
+			for ( var docId in svgImagesProp.childImages ){
+	//			console.log(docId, svgImagesProps);
+				ans.push(docId);
+				digChild( svgImagesProps[docId], ans , svgImagesProps);
+			}
+		}
+	}
+	
+	function buildDifferenceS2( geom, params , loop1Count , loop2Count, fa1, fa2, ansFeatures , ansFeature ,ansFeatureMetadata ){ // 2020/1/10 非同期処理のために、かなりトリッキーですよ
+		var startTime =  new Date().getTime();
+//		console.log( "called buildDifferenceS2:",geom, params );
+		var j = 0;
+		if ( !ansFeatures ){
+			loop1Count = 0;
+			loop2Count = 0;
+			var svgImages = svgMap.getSvgImages();
+			var svgImagesProps = svgMap.getSvgImagesProps();
+			var src1IDs = getChildDocsId( params.sourceId1);
+			var src2IDs = getChildDocsId( params.sourceId2);
+			
+			// Array.prototype.push.apply(array1, array2);
+			// var array = array1.concat(array2);
+			fa1=[];
+			for ( var i = 0 ; i < src1IDs.length ; i++ ){
+				if ( geom[src1IDs[i]] ){
+					fa1 = fa1.concat(geom[src1IDs[i]]);
+				}
+			}
+			fa2=[];
+			for ( var i = 0 ; i < src2IDs.length ; i++ ){
+				if ( geom[src2IDs[i]] ){
+					fa2 = fa2.concat(geom[src2IDs[i]]);
+				}
+			}
+			ansFeatures=[];
+		} else {
+			j = loop2Count;
+		}
+//		console.log("buffered srcgem1:",fa1,"  srcgem2:",fa2);
+		
+		var pm =new jsts.geom.PrecisionModel(1000000);
+		
+		loop1: for (var i = loop1Count ; i < fa1.length ; i++){
+			if ( j == 0 ){
+				console.log("Seed feartureA:",fa1[i]);
+				var featureA = getFeature(fa1[i]);
+				try{
+					featureA = jsts.simplify.DouglasPeuckerSimplifier.simplify(featureA,0.00001);
+					featureA = jsts.precision.GeometryPrecisionReducer.reduce(featureA,pm);
+				} catch (e){
+					continue;
+				}
+				ansFeature = featureA;
+				if ( params.addMetadata ){
+					ansFeatureMetadata = fa1[i].src.getAttribute("content");
+				}
+			}
+			for ( j = loop2Count ; j < fa2.length ; j++){
+				var featureB = getFeature(fa2[j]);
+				try{
+					featureB = jsts.simplify.DouglasPeuckerSimplifier.simplify(featureB,0.00001);
+					featureB = jsts.precision.GeometryPrecisionReducer.reduce(featureB,pm);
+					var difFeature = ansFeature.difference(featureB);
+					if ( difFeature ){
+						ansFeature = jsts.simplify.DouglasPeuckerSimplifier.simplify(difFeature,0.00001);
+						ansFeature = jsts.precision.GeometryPrecisionReducer.reduce(ansFeature,pm);
+					}
+				}catch(e){
+					continue;
+				}
+				
+				// 時間がかかり過ぎたら一旦停止して再開させる再起呼び出し・(ここがトリッキーなポイント)
+				var difTime =  new Date().getTime() - startTime;
+				if ( difTime > 300){
+					if ( params.progrssCallback ){
+						params.progrssCallback(  Math.ceil((i*fa2.length + j) / (fa2.length * fa1.length) * 1000)/10 );
+					}
+					var nextCount2 = j+1;
+					var nextCount1 = i;
+					if ( nextCount2 == fa2.length ){
+						// たまたま内側ループ完了タイミングだった
+						if ( ansFeature ){
+							ansFeatures.push(getGeoJson(ansFeature));
+//							console.log(ansFeature);
+						}
+						nextCount1 = i+1;
+						nextCount2 = 0;
+						if ( nextCount1 == fa1.length ){
+							// たまたま・・完了のタイミングだった
+							break loop1;
+						}
+					}
+					if ( halt == true ){
+						break loop1;
+					}
+//					wait and call buildDifferenceS2 and exit
+					setTimeout(buildDifferenceS2, 20 , geom, params , nextCount1 , nextCount2, fa1, fa2, ansFeatures , ansFeature, ansFeatureMetadata);
+					return;
+				}
+				
+			}
+			j = 0;
+			loop2Count = 0;
+			if ( ansFeature ){
+				var ansGeoJs=getGeoJson(ansFeature);
+				if ( geomHasCoordinates(ansGeoJs)){
+					if ( params.addMetadata ){
+//						console.log("Add metada",ansFeatureMetadata);
+						ansGeoJs.metadata=ansFeatureMetadata;
+					}
+					ansFeatures.push(ansGeoJs);
+//					console.log(ansFeature);
+				}
+			}
+		}
+		
+		halt = false;
+		
+		if ( params.progrssCallback ){
+			params.progrssCallback(  100 );
+		}
+		var geoJsonIntersections = {};
+		geoJsonIntersections.type="GeometryCollection";
+		geoJsonIntersections.geometries = ansFeatures;
+		console.log("ans geojson:",geoJsonIntersections);
+		drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+		svgMap.refreshScreen();
+		
+	}
+	
+	
+	function buildIntersectionS2a( geom, params ){
+		// 2020/1/9 jstsの性能に頼って、全geomをcollectionにしたうえで放り込んで一気に処理してみる
+		// やはり大エリアではリソースを使い切ってしまうし、進捗表示もできないので厳しいかも・・
+		// またメタデータ同一の物（というより、同一のオブジェクトの部分とみなせるもの）だけをcollectionに投入する必要がある（が、今はそれを行ってない。全部入れている）
+		// simplifyは(この方法でなくS2でも)行うべきと思われるが・・
+		console.log( "called buildIntersectionS2a:",geom, params );
+		
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var src1IDs = getChildDocsId( params.sourceId1);
+		var src2IDs = getChildDocsId( params.sourceId2);
+		
+		// Array.prototype.push.apply(array1, array2);
+		// var array = array1.concat(array2);
+		var fa1=[];
+		for ( var i = 0 ; i < src1IDs.length ; i++ ){
+			if ( geom[src1IDs[i]] ){
+				fa1 = fa1.concat(geom[src1IDs[i]]);
+			}
+		}
+		var fa2=[];
+		for ( var i = 0 ; i < src2IDs.length ; i++ ){
+			if ( geom[src2IDs[i]] ){
+				fa2 = fa2.concat(geom[src2IDs[i]]);
+			}
+		}
+		console.log("buffered srcgem1:",fa1,"  srcgem2:",fa2);
+		
+		var jstsFeature1 = getFeature(buildGeoJsonGeometryCollectionFromGeometryArray(fa1));
+		var jstsFeature2 = getFeature(buildGeoJsonGeometryCollectionFromGeometryArray(fa2));
+		var gpr = jsts.precision.GeometryPrecisionReducer;
+//		jstsFeature1 = jstsFeature1.buffer(0);
+//		jstsFeature2 = jstsFeature2.buffer(0);
+		jstsFeature1=jsts.simplify.DouglasPeuckerSimplifier.simplify(jstsFeature1,0.00001);
+		jstsFeature2=jsts.simplify.DouglasPeuckerSimplifier.simplify(jstsFeature2,0.00001);
+		console.log("buffered jstsFeature1:",jstsFeature1,"  jstsFeature2:",jstsFeature2);
+		jstsFeature1 = gpr.reduce(jstsFeature1,new jsts.geom.PrecisionModel(1000000));
+		jstsFeature2 = gpr.reduce(jstsFeature2,new jsts.geom.PrecisionModel(1000000));
+		console.log("GeometryPrecisionReducer:",gpr);
+		var isf;
+		switch (params.processMode){
+		case "intersection":
+			isf = jstsFeature1.intersection(jstsFeature2);
+//			isf = jstsFeature1.intersection(jstsFeature2);
+			break;
+		case "difference":
+			isf = jstsFeature1.difference(jstsFeature2);
+			break;
+		case "union":
+			isf = jstsFeature1.union(jstsFeature2);
+			break;
+		case "symDifference":
+			isf = jstsFeature1.symDifference(jstsFeature2);
+			break;
+		default: // その他の文字列の場合は、jstsのintersectionを使う・・(一応S2のintersectionと使い分けができるけどね・・・)
+			isf = jstsFeature1.intersection(jstsFeature2);
+			break;
+		}
+			
+		var isg=getGeoJson(isf);
+//		var isg= getGeoJson(jstsFeature1);
+		console.log("intersection:",isg);
+		
+		if ( params.getResultAsGeoJsonCallback ){ // 2020/1/8
+			if ( params.getResultAsGeoJsonCallbackParam ){
+				params.getResultAsGeoJsonCallback(isg, getResultAsGeoJsonCallbackParam);
+			} else {
+				params.getResultAsGeoJsonCallback(isg );
+			}
+		}
+		if ( params.strokeColor || params.strokeWidth || params.fillColor){
+			drawGeoJson(isg, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+			svgMap.refreshScreen();
+		}
+	}
+	
+	function buildGeoJsonFeatureCollectionFromGeometryArray( geometryArray ){ // not used
+		var fc = {};
+		fc.type="FeatureCollection";
+		fc.features=[];
+		
+		for ( var i = 0 ; i < geometryArray.length ; i++ ){
+			var feature = {};
+			feature.type="Feature";
+			feature.geometry=geometryArray[i];
+			fc.features.push(feature);
+		}
+		return ( fc );
+	}
+	
+	function buildGeoJsonGeometryCollectionFromGeometryArray( geometryArray ){
+		
+		var gc = {};
+		gc.type="GeometryCollection";
+		gc.geometries=geometryArray;
+		
+		return ( gc );
+	}
+	
+	function buildIntersectionS2( geom, params ){
+		console.log( "called buildIntersectionS2:",geom, params );
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+//		var source1IDs = [], source2IDs = [];
+		// sourceId1,2がルートレイヤーである子レイヤーをsource1,2IDsに蓄積する
+		
+//		var childrenID = getChildDocsId( params.sourceId1 , params.sourceId2 );
+		var source1IDs = getChildDocsId( params.sourceId1);
+		var source2IDs = getChildDocsId( params.sourceId2);
+		
+		/**
+		for ( var docId in geom ){
+//			console.log("layerId:",docId , " rootLayer:",svgImagesProps[docId].rootLayer);
+			if ( params.sourceId1 === svgImagesProps[docId].rootLayer ){
+				source1IDs.push(docId);
+			} else if ( params.sourceId2 === svgImagesProps[docId].rootLayer ){
+				source2IDs.push(docId);
+			}
+		}
+		**/
+		
+		console.log("source1IDs:",source1IDs,"\nsource2IDs:",source2IDs);
+		
+		var targetDoc = svgImages[params.targetId];
+		
+		var intersections=[];
+		
+		var src1IDs, src2IDs;
+		
+		var source1Points = countPoints(source1IDs , geom);
+		var source2Points = countPoints(source2IDs , geom);
+		
+		if ( source1Points < source2Points ){
+			src1IDs = source1IDs;
+			src2IDs = source2IDs;
+		} else {
+			src1IDs = source2IDs;
+			src2IDs = source1IDs;
+		}
+		
+		console.log("src1IDs:",src1IDs,"\src2IDs:",src2IDs);
+		
+		
+		var src1Features=[];
+		for ( var i = 0 ; i < src1IDs.length ; i++ ){
+			var src1docID = src1IDs[i];
+			var geoms1 = geom[src1docID];
+//			console.log(geoms1);
+			if ( geoms1 && geoms1.length>0 ){
+				for ( var k = 0 ; k < geoms1.length ; k++ ){
+					var geom1 = geoms1[k];
+					if ( geom1 ){
+						var feature1 = getFeature(geom1);
+						feature1=jsts.simplify.DouglasPeuckerSimplifier.simplify(feature1,0.00001);
+						src1Features.push({feature:feature1,docId:src1docID,geomIndex:k}); // mod 2020/1/8 for addMetadata
+					}
+				}
+			}
+		}
+		console.log("src1Features:",src1Features);
+		
+		
+		var compArray = [];
+		for ( var j = 0 ; j < src2IDs.length ; j++ ){
+			var geoms2 = geom[src2IDs[j]];
+			if ( geoms2 && geoms2.length>0 ){
+				for ( var l = 0 ; l < geoms2.length ; l++ ){
+					var geom2 = geoms2[l];
+					if ( geom2 ){
+						for ( var m = 0 ; m < src1Features.length ; m++ ){
+							compArray.push([j,l,m]);
+						}
+					}
+				}
+			}
+		}
+//		console.log(compArray);
+		
+		buildIntersectionS3(src2IDs,src1Features, compArray,geom, params);
+		
+	}
+	
+	var halt = false;
+	function haltComputing(){
+		console.log("HALT...");
+		halt = true;
+	}
+	
+	function geomHasCoordinates(geom){ // 2020/1/28 polygonでからのものが入ってしまうのを修正し関数化
+		var hasCrds = false;
+		if ( geom.coordinates.length > 0 ){
+			hasCrds = true;
+			if ( geom.type=="Polygon" ){
+				var polCrds = 0;
+				for ( var i = 0 ; i < geom.coordinates.length ; i++){
+					polCrds += geom.coordinates[i].length;
+				}
+				if ( polCrds == 0 ){
+					hasCrds = false;
+				}
+			}
+		}
+		return ( hasCrds);
+	}
+	
+	// intersectionが重すぎる処理なので・・・
+	function buildIntersectionS3(src2IDs,src1Features, compArray,geom, params, counter , startTime , feature2, intersections){
+//		console.log("called buildIntersectionS3:",counter);
+		// 再帰処理用内部変数の初期化
+		if ( ! counter ){
+			startTime = new Date().getTime();
+			intersections = [];
+			counter = 0;
+		}
+		while ( counter < compArray.length && halt == false){
+			var j = compArray[counter][0]; // src2IDs[j]が src2のdocID
+			var l = compArray[counter][1]; // geomIndexが、src2のgeomIndex
+			var m = compArray[counter][2]; // src1Featuresのindex
+			
+			var geoms2 = geom[src2IDs[j]];
+			if ( m == 0 ){
+				var geom2 = geoms2[l];
+				feature2 = getFeature(geom2);
+				feature2=jsts.simplify.DouglasPeuckerSimplifier.simplify(feature2,0.00001);
+			}
+			var featureA = src1Features[m].feature;
+			try{
+				var isf = featureA.intersection(feature2);
+				if ( isf ){
+					var isGeom = getGeoJson(isf);
+					if ( geomHasCoordinates(isGeom) ){
+						if ( params.addMetadata ){ // 2020/1/8
+							var docIdA = src1Features[m].docId;
+							var geomIndexA = src1Features[m].geomIndex;
+							var meta1 = (geom[docIdA])[geomIndexA].src.getAttribute("content"); // 重ければ一括前処理で効率化できる
+							var meta2 = geoms2[l].src.getAttribute("content"); // 同上
+							isGeom.metadata=meta1+","+meta2;
+						}
+						intersections.push(isGeom);
+					}
+				}
+			}catch (e){
+				console.log(e);
+			}
+			var currentTime =  new Date().getTime();
+			++ counter;
+			if ( currentTime - startTime > 500 ){ // 0.3秒以上たったらちょっと(30ms)休憩
+//				console.log( "call laze compu",counter, compArray.length , Math.ceil(counter /  compArray.length));
+				if ( params.progrssCallback ){
+					params.progrssCallback( Math.ceil(1000 * counter /  compArray.length) / 10 );
+				}
+				startTime = new Date().getTime();
+				setTimeout(buildIntersectionS3, 30 , src2IDs,src1Features, compArray,geom, params, counter , startTime , feature2, intersections);
+				break;
+			}
+		}
+		halt = false;
+		if ( counter == compArray.length ) {
+			if ( params.progrssCallback ){
+				params.progrssCallback( 100 );
+			}
+			var geoJsonIntersections = {};
+			geoJsonIntersections.type="GeometryCollection";
+			geoJsonIntersections.geometries = intersections;
+			console.log("svgmapGIS:geoJsonIntersections",geoJsonIntersections);
+			if ( params.getResultAsGeoJsonCallback ){ // 2020/1/8
+				if ( params.getResultAsGeoJsonCallbackParam ){
+					params.getResultAsGeoJsonCallback(geoJsonIntersections, getResultAsGeoJsonCallbackParam);
+				} else {
+					params.getResultAsGeoJsonCallback(geoJsonIntersections );
+				}
+			}
+			if ( params.strokeColor || params.strokeWidth || params.fillColor){
+				drawGeoJson(geoJsonIntersections, params.targetId, params.strokeColor, params.strokeWidth, params.fillColor,"p0","poi",null,params.resultGroup);
+				svgMap.refreshScreen();
+			}
+		}
+	}
+	
+	// imageタグのビットイメージ(coverage)によるGIS
+	// 2018/6/8 S.Takagi
+	// rangeData: [hueRangemin,hueRangemax] or [[hueRange1min,hueRange1max],[...]] or {hue:[[range1min,range1max],[...]],satulation:[[range1min,range1max],[...]],value:[[range1min,range1max],[...]],alpha:[[range1min,range1max],[...]],outOfBoundsColor:{r:R,g:G,b:B}}
+	// poiID_or_pointsには、POINTジオメトリが入ってるレイヤIDもしくは、直接POINTジオメトリの配列を入れる
+	
+	// 関数コールの流れ : getInRangePoints -> getInRangeGeometriesOnCoverage -> getInRangePointsS2 -> *0 getImagePixData -> computeInRangePoints (DO Actual Computing) (if completed : Exit) -> *0
+	
+	function getInRangePolygonParts(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions ){
+		// 出力データ形式: cbFuncの第一引数に以下の形のデータが返却される
+		// [{coordinates[geoX,geoY],inRange,color}]
+		
+		if ( ! computingOptions ){ computingOptions={};}
+		computingOptions.targetVectorType = 2;
+		getInRangeGeometriesOnCoverage(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions);
+	}
+	function getInRangeLineParts(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions ){
+		// 出力データ形式: cbFuncの第一引数に以下の形のデータが返却される
+		// [{extent,width,height,pixSize,rasterData,hasIntersection,hasInRange,hasOutOfRange,inRangeCounts,outOfRangeCounts},...]
+		// extent:{x,y,width,height} (in geoCrds)
+		// rasterData: [y][x]{color:{r,g,b,a},inRange}   if noData:{}
+		
+		if ( ! computingOptions ){ computingOptions={};}
+		computingOptions.targetVectorType = 1;
+		getInRangeGeometriesOnCoverage(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions);
+	}
+	function getInRangePoints(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions ){
+		if ( ! computingOptions ){ computingOptions={};}
+		computingOptions.targetVectorType = 0;
+		getInRangeGeometriesOnCoverage(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry , computingOptions);
+	}
+	
+	function getInRangeGeometriesOnCoverage(poiID_or_points, coverID, rangeData, cbFunc, param , progrssCallback , preCapturedGeometry, computingOptions ){		// 必要な検索パラメータ(superParam)を整形した後、SVGMap.jsからviewportのgeometryisを取得してgetInRangePointsS2に投げる
+		// computingOptions:
+		//   targetVectorType : (0:point,1:polyline(multiLineString),2:polygon) (この値を入れて関数を生で呼べば上の3つの関数包含している)
+		//   splitByCoverage : true/false <=内部的なものにしたいね・・
+		
+		if ( computingOptions == undefined ){ computingOptions={};}
+		if ( computingOptions.targetVectorType == undefined ){ computingOptions.targetVectorType = 0;}
+		if ( computingOptions.overlappingCoverage && (computingOptions.overlappingCoverage).toLowerCase() == "or" ){
+			computingOptions.splitByCoverage = true;
+			computingOptions.overlappingCoverage="or";
+		}
+		
+		
+		halt = false;
+		var superParam = {
+			coverageDocTreeID: coverID,
+			cbFunc: cbFunc,
+			param: param,
+			progrssCallback: progrssCallback,
+			range: getRangeParam(rangeData),
+			targetType: computingOptions.targetVectorType, // 2020/7/2  0:point, 1:line , ...
+			computingOptions:computingOptions, // 2020/7/2  0:point, 1:line , ...
+			pixDataBuffer: [], // 2020/7/10 取得したピクセルデータを保持することにする
+		}
+		if ( Array.isArray(poiID_or_points)){
+			superParam.points= poiID_or_points;
+		} else {
+			superParam.pointsDocTreeID= poiID_or_points;
+		}
+		console.log( "called getInRangePoints: poi,cover:", poiID_or_points, coverID,"  range:", superParam.range);
+		
+		svgMap.captureGISgeometriesOption(true); // カバレッジが必要
+		if ( ! preCapturedGeometry ){
+			// captureGISgeometriesはviewportにあるオブジェクトのみ取ってくる仕様
+			svgMap.captureGISgeometries(getInRangePointsS2 , superParam );
+		} else {
+			console.log("getInRangePoints: USE preCapturedGeometry");
+			getInRangePointsS2(preCapturedGeometry, superParam);
+		}
+	}
+	
+	function getRangeParam(rangeData){
+//		console.log("getRangeParam:",rangeData);
+		// デフォルトは透明でないもの
+		var nRange={
+			hue:        [[0,360]],
+			satulation: [[10,100]],
+			value:      [[10,100]],
+			alpha:      [[10,100]],
+//			outOfBoundsColor: {r:0,g:0,b:0} // https://stackoverflow.com/questions/22384423/canvas-corrupts-rgb-when-alpha-0 この問題があるのでalpha=0のとき、RGBは必ず0,0,0になってしまうためすごく問題。もったいないがこの設定はデフォルトでは使わないことにした 2020/7/7
+		}
+		
+		if ( rangeData){
+			if ( rangeData.hue ){
+				nRange.hue = getRangeVal(rangeData.hue );
+				if ( rangeData.satulation ){
+					nRange.satulation = getRangeVal(rangeData.satulation );
+				}
+				if ( rangeData.value ){
+					nRange.value = getRangeVal(rangeData.value );
+				}
+				if ( rangeData.alpha ){
+					nRange.alpha = getRangeVal(rangeData.alpha );
+				}
+				if ( rangeData.outOfBoundsColor ){
+					nRange.outOfBoundsColor = rangeData.outOfBoundsColor;
+				}
+			} else if ( rangeData.length && rangeData.length > 0){
+				nRange.hue =  getRangeVal(rangeData);
+			}
+		}
+		return ( nRange);
+	}
+	
+	function getRangeVal( rangeVal ){
+		var nRangeVal=[];
+		if ( rangeVal[0][0] != undefined){
+			nRangeVal = rangeVal;
+		} else {
+			nRangeVal[0] = rangeVal;
+		}
+		console.log("rangeVal:",rangeVal,"  normalized nRangeVal:",nRangeVal);
+		return (nRangeVal);
+	}
+	
+	function getTargetGeomsBbox( poiGeoms ){
+		var xmin=1e30;
+		var xmax=-1e30;
+		var ymin=1e30;
+		var ymax=-1e30;
+		var poiGeoms;
+		for ( var i = 0 ; i < poiGeoms.length ; i++ ){
+			if ( poiGeoms[i].type=="Point"  ){ // Point
+				if ( poiGeoms[i].coordinates[0] > xmax ){
+					xmax = poiGeoms[i].coordinates[0];
+				}
+				if ( poiGeoms[i].coordinates[0] < xmin ){
+					xmin = poiGeoms[i].coordinates[0];
+				}
+				
+				if ( poiGeoms[i].coordinates[1] > ymax ){
+					ymax = poiGeoms[i].coordinates[1];
+				}
+				if ( poiGeoms[i].coordinates[1] < ymin ){
+					ymin = poiGeoms[i].coordinates[1];
+				}
+			} else {  // MultiLineString, Polygon
+				//console.log("not point");
+				for ( var j = 0 ; j < (poiGeoms[i].coordinates).length ; j++ ){
+					for ( var k = 0 ; k < ((poiGeoms[i].coordinates)[j]).length ; k++ ){
+						var vertex = ((poiGeoms[i].coordinates)[j])[k];
+						//console.log("vertex:",vertex);
+						if ( vertex[0] > xmax ){
+							xmax = vertex[0];
+						}
+						if ( vertex[0] < xmin ){
+							xmin = vertex[0];
+						}
+						
+						if (vertex[1] > ymax ){
+							ymax = vertex[1];
+						}
+						if ( vertex[1] < ymin ){
+							ymin = vertex[1];
+						}
+					}
+				}
+			}
+		}
+		
+		return {
+			xmin  : xmin,
+			ymin  : ymin,
+			xmax  : xmax,
+			ymax  : ymax,
+			x     : xmin,
+			y     : ymin,
+			width : xmax-xmin,
+			height: ymax-ymin
+		}
+	}
+	
+	function getInRangePointsS2( geom , superParam ){
+		// 
+//		var geoViewBox = svgMap.getGeoViewBox();
+		var targetGeoms = [];
+		var targetCoverages = [];
+		// ここでcanvasに入れたimageとpoisで、いろいろやる感じ
+		if ( ! geom ){
+			console.log("processing conflict?? exit");
+		}
+		var svgImagesProps = svgMap.getSvgImagesProps();
+//		console.log("getInRangePointsS2  geom:",geom, "  superParam:",superParam,"  svgImagesProps:",svgImagesProps);
+		if ( superParam.points ){
+			targetGeoms = superParam.points;
+		}
+		for ( var layerId in geom ){
+			if ( superParam.pointsDocTreeID && svgImagesProps[layerId].rootLayer == superParam.pointsDocTreeID ){
+				for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+					if ( superParam.computingOptions.targetVectorType == 0 ){
+						if ( geom[layerId][i].type =="Point" ){
+							targetGeoms.push( geom[layerId][i] );
+						}
+					} else if ( superParam.computingOptions.targetVectorType == 1 ){
+						if ( geom[layerId][i].type =="MultiLineString" ){ // LineStringもあるような気がするが・・
+							targetGeoms.push( geom[layerId][i] );
+						}
+					} else if ( superParam.computingOptions.targetVectorType == 2 ){
+						if ( geom[layerId][i].type =="Polygon" ){ 
+							targetGeoms.push( geom[layerId][i] );
+						}
+					} 
+				}
+			} else if ( svgImagesProps[layerId].rootLayer == superParam.coverageDocTreeID ){
+				for ( var i = 0 ; i < geom[layerId].length ; i++ ){
+					if ( geom[layerId][i].type =="Coverage" ){
+						targetCoverages.push( geom[layerId][i] );
+					}
+				}
+			}
+		}
+		
+		// viewportにある対象オブジェクトが取れているはず
+		console.log("targetCoverages:",targetCoverages,"  targetGeoms:",targetGeoms);
+		superParam.targetGeomsBbox = getTargetGeomsBbox(targetGeoms);
+		console.log("targetGeomsBbox:",superParam.targetGeomsBbox);
+		superParam.targetGeoms = targetGeoms;
+		superParam.targetCoverages = targetCoverages;
+		superParam.coverageIndex = getNextIntersectedCoverage(superParam.targetCoverages, superParam.targetGeomsBbox, -1);
+		superParam.ans = [];
+		
+		if ( superParam.progrssCallback ){
+			superParam.progrssCallback(0);
+		}
+		
+		// getImagePixData経由で再帰実行されるcomputeInRangePointsを呼び出し処理を進める
+		var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+		fileGetOverhead = 0;
+		computingOverhead = 0;
+		overheadPrevTimeInt = Date.now();
+		console.log("getImagePixData B:",targetCoverage,"   superParam.coverageIndex:",superParam.coverageIndex);
+		if ( targetCoverage && targetCoverage.href ){
+			var targetCoverageURL = targetCoverage.href;
+			console.log("getImagePixData:",getImagePixData);
+			getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
+		} else {
+			halt = false;
+			superParam.cbFunc(superParam.ans, superParam.param);
+		}
+	}
+	
+	// getInRangePointsS2の性能の統計用
+	var fileGetOverhead, computingOverhead , overheadPrevTimeInt;
+	
+	// そのターゲットのジオメトリと、カバレッジが交差してるかどうかを判別して返答する
+	// この時、geoExtent,geo2svgをtargetCoverageに追加してる（トリッキー）
+	function getNextIntersectedCoverage(targetCoverages, targetGeomsBbox, currentIndex){
+		var cindex = currentIndex+1;
+		var intersects = false;
+		while ( intersects == false ){
+			var targetCov = targetCoverages[cindex];
+			if ( cindex == targetCoverages.length ){
+				return ( cindex);
+			} else {
+//				var cLatMin, cLatMax, cLngMin, cLngMax;
+				if ( targetCov.geoExtent ){
+//					console.log("geoExtent再利用");
+				} else {
+					setGeoExtent(targetCov);
+				}
+				/**
+				cLatMin = targetCov.geoExtent[0];
+				cLatMax = targetCov.geoExtent[1];
+				cLngMin = targetCov.geoExtent[2];
+				cLngMax = targetCov.geoExtent[3];
+				**/
+				if ( targetCov.geoExtent[0] <= targetGeomsBbox.ymax && 
+					targetGeomsBbox.ymin <= targetCov.geoExtent[1] && 
+					targetCov.geoExtent[2] <= targetGeomsBbox.xmax && 
+					targetGeomsBbox.xmin <= targetCov.geoExtent[3] ){
+					intersects = true;
+				} else {
+					intersects = false;
+					++ cindex;
+				}
+			}
+		}
+		return ( cindex );
+	}
+	
+	function setGeoExtent(targetCoverage){
+		// そのカバレッジについて、地理的領域を計算し設定する。 transformがある場合はgeo2svgも設定する
+		var cLatMin, cLatMax, cLngMin, cLngMax;
+		if ( targetCoverage.coordinates[0].lat ){ // SVGMap.jsの機能として、captureGisGeometriesで取得したcoverageがtransformを持っていない(緯度経度に対して回転してない)場合、coordinates.lat,.lngがある。
+			// lng:x lat:y
+			cLatMin = Math.min( targetCoverage.coordinates[0].lat , targetCoverage.coordinates[1].lat);
+			cLatMax = Math.max( targetCoverage.coordinates[0].lat , targetCoverage.coordinates[1].lat);
+			cLngMin = Math.min( targetCoverage.coordinates[0].lng , targetCoverage.coordinates[1].lng);
+			cLngMax = Math.max( targetCoverage.coordinates[0].lng , targetCoverage.coordinates[1].lng);
+			targetCoverage.geoExtent=[cLatMin,cLatMax,cLngMin,cLngMax]; // ここで、普通にはない .geoExtentを追加している
+		} else { // 一方transformがある場合、coordinates.x,.yとなっていて、そこにはローカルsvg座標の2点が入っている
+		//					console.log("非対角transform処理:");
+			var s2g = targetCoverage.transform;
+			var p0 = targetCoverage.coordinates[0];
+			var p1 = targetCoverage.coordinates[1];
+			var gp0 = svgMap.transform(p0.x ,p0.y , s2g);
+			var gp1 = svgMap.transform(p1.x ,p1.y , s2g);
+			cLatMin = Math.min( gp0.y , gp1.y);
+			cLatMax = Math.max( gp0.y , gp1.y);
+			cLngMin = Math.min( gp0.x , gp1.x);
+			cLngMax = Math.max( gp0.x , gp1.x);
+			targetCoverage.geoExtent=[cLatMin,cLatMax,cLngMin,cLngMax]; // ここで、普通にはない .geoExtentを追加している
+			targetCoverage.geo2svg=svgMap.getInverseMatrix(s2g); // ここで、普通にはない .geo2svgを追加している
+		}
+	}
+	
+	function computeInRangePoints( pixData , pixWidth , pixHeight , superParam ){
+		// ひとつのimageデータ(カバレッジのビットイメージ)に対して、演算対象ベクトルデータ(全部)との演算を行う
+		superParam.pixDataBuffer[superParam.coverageIndex] = pixData; // superParamがある間pixDaraを保持することにした (2020/7/10
+		var now = Date.now();
+		fileGetOverhead += now - overheadPrevTimeInt;
+		overheadPrevTimeInt = now;
+		// console.log("computeInRangePoints: coverageData:",pixData.length , pixWidth, pixHeight,"  targetGeoms:",superParam.targetGeoms);
+		// var extent = superParam.targetCoverages[superParam.coverageIndex].coordinates;
+		
+		for ( var i = 0 ; i < superParam.targetGeoms.length ; i++ ){
+			var geomCrd = superParam.targetGeoms[i].coordinates;
+			
+			
+			if ( superParam.computingOptions.targetVectorType == 1 ){ // ポリラインフィーチャーとカバレッジのGIS
+				for ( var j = 0 ; j < geomCrd.length ; j++){ // multiPolyLineなので・・
+					computeInRangeLineParts(pixData , pixWidth , pixHeight, geomCrd[j], superParam);
+				}
+				
+			} else if ( superParam.computingOptions.targetVectorType == 2 ){ // ポリゴンフィーチャーとカバレッジのGIS
+				for ( var j = 0 ; j < geomCrd.length ; j++){ // same as
+					computeInRangePolygonParts(pixData , pixWidth , pixHeight, geomCrd[j], superParam);
+				}
+			} else if (superParam.computingOptions.targetVectorType == 0){ // ポイントフィーチャーとカバレッジのGIS
+				// 以下、poly*と同様に別関数にするかもしれない
+				var extent= getCoverageExtent(superParam.targetCoverages[superParam.coverageIndex]);
+	//			console.log("cover:",extent.latMin,extent.latMax,extent.lngMin,extent.lngMax,"  poi:",geomCrd[1],geomCrd[0]);
+				if ( extent.lngMin <= geomCrd[0] && extent.lngMax > geomCrd[0] && extent.latMin <= geomCrd[1] && extent.latMax > geomCrd[1] ){ //そのポイントがビットイメージの座標範囲内なら・・
+					
+					var canXY = latLng2coverageImageXY(pixWidth , pixHeight, geomCrd[0], geomCrd[1], superParam.targetCoverages[superParam.coverageIndex],extent);
+					var addr = ( canXY.x + canXY.y * pixWidth ) * 4;
+					var R = pixData[ addr ];
+					var G = pixData[ addr + 1 ];
+					var B = pixData[ addr + 2 ];
+					var A = pixData[ addr + 3 ];
+					if ( judgeVal(100*A/255,superParam.range.alpha)){
+						var hsv = rgb2hsv( R , G , B );
+	//					console.log(canXY,hsv,A);
+	//					console.log("Judge:",superParam.range.hue);
+						if ( judgeVal(hsv.h,superParam.range.hue,true) && judgeVal(hsv.s,superParam.range.satulation) && judgeVal(hsv.v,superParam.range.value)){
+							hsv.a = A;
+							hsv.r = R;
+							hsv.g = G;
+							hsv.b = B;
+							superParam.targetGeoms[i].hsv = hsv;
+							superParam.ans.push(superParam.targetGeoms[i]);
+						}
+					}
+				}
+			}
+		}
+		
+		
+		// for next coverage computation
+		
+//		superParam.coverageIndex = superParam.coverageIndex + 1;
+		superParam.coverageIndex = getNextIntersectedCoverage(superParam.targetCoverages, superParam.targetGeomsBbox, superParam.coverageIndex);
+
+		if ( superParam.progrssCallback ){
+			superParam.progrssCallback( Math.ceil(100 * (superParam.coverageIndex/superParam.targetCoverages.length)) );
+		}
+		
+		if ( halt == true || superParam.coverageIndex == superParam.targetCoverages.length ){
+			// complete computation
+			halt = false;
+			console.log("Processing overhead[ms]: fileFetch:",fileGetOverhead,"  computing:", computingOverhead, "   comp.Ratio[%]:", Math.floor(10000*computingOverhead / (computingOverhead+fileGetOverhead))/100 );
+			if ( superParam.computingOptions.splitByCoverage == true ){
+				if ( superParam.computingOptions.targetVectorType == 2 ){
+					doPolygonOrComputing( superParam );
+				} else if (  superParam.computingOptions.targetVectorType == 1){
+					doPolylineOrComputing( superParam );
+				} else {
+					doPointOrComputing( superParam );
+				}
+			} else {
+				superParam.cbFunc(superParam.ans, superParam.param);
+			}
+		} else {
+			// compute next coverage
+			var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+			now = Date.now();
+			computingOverhead += now - overheadPrevTimeInt;
+			overheadPrevTimeInt = now;
+			if ( targetCoverage && targetCoverage.href ){
+				var targetCoverageURL = targetCoverage.href;
+				// getImagePixData経由で再帰実行されるcomputeInRangePointsを呼び出し処理を進める
+				getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
+			} else {
+				// これは異常終了のケース？
+				halt = false;
+				superParam.cbFunc(superParam.ans, superParam.param);
+			}
+		}
+	}
+	
+	function normalizeHue( hue ){
+		var ans = hue % 360;
+		if ( ans < 0 ){
+			ans += 360;
+		}
+		return ( ans );
+	}
+	
+	function judgeVal( val, rangeVal , isHue ){
+//		console.log("judgeVal:",val,rangeVal);
+		if ( !rangeVal ){
+			return ( true );
+		}
+		
+		for ( var i = 0 ; i < rangeVal.length ; i++ ){
+			
+			if ( isHue ){
+				if(rangeVal[i][0] <=0 && rangeVal[i][1]>=360){ // hue全域指定の場合はtrue
+					return ( true );
+				}
+				var hmin = normalizeHue(rangeVal[i][0]);
+				var hmax = normalizeHue(rangeVal[i][1]);
+				
+//				console.log( "hueRange:min:",hmin," max:",hmax,"  val:",val);
+				if( hmin > hmax ){ // 360を跨いでる場合
+					if (( hmin <= val && val <= 360 )||( 0 <= val && val <= hmax )){
+						return( true );
+					}
+				} else if( hmin <= val && val <= hmax) {
+					return ( true );
+				}
+			} else {
+				if ( rangeVal[i][0] <= val && val <= rangeVal[i][1] ){
+					return ( true );
+				}
+			}
+		}
+		return ( false );
+	}
+	
+	// 2020/1/23 ブラウザネイティブのキャッシュが効いてない？？　Imageのためのキャッシュ(FIFO)を構築 
+	// オートパイロットで特に高速化したと思う。
+	var imageCacheMaxSize=100; // FIFOキャッシュの数
+	var imageCache = [];
+	var imageCacheQueue=[];
+	function addImageCache(hashKey,img){
+		imageCache[hashKey] = img;
+		imageCacheQueue.push(hashKey);
+		if (imageCacheQueue.length == imageCacheMaxSize){
+			var delImageHash = imageCacheQueue.shift();
+			delete imageCache[delImageHash];
+		}
+	}
+	
+	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
+		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
+//		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
+		var imageURL_int = getImageURL(imageUrl);
+		if ( imageCache[imageURL_int]){
+//			console.log("Hit imageCache");
+			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
+		} else {
+			var documentImage = document.getElementById(imageIID);
+			var imgSrcURL = documentImage.getAttribute("src");
+			if ( imgSrcURL.indexOf("http")!=0 || isDirectURL(imgSrcURL)){
+				console.log("use image element's image :", documentImage); 
+				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
+				addImageCache(imageURL_int, documentImage);
+			} else {
+				
+				var img = new Image();
+				if ( anonProxy ){
+					img.crossOrigin = "anonymous";
+				}
+				// console.log("Fetch image : ", imageUrl);
+				img.src = imageURL_int;
+				img.onload = function() {
+					returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
+					addImageCache(imageURL_int, img);
+				}
+			}
+		}
+	}
+	
+	function returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams){
+		var canvas = document.createElement("canvas");
+//		canvas.width  = img.width;
+		canvas.width  = img.naturalWidth;
+//		canvas.height = img.height;
+		canvas.height = img.naturalHeight;
+		var cContext = canvas.getContext('2d');
+		cContext.mozImageSmoothingEnabled = false;
+		cContext.webkitImageSmoothingEnabled = false;
+		cContext.msImageSmoothingEnabled = false;
+		cContext.imageSmoothingEnabled = false;
+		cContext.drawImage(img, 0, 0);
+		var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
+//		console.log("pixData:",pixData);
+		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
+	}
+	
+	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
+	var proxyUrl="";
+	var anonProxy = false;
+	var directURLlist = [];
+	function setImageProxy( pxUrl , directURLls , useAnonProxy){
+		proxyUrl = pxUrl;
+		if ( directURLls ){
+			directURLlist = directURLls;
+		} else {
+			directURLlist = [];
+		}
+		if ( pxUrl.indexOf("http")==0){
+			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
+			directURLlist.push(pxDomain);
+		}
+		
+		if ( useAnonProxy ){
+			anonProxy = true;
+		} else {
+			anonProxy = false;
+		}
+	}
+	
+	
+	// 線(ポリライン)とビットイメージ間のGIS 2020/7/3
+	function computeInRangeLineParts( pixData , pixWidth , pixHeight, geomCrd, superParam ){
+		var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+		//console.log("computeInRangeLineParts: geomCrd:",geomCrd,"  targetCoverage:",targetCoverage);
+		var cExt = getCoverageExtent(targetCoverage);
+		var lExt = getLineExtent(geomCrd);
+		//console.log("isIntersect:",svgMap.isIntersect(lExt,cExt),"  lExt:",lExt,"  cExt:",cExt);
+		if ( svgMap.isIntersect(lExt,cExt)){ // ポリラインとカバレッジが被っていたら演算する
+			// console.log("isIntersect : cExt:",cExt,"  lExt:",lExt);
+			
+			var cline = clipLine(geomCrd,cExt); // ポリラインをカバレンジの領域でクリッピングする(これは地理座標)
+//			console.log("clipLine:",cline, "   orig:",geomCrd);
+			var pixSize = getPixSize(pixWidth , pixHeight,cExt);
+			
+			for ( var i = 0 ; i < cline.length-1 ; i++ ){ // ポリラインを線分に分けて演算する
+				if ( cline[i+1].clippedEdge != true ){ // これはクリッピングルーチンの癖でこうなってます
+					var startP = cline[i];
+					var endP = cline[i+1];
+					
+					// 線分の始点終点の(カバレッジの)ピクセル座標を得る （ここからピクセル座標）
+					var startXY = latLng2coverageImageXY(pixWidth , pixHeight, startP.x, startP.y, targetCoverage,cExt);
+					var endXY = latLng2coverageImageXY(pixWidth , pixHeight, endP.x, endP.y, targetCoverage,cExt);
+					
+					// その座標間にピクセル化した直線の座標列を算出する
+					var pixs = getStraightLineCoordinates([startXY.x,startXY.y],[endXY.x,endXY.y]);
+					// console.log("pixs:",pixs);
+					
+					// それぞれのピクセルの値を読み出し評価する
+					for ( var j = 0 ; j < pixs.length ; j++ ){
+						var comPix = computePixCoverage(pixs[j][0],pixs[j][1],pixWidth,pixHeight,pixData,superParam.range);
+						var geoPos = coverageImageXY2LatLng(pixWidth , pixHeight, pixs[j][0],pixs[j][1] ,targetCoverage,cExt);
+						if ( comPix.inBounds){
+							if ( superParam.computingOptions.splitByCoverage == true ){
+								if ( !superParam.ans[superParam.coverageIndex] ){
+									// console.log("add ans index:",superParam.coverageIndex,"  extent:",cExt);
+									superParam.ans[superParam.coverageIndex] = [];
+									superParam.ans[superParam.coverageIndex]["extent"]=cExt;
+									superParam.ans[superParam.coverageIndex]["pixSize"]=pixSize;
+								}
+								superParam.ans[superParam.coverageIndex].push({coordinates:[geoPos.longitude,geoPos.latitude],color:comPix.color,inRange:comPix.inRange});
+								
+							} else {
+								superParam.ans.push({coordinates:[geoPos.longitude,geoPos.latitude],color:comPix.color,inRange:comPix.inRange});
+							}
+						} // カバレッジ域外の場合は無視
+					}
+					
+				}
+			}
+		}
+	}
+	
+	// ポリゴンとビットイメージ間のGIS 2020/7/9-
+	function computeInRangePolygonParts( pixData , pixWidth , pixHeight, geomCrd, superParam ){
+		var targetCoverage = superParam.targetCoverages[superParam.coverageIndex];
+		//console.log("computeInRangePolygonParts: geomCrd:",geomCrd,"  targetCoverage:",targetCoverage);
+		var cExt = getCoverageExtent(targetCoverage);
+		var lExt = getLineExtent(geomCrd); // これはポリゴンでも同じものが使える
+		//console.log("isIntersect:",svgMap.isIntersect(lExt,cExt),"  lExt:",lExt,"  cExt:",cExt);
+		if ( svgMap.isIntersect(lExt,cExt)){ // ポリゴンとカバレッジが被っていたら演算する
+			// console.log("isIntersect : cExt:",cExt,"  lExt:",lExt);
+			
+			// var cline = clipLine(geomCrd,cExt); // ポリライン(ポリゴンでも使用可能)をカバレッジの領域でクリッピングする(これは地理座標)
+			// スキャンラインを取得する(まずは上のクリッピングを使わないで力技をやってみよう)
+			var pixSize = getPixSize(pixWidth , pixHeight,cExt);
+			
+			var canvasCrds=[]; // ここからピクセル座標
+			for ( var i = 0 ; i < geomCrd.length ; i++ ){
+				var canXY = latLng2coverageImageXY(pixWidth , pixHeight, geomCrd[i][0], geomCrd[i][1], targetCoverage,cExt);
+				canvasCrds.push([canXY.x,canXY.y]);
+			}
+			// console.log("canvasCrds:",canvasCrds);
+			var slines = polygonFilling(canvasCrds); // スキャンラインポリゴンフィル関数
+			//console.log("scanLines:",slines);
+			
+			var sc = 0;
+			var rasterData;
+			if ( !superParam.ans[superParam.coverageIndex] ){
+				rasterData = new Array(pixHeight);
+				for ( var py = 0 ; py < pixHeight ; py++ ){
+					rasterData[py]=new Array(pixWidth).fill({});
+				}
+				superParam.ans[superParam.coverageIndex] = {};
+				if ( targetCoverage.transform ){
+					superParam.ans[superParam.coverageIndex].transform = targetCoverage.transform;
+					superParam.ans[superParam.coverageIndex].coordinates = targetCoverage.coordinates;
+				}
+				superParam.ans[superParam.coverageIndex].extent = cExt;
+				superParam.ans[superParam.coverageIndex].width = pixWidth;
+				superParam.ans[superParam.coverageIndex].height = pixHeight;
+				superParam.ans[superParam.coverageIndex].pixSize = pixSize;
+				superParam.ans[superParam.coverageIndex].rasterData = rasterData;
+				superParam.ans[superParam.coverageIndex].hasIntersection = false; // そのタイル内に、ポリゴンが被っている
+				superParam.ans[superParam.coverageIndex].hasInRange = false; // そのタイルにポリゴンが被っており、なおかつレンジ内がある
+				superParam.ans[superParam.coverageIndex].hasOutOfRange = false;// そのタイルにポリゴンが被っており、なおかつレンジ外がある
+				superParam.ans[superParam.coverageIndex].inRangeCounts = 0;
+				superParam.ans[superParam.coverageIndex].outOfRangeCounts = 0;
+			}
+			rasterData = superParam.ans[superParam.coverageIndex].rasterData; // 実際の演算結果のsuperParam.ans[].rasterDataへの紐づけ
+			var hasIntersection = false;
+			var hasInRange = false;
+			var hasOutOfRange = false;
+			var inRangeCounts = 0;
+			var outOfRangeCounts = 0;
+			for ( var py = pixHeight -1 ; py >= 0 ; py--){ // scan lineがymaxから始まるため
+				var row = rasterData[py]; // 各rowごとの演算結果を紐づけ
+				while ( sc < slines.length && slines[sc][1] >= py ){ // slinesのyが該当するものまで回していく
+					if( slines[sc][1] == py ){
+						var pxs = slines[sc][0];
+						var px1 = Math.max(0,pxs[0]);
+						var px2 = Math.min(pixWidth-1,pxs[1]);
+						for ( var px = px1 ; px <= px2 ; px++){
+							var comPix = computePixCoverage(px,py,pixWidth,pixHeight,pixData,superParam.range);
+//							var geoPos = coverageImageXY2LatLng(pixWidth , pixHeight, px,py ,targetCoverage,cExt);
+							if ( comPix.inBounds){
+								row[px]=comPix; // これが演算結果の代入部
+								hasIntersection = true;
+								if ( comPix.inRange ){
+									hasInRange = true;
+									++ inRangeCounts;
+								} else {
+									hasOutOfRange = true;
+									++ outOfRangeCounts;
+								}
+							} // カバレッジ域外の場合は無視
+						}
+					}
+					++sc;
+				}
+			}
+			
+			if ( hasInRange ){
+				superParam.ans[superParam.coverageIndex].hasInRange = true;
+			}
+			if ( hasOutOfRange ){
+				superParam.ans[superParam.coverageIndex].hasOutOfRange = true;
+			}
+			if ( hasIntersection ){
+				superParam.ans[superParam.coverageIndex].hasIntersection = true;
+			}
+			
+			superParam.ans[superParam.coverageIndex].inRangeCounts = inRangeCounts;
+			superParam.ans[superParam.coverageIndex].outOfRangeCounts = outOfRangeCounts;
+		}
+	}
+	
+	function computePixCoverage(px,py,pixWidth,pixHeight,pixData,range){
+		// return value:
+		// .inBounds: そのカバレッジの領域内の場合true
+		// .color:    実際の色の値(カバレッジ領域外ではnull)
+		// .inRange:  rangeで指定した条件に合致の場合true
+//		console.log("px:",px," py:",py,"  pixWidth:",pixWidth,"  pixHeight:",pixHeight);
+		if ( px < 0 || py < 0 || px >= pixWidth || py >= pixHeight ){
+			return ( {color:null,inRange:false , inBounds: false } );
+		}
+		var addr = ( px + py * pixWidth ) * 4;
+		var R = pixData[ addr ];
+		var G = pixData[ addr + 1 ];
+		var B = pixData[ addr + 2 ];
+		var A = pixData[ addr + 3 ];
+		if ( range.outOfBoundsColor && R == range.outOfBoundsColor.r && G == range.outOfBoundsColor.g && B == range.outOfBoundsColor.b ){
+//			console.log("outOfBounds: Color RGB:",R,G,B);
+			return ( {color:null,inRange:false , inBounds: false } );
+		}
+		var hsv = rgb2hsv( R , G , B );
+		hsv.a = A;
+		hsv.r = R;
+		hsv.g = G;
+		hsv.b = B;
+//		console.log("RGBA:",R,G,B,A,"  range:",range,"  addr:",addr );
+		if ( judgeVal(100*A/255,range.alpha)){
+//					console.log(px,py,hsv,A);
+//					console.log("Judge:",range.hue);
+			if ( judgeVal(hsv.h,range.hue,true) && judgeVal(hsv.s,range.satulation) && judgeVal(hsv.v,range.value)){
+					// console.log("inRange:", hsv.h,hsv.s,hsv.v,R,G,B,A);
+					return ( {color:hsv, inRange:true , inBounds: true } );
+			}
+		}
+		// console.log("outOfRange:", hsv.h,hsv.s,hsv.v,R,G,B,A,"  range:",range);
+		return ( {color:hsv, inRange:false , inBounds: true } );
+	}
+	
+	
+	function clipLine(geomCrd,cExt){
+		// build poyline for ClipPolygon()
+		var poly= [];
+		for ( var i = 0 ; i < geomCrd.length ; i++ ){
+			var point={x:geomCrd[i][0],y:geomCrd[i][1],clippedEdge:false};
+			if ( i == 0 ){
+				point.clippedEdge = true;
+			}
+			poly.push(point);
+		}
+		//console.log("poly:",poly,"   cExt:",cExt);
+		var cpoly = ClipPolygon(poly,cExt);
+		return ( cpoly );
+	}
+
+	
+	
+	function getLineExtent(coords){
+		var xmin=1e30,ymin=1e30,xmax=-1e30,ymax=-1e30;
+		for ( var i = 0 ; i < coords.length ; i++ ){
+			var crd = coords[i];
+			if ( crd[0] > xmax ){
+				xmax = crd[0];
+			}
+			if ( crd[0] < xmin ){
+				xmin = crd[0];
+			}
+			if ( crd[1] > ymax ){
+				ymax = crd[1];
+			} 
+			if ( crd[1] < ymin ){
+				ymin = crd[1];
+			}
+		}
+		//console.log("coords:",coords,"   getLineExtent: xmin,xmax,ymin,ymax: ",xmin,xmax,ymin,ymax);
+		return {
+			x:xmin,
+			y:ymin,
+			width:xmax-xmin,
+			height:ymax-ymin
+		}
+	}
+	
+	function getCoverageExtent(coverage){
+		var latMin = coverage.geoExtent[0];
+		var latMax = coverage.geoExtent[1];
+		var lngMin = coverage.geoExtent[2];
+		var lngMax = coverage.geoExtent[3];
+		return {
+			latMin : latMin,
+			latMax : latMax,
+			lngMin : lngMin,
+			lngMax : lngMax,
+			x : lngMin,
+			y : latMin,
+			width : lngMax-lngMin,
+			height : latMax-latMin
+		}
+	}
+	
+	function isIntersect(rect1 , rect2){
+		// rect* : x,y,width,height
+		return (svgMap.isIntersect(rect1 , rect2));
+	}
+
+	function getPixSize(pixWidth , pixHeight,cExt){
+		var xs = cExt.width / pixWidth;
+		var ys = cExt.height / pixHeight;
+//		console.log("getPixSize:",(xs + ys)/2);
+		return ( (xs + ys)/2 ); // かなりいい加減・・
+	}
+	
+	// 地理座標からビットイメージカバレッジのピクセル座標を算出する
+	// cExtは冗長～不要
+	function latLng2coverageImageXY(pixWidth , pixHeight, lng,lat,targetCoverage,cExt){
+		var px,py;
+		if ( !targetCoverage.geo2svg){
+			if ( !cExt){
+				cExt = getCoverageExtent(targetCoverage);
+			}
+			px = Math.floor(pixWidth  * (lng - cExt.lngMin)/(cExt.lngMax - cExt.lngMin));
+			py = pixHeight - Math.floor(pixHeight * (lat - cExt.latMin)/(cExt.latMax - cExt.latMin)) - 1;
+//			console.log("lat:",lat," lng:",lng,"  cExt:",cExt,"    px:",px,"  py:",py);
+		} else {
+			var g2s = targetCoverage.geo2svg;
+			var cov_sp0 = targetCoverage.coordinates[0]; //カバレッジのsvg原点座標(transformかける前)
+			var cov_sp1 = targetCoverage.coordinates[1]; //同対角座標
+			var poi_svgPos = svgMap.transform(lng , lat , g2s); // カバレッジのsvgコンテンツの座標系上でのポイントの座標
+			var cov_sw = cov_sp1.x - cov_sp0.x;
+			var cov_sh = cov_sp1.y - cov_sp0.y;
+			px = Math.floor(pixWidth * ( poi_svgPos.x -cov_sp0.x )/cov_sw);
+			py = Math.floor(pixHeight * ( poi_svgPos.y -cov_sp0.y )/cov_sh);
+	//					console.log(g2s,cov_sp0,cov_sp1,poi_svgPos,cov_sw,cov_sh,pixWidth,pixHeight);
+	//					console.log("非対角transform PX,PY算出:px,py:",px,py);
+		}
+		var ans =  {x:px, y:py};
+		if ( px <0 || py <0 || px >= pixWidth || py>= pixHeight ){
+			ans.outOfRange = true;
+		}
+		return (ans);
+	}
+	
+	// latLng2coverageImageXYの逆変換関数～非対角成分ありも確認作業済 2020/7/21
+	// cExtは冗長～不要
+	function coverageImageXY2LatLng(pixWidth , pixHeight, px,py,targetCoverage,cExt){
+		var lat,lng;
+		
+		if ( !targetCoverage.geo2svg){
+			if ( !cExt){
+				cExt = getCoverageExtent(targetCoverage);
+			}
+			lng = cExt.lngMin + (px+0.5) * (cExt.lngMax - cExt.lngMin) / pixWidth;
+			lat = cExt.latMin + (pixHeight -py -0.5) * (cExt.latMax - cExt.latMin) / pixHeight;
+//			console.log("lat:",lat," lng:",lng,"  cExt:",cExt,"    px:",px,"  py:",py);
+		} else {
+			var s2g = targetCoverage.transform;
+			
+			var cov_sp0 = targetCoverage.coordinates[0]; //カバレッジのsvg原点座標(transformかける前)
+			var cov_sp1 = targetCoverage.coordinates[1]; //同対角座標
+			var cov_sw = cov_sp1.x - cov_sp0.x;
+			var cov_sh = cov_sp1.y - cov_sp0.y;
+			
+			var poi_svgPosX = (px * cov_sw / pixWidth) + cov_sp0.x;
+			var poi_svgPosY = (py * cov_sh / pixHeight) + cov_sp0.y;
+			
+			var geoPos = svgMap.transform(poi_svgPosX, poi_svgPosY, s2g);
+			lng = geoPos.x;
+			lat = geoPos.y;
+		}
+		
+		var ans = {latitude:lat,longitude:lng};
+		return ( ans );
+	}
+	
+	
+	// ClipPolygon関数 ported from SVGMapTools's ClipPolygonDouble.java  ポリゴンやポリラインをrectでクリッピングする
+	function ClipPolygon( poly , rect ){
+		// poly: [{x,y,clippedEdge},..]
+		// rect:to clip rectangle(.x,y,width,height)
+		
+		var lastClipped , clipped ; // poly class
+		var currentEdge; // Edge class
+		var lastp , thisp; // Point class
+		var thisCE; //Is current point Clipped Edge?
+		
+		lastClipped = poly;
+		lastClipped = clipSide(lastClipped, Edge(rect.x,rect.y,rect.x,rect.y+rect.height));
+		lastClipped = clipSide(lastClipped, Edge(rect.x,rect.y+rect.height,rect.x+rect.width,rect.y+rect.height));
+		lastClipped = clipSide(lastClipped, Edge(rect.x+rect.width,rect.y+rect.height,rect.x+rect.width,rect.y));
+		lastClipped = clipSide(lastClipped, Edge(rect.x+rect.width,rect.y,rect.x,rect.y));
+		return lastClipped;
+		
+		function clipSide( p,  e){ // p:poly, e:edge
+			var intersect; // poly
+			if (p.length == 0){
+				return p; //nothing to do
+			}
+			currentEdge = e;
+			clipped = [];
+//			clipped.clipped=p.clipped;
+//			console.log("p:poly:",p);
+			lastp = [p[p.length-1].x,p[p.length-1].y];
+			for (var i = 0; i < p.length; i++){
+				thisp = [p[i].x,p[i].y];
+				thisCE = p[i].clippedEdge;
+				if (e.inside(thisp) && e.inside(lastp)){ // 前の点も今の点も入っていたら今の点を追加
+					clipped.push({x:thisp[0],y:thisp[1],clippedEdge:thisCE});
+				} else if (!e.inside(thisp) && e.inside(lastp)){ // 前の点だけ入っていたら交点を追加
+					intersect = e.intersect(thisp,lastp);
+					clipped.push({x:intersect[0],y:intersect[1], clippedEdge:thisCE}); // その点のClipEdgeフラグ継承
+				} else if (!e.inside(thisp) && !e.inside(lastp)){ // 共に入って無い場合何も追加しない
+					/*nothing */
+				} else if (e.inside(thisp) && !e.inside(lastp)){ // 今の点だけ入っていたら・・
+					intersect = e.intersect(lastp,thisp); // 交点を追加して、今の点を更に追加
+					clipped.push({x:intersect[0],y:intersect[1], clippedEdge:true}); // しかもそれはクリップされたエッジの終点
+					clipped.push({x:thisp[0],y:thisp[1],clippedEdge:thisCE});
+//					clipped.clipped=true;
+				}
+				lastp = thisp;
+			}
+			currentEdge = null;  //so that paint won't draw currentEdge now we've 
+			//left the loop
+			return clipped;
+		}
+		
+		function  Edge(x1, y1, x2, y2){
+			var a = y2 - y1;
+			var b = x1 - x2;
+			var c = -a*x1 - b*y1;
+			
+			function inside(p){
+				if ( a>0 || (a==0 && b<0)){
+					return (a*p[0] + b*p[1] + c > 0);
+				} else {
+					return (a*p[0] + b*p[1] + c > 0);
+				}
+			}
+			
+			function intersect(p1, p2){
+				var d = p2[1] - p1[1];
+				var e = p1[0] - p2[0];
+				var f = -d*p1[0] - e*p1[1];
+				var denom = e*a - b*d;
+				var x = ((b*f - e*c)/denom);
+				var y = ((d*c - a*f)/denom);
+				return ([x,y]);
+			}
+			return {
+				inside:inside,
+				intersect:intersect
+			}
+		}
+	}
+	
+	
+	// 線を指定して、そのビットイメージのRGB値を得るみたいなものを作っていきたいので、まずは単純な直線描画ライブラリを・・
+	function getStraightLineCoordinates (startCoordinates, endCoordinates) {
+		var coordinatesArray = new Array();
+		// Translate coordinates
+		var x1 = startCoordinates[0];
+		var y1 = startCoordinates[1];
+		var x2 = endCoordinates[0];
+		var y2 = endCoordinates[1];
+		// Define differences and error check
+		var dx = Math.abs(x2 - x1);
+		var dy = Math.abs(y2 - y1);
+		var sx = (x1 < x2) ? 1 : -1;
+		var sy = (y1 < y2) ? 1 : -1;
+		var err = dx - dy;
+		// Set first coordinates
+		coordinatesArray.push([ x1,y1]);
+		// Main loop
+		while (!((x1 == x2) && (y1 == y2))) {
+			var e2 = err << 1;
+			if (e2 > -dy) {
+				err -= dy;
+				x1 += sx;
+			}
+			if (e2 < dx) {
+				err += dx;
+				y1 += sy;
+			}
+			// Set coordinates
+			coordinatesArray.push([ x1,y1]);
+		}
+		// Return the result
+		return coordinatesArray;
+	}
+	
+	// スキャンラインアルゴリズムによるポリゴンフィルライブラリ
+	// https://gist.github.com/arcollector/a7a1492689dee2e947ec
+	var polygonFilling = function( vertices , pixWidth, pixHeight) {
+		// vertices:[[x1,y1],[x2,y2],...]
+		// pixWidth/Height この範囲でクリップされてビットイメージが作られる
+		// この領域でビットイメージ構築される
+		// 座標列はマイナスも許容されるが、ビットイメージ出力は、x,yとも原点0まででクリップ (x,hは与えればその値-1まででクリップ)
+		
+		// "global" variables
+		var verticesCount = vertices.length,
+			edgesEntered,
+			// table cols
+			yMax, yMin, xInt, invNegSlope;
+		var bbox={xmin:1e30,ymin:1e30,xmax:-1e30,ymax:-1e30};
+		var outputBitImage=false;
+	// *************************
+
+		if( verticesCount <= 2 ) {
+			console.error( 'polygon has insuffient number of vertices' );
+			return;
+		}
+
+		// find out table length
+		var y1 = Math.round( vertices[verticesCount-1[1]] ), y2,i; // roundではなくfloor？
+		edgesEntered = 0;
+		for( i = 0; i < verticesCount; i ++ ) {
+			y2 = Math.round( vertices[i][1] ); // これも同様
+			if( y1 !== y2 ) {
+				y1 = y2;
+				edgesEntered++;
+			}
+			var x2= Math.round( vertices[i][0]); // これも同様
+			if ( x2 > bbox.xmax ){
+				bbox.xmax = x2;
+			}
+			if ( x2 < bbox.xmin ){
+				bbox.xmin = x2;
+			}
+			if ( y2 > bbox.ymax ){
+				bbox.ymax = y2;
+			}
+			if ( y2 < bbox.ymin ){
+				bbox.ymin = y2;
+			}
+			
+		}
+		if( edgesEntered < 2 ) {
+			console.error( 'malformed polygon' );
+			return;
+		}
+		
+		// setup table length
+		xInt = new Float64Array( edgesEntered );
+		yMin = new Int32Array( edgesEntered );
+		yMax = new Int32Array( edgesEntered );
+		invNegSlope = new Float64Array( edgesEntered );
+		
+		var pixData = [];
+		
+		if ( pixWidth && pixHeight ){
+			bbox={xmin:0,xmax:pixWidth-1, ymin:0,ymax:pixHeight-1};
+			outputBitImage = true;
+			pixData = new Array(bbox.ymax+1);
+			for ( var i = 0 ; i < bbox.ymax+1 ; i++ ){
+				pixData[i]=new Array(bbox.xmax+1).fill(0);
+			}
+		}
+		
+		
+		
+	// *************************
+		
+		var insertTableEntry = function( x1,y1, x2,y2, edgesEntered ) {
+			var biggerY = Math.max( y1, y2 ),
+				i = edgesEntered;
+			for( ; i !== 0 && yMax[i-1] < biggerY; i-- ) { // insertion sort mechanism
+				// shift elements to right
+				yMax[i] = yMax[i-1];
+				yMin[i] = yMin[i-1];
+				xInt[i] = xInt[i-1];
+				invNegSlope[i] = invNegSlope[i-1];
+			}
+			yMax[i] = biggerY;
+			invNegSlope[i] = -(x2-x1)/(y2-y1);
+			if( biggerY === y1 ) {
+				yMin[i] = y2;
+				xInt[i] = x1;
+			} else {
+				yMin[i] = y1;
+				xInt[i] = x2;
+			}
+		};
+		
+		var x1 = Math.round( vertices[verticesCount-1][0] ),
+			y1 = Math.round( vertices[verticesCount-1][1] ),
+			x2, y2,
+			i;
+
+		edgesEntered = 0;
+		for( i = 0; i < verticesCount; i ++ ) {
+			x2 = Math.round( vertices[i][0] );
+			y2 = Math.round( vertices[i][1] );
+			if( y1 !== y2 ) { // avoid horizontal edges
+				insertTableEntry( x1,y1, x2,y2, edgesEntered );
+				edgesEntered++;
+			}
+			x1 = x2;
+			y1 = y2;
+		}
+		//console.log(xInt,yMin,yMax,invNegSlope,bbox);
+	// *************************
+		
+		// helpers functions	
+		var exclude = function( leftMostEdge, rightMostEdge, scan ) {
+			var i, j;
+			for( i = leftMostEdge; i <= rightMostEdge; i++ ) {
+				if( yMin[i] > scan ) {
+					leftMostEdge++;
+					for( j = i; j >= leftMostEdge; j-- ) {
+						// shift elements to right
+						yMin[j] = yMin[j-1];
+						xInt[j] = xInt[j-1];
+						invNegSlope[j] = invNegSlope[j-1];
+					}
+				}
+			}
+			return leftMostEdge;
+		};
+		
+		var updateXInt = function( leftMostEdge, rightMostEdge ) {
+			for( var i = leftMostEdge; i <= rightMostEdge; i++ ) {
+				xInt[i] += invNegSlope[i];
+			}
+		};
+		
+		var include = function( rightMostEdge, scan, edgesEntered ) {
+			for( ; rightMostEdge + 1 < edgesEntered && yMax[rightMostEdge + 1] > scan; rightMostEdge++ );
+			return rightMostEdge;
+		};
+		
+		var sortXInt = function( leftMostEdge, rightMostEdge ) { // bubble sort mechanism
+			var i, j, tmp;
+			for( i = leftMostEdge; i <= rightMostEdge - 1; i++ ) {
+				for( j = i + 1; j <= rightMostEdge; j++ ) {
+					if( xInt[i] > xInt[j] ) {
+						tmp = yMin[i];
+						yMin[i] = yMin[j];
+						yMin[j] = tmp;
+						tmp = xInt[i];
+						xInt[i] = xInt[j];
+						xInt[j] = tmp;
+						tmp = invNegSlope[i];
+						invNegSlope[i] = invNegSlope[j];
+						invNegSlope[j] = tmp;
+					}
+				}
+			}
+		};
+		
+		var fillScan = function( leftMostEdge, rightMostEdge, scan ) {
+			var x1, x2, i;
+			for( i = leftMostEdge; i <= rightMostEdge; i += 2 ) {
+				x1 = Math.round( xInt[i] );
+				x2 = Math.round( xInt[i+1] );
+	//			console.log( 'drawing line from', x1, 'to', x2, 'at y =', scan );
+				if ( outputBitImage ){
+					x1 = Math.max(x1,bbox.xmin);
+					x2 = Math.min(x2,bbox.xmax);
+		//			console.log("clip:",x1,"to",x2);
+					for( ; x1 <= x2; x1++ ) {
+						pixData[scan][x1]=1;
+						// plot pixel (x1,scan)
+					}
+				} else {
+					pixData.push([[x1,x2],scan]);
+				}
+			}
+		};
+		
+	// *************************
+
+		// start filling
+		var scan = yMax[0],
+			leftMostEdge = 0,
+			rightMostEdge = -1;
+
+		while( leftMostEdge < edgesEntered ) {
+			scan--;
+			if ( scan < bbox.ymin ){
+				break;
+			}
+			leftMostEdge = exclude( leftMostEdge, rightMostEdge, scan );
+			updateXInt( leftMostEdge, rightMostEdge );
+			rightMostEdge = include( rightMostEdge, scan, edgesEntered );
+			sortXInt( leftMostEdge, rightMostEdge );
+			if ( scan <= bbox.ymax ){
+				fillScan( leftMostEdge, rightMostEdge, scan );
+			}
+		}
+		return ( pixData );
+	};
+	
+	
+	// ポリゴンxビットイメージで出力された結果のOR演算機能 2020/7/10
+	// ポリゴンの特性を使って演算量を少なくする処理が入った特別処理になっている。
+	// あるタイルのピクセルのinRangeがfalseでも、別のタイルで同じ場所がtrueだったらそのデータを除去する処理
+	function doPolygonOrComputing( superParam ){
+		var dsrc = superParam.ans;
+		
+		dc=0;
+		dc2=0;
+		for ( var i = 0 ; i < dsrc.length ; i++ ){
+			if ( ! dsrc[i] ){
+				continue;
+			}
+			var cAns = dsrc[i];
+			if ( cAns.hasIntersection && cAns.hasOutOfRange ){ // 全部inRangeならスルーできる
+				var cExtent = cAns.extent;
+				var inersectedTiles =[]; // そのタイルと重なっているタイルを探す
+				for ( var j = 0 ; j < dsrc.length ; j++ ){
+					if ( i!=j && dsrc[j] && isIntersect(cExtent, dsrc[j].extent )){ // 自身は対象外だね
+						inersectedTiles.push({index:j, tile:dsrc[j]});
+					}
+				}
+				
+//				console.log("inersectedTiles:",inersectedTiles);
+				
+				for ( var py = 0 ; py < cAns.height ; py++ ){
+					for ( var px = 0 ; px < cAns.width ; px++ ){
+						// データがあり、inRangeがfalseのものが評価対象
+						if ( cAns.rasterData[py][px].color && cAns.rasterData[py][px].inRange == false ){ 
+							var pLng = cAns.extent.lngMin + px * (cAns.extent.width / cAns.width );
+							var pLat = cAns.extent.latMax - py * (cAns.extent.height / cAns.height);
+							
+							for ( var k = 0 ; k < inersectedTiles.length ; k++ ){
+								var iTile = inersectedTiles[k].tile;
+								iPx = Math.floor( iTile.width * (pLng - iTile.extent.lngMin) / iTile.extent.width);
+								iPy = Math.floor( iTile.height * (iTile.extent.latMax - pLat) / iTile.extent.height);
+								
+//								if ( dc < 100 ){console.log(iPx,iPy,iTile.rasterData[iPy][iPx])}
+								
+								if ( iPx>=0 && iPy>=0 && iPx < iTile.width && iPy < iTile.height ){
+									if (iTile.rasterData[iPy][iPx].color ){
+										if (iTile.rasterData[iPy][iPx].inRange == true ){
+		//									cAns.rasterData[py][px].inRange = true; // 本当のtrueとは言いづらいので、別の名前にするか、空にした方が良いかも。
+											cAns.rasterData[py][px] ={};
+											--cAns.outOfRangeCounts;
+											++dc;
+											break;
+										}
+									} else { // ジャギーによりポリゴンの縁の部分のデータがないケースがある
+										var comPix = computePixCoverage(iPx,iPy,iTile.width,iTile.height,superParam.pixDataBuffer[inersectedTiles[k].index],superParam.range);
+										if ( comPix.inRange == true ){
+											cAns.rasterData[py][px] ={};
+											--cAns.outOfRangeCounts;
+											++dc;
+											++dc2;
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+				
+				if ( cAns.outOfRangeCounts < 0 ){ // 引きすぎ
+					cAns.outOfRangeCounts = 0;
+				}
+				
+				if ( cAns.outOfRangeCounts == 0 ){
+					cAns.hasOutOfRange = false;
+				}
+				
+			} else {
+				// pass
+			}
+		}
+		console.log("Number of points inranged by OR processing : ",dc,"   by backup Processing:",dc2);
+		superParam.cbFunc(superParam.ans, superParam.param);
+	}
+	
+	function doPointOrComputing( superParam ){
+		// 工事中 未実装です
+		superParam.cbFunc(superParam.ans, superParam.param);
+	}
+	
+	
+	// 他のカバレッジで包含判定が出ているものを外す処理 2020/7/8
+	// 少しヒューリスティックなところがある・・・(ピクセルの分解能分)
+	function doPolylineOrComputing( superParam ){
+		var dsrc = superParam.ans;
+		
+		// このsuperParam.ans配列 作り方に若干無理があるのでemptyがあるためそれを消す
+		// 加えて、それぞれの中に、inRangeでないポイントがあるかどうかを確認する
+		for ( var i = dsrc.length -1 ; i >=0 ; i-- ){
+			if ( !dsrc[i] ){
+				dsrc.splice(i,1);
+			} else {
+				var hasOutOfRange = false;
+				for ( var j = 0 ; j < dsrc[i].length ; j++ ){
+					if ( dsrc[i][j].inRange == false ){
+						hasOutOfRange = true;
+						break;
+					}
+				}
+				dsrc[i].hasOutOfRange=hasOutOfRange;
+			}
+		}
+		var ans;
+		console.log("doPolylineOrComputing dsrc:",dsrc);
+		for ( var i = 0 ; i < dsrc.length ; i++ ){
+			var cAns = dsrc[i];
+			if ( cAns.hasOutOfRange ){ // 全部inRangeならスルーできる
+				var cExtent = cAns.extent;
+				var inersectedTiles =[]; // そのタイルと重なっているタイルを探す
+				for ( var j = 0 ; j < dsrc.length ; j++ ){
+					if ( i!=j && isIntersect(cExtent, dsrc[j].extent )){ // 自身は対象外だね
+						inersectedTiles.push(dsrc[j]);
+					}
+				}
+				// console.log("cAns:",cAns,"  inersectedTiles:",inersectedTiles);
+				for ( var j = 0 ; j < cAns.length ; j++ ){ // 個々のポイントについて評価する
+					var tPoi=cAns[j];
+					if ( tPoi.inRange==false ){ // inRangeでないポイントがあったらinersectedTilesのポイントの中の近いものでinRangeのものがあるかどうか探す
+						var mPois=[];
+						for ( var k = 0 ; k < inersectedTiles.length ; k++ ){
+							var minDif = 1e30;
+							var mPoi=null;
+							//console.log("inersectedTiles[k].extent",inersectedTiles[k].extent,"  tPoi:",tPoi);
+							if (inersectedTiles[k].extent.lngMin <= tPoi.coordinates[0] && inersectedTiles[k].extent.lngMax > tPoi.coordinates[0] && inersectedTiles[k].extent.latMin <= tPoi.coordinates[1] && inersectedTiles[k].extent.latMax > tPoi.coordinates[1]){ // 対象とする地点が、その隣接タイルの中に入っている場合のみ演算対象とする
+								// console.log("doComp:");
+								for ( var l = 0 ; l < inersectedTiles[k].length ; l++){
+									var rPoi = inersectedTiles[k][l];
+									var dif = (tPoi.coordinates[0] - rPoi.coordinates[0])*(tPoi.coordinates[0] - rPoi.coordinates[0])+(tPoi.coordinates[1] - rPoi.coordinates[1])*(tPoi.coordinates[1] - rPoi.coordinates[1]);
+									if (dif < minDif ){ // 対象地点と最も近い隣接タイル中の地点を選別する ISSUE これだけだと消し過ぎる可能が否定しきれない（タイルレベルでは入っているが、たまたまタイル中にある全然離れたライン上のポイントで判別してる可能性） スレッショルドをピクセル解像度程度にするべきじゃないか。
+										minDif = dif;
+										// rPoi.dif = dif;
+										mPoi = rPoi;
+									}
+								}
+							}
+							if ( mPoi && minDif < (cAns.pixSize + inersectedTiles[k].pixSize)*(cAns.pixSize + inersectedTiles[k].pixSize)){ // 上の課題に対応するため、ここで minDif < pixRes^2 (ピクセル程度しか離れてない) 的な条件で絞る
+								mPois.push(mPoi);
+							}
+						}
+						// console.log("tPoi:",tPoi,"  mPois:",mPois,"  minDif:",minDif);
+						for ( var k = 0; k < mPois.length ; k++ ){
+							var mPoi = mPois[k];
+							if ( mPoi && mPoi.inRange==true){
+								// 他のカバレッジで包含判定が出ているピクセルだと判定
+//								console.log("OR: tgt:",tPoi,"   ref:",mPoi,"   minDif:",minDif);
+								tPoi.inRange = "mayTrue"; // ひとまず消さずにフラグを変える・・
+							}
+						}
+					}
+				}
+				
+				//console.log("hasOOR:",i, " cExtent:",cExtent, "  inersectedTiles:",inersectedTiles);
+			} else {
+				//console.log("PASS  :",i);
+			}
+		}
+		
+		var ans = [];
+		var dc=0;
+		// 処理完了！　きれいにする
+		for ( var i = 0 ; i < dsrc.length ; i++ ){
+			for ( var j = 0 ; j < dsrc[i].length ; j++ ){
+				var tPoi = dsrc[i][j];
+				if ( tPoi.inRange == "mayTrue"){
+					++ dc;
+					// pass
+//					tPoi.inRange=false;
+//					ans.push(tPoi);
+				} else {
+					ans.push(tPoi);
+				}
+			}
+		}
+		superParam.ans=ans;
+		console.log("Number of points deleted by OR processing : ",dc);
+		superParam.cbFunc(superParam.ans, superParam.param);
+	}
+	
+	
+	
+	
+	
+	function getImageURL(imageUrl){
+		if ( proxyUrl && imageUrl.indexOf("http") == 0){
+			if (isDirectURL(imageUrl)){
+				// Do nothing (Direct Connection)
+			} else {
+				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
+//				console.log("via proxy url:",imageUrl);
+			}
+		} else {
+			// Do nothing..
+		}
+		return (imageUrl);
+	}
+	
+	function isDirectURL(url){
+		// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
+		var ans = false;
+		for ( var i = 0 ; i < directURLlist.length ; i++ ){
+			if ( url.indexOf(directURLlist[i])>=0){
+				ans = true;
+				break;
+			}
+		}
+		return ( ans );
+	}
+	
+	// rgb2hsv and hsv2rgb : from https://www.petitmonte.com/javascript/rgb_hsv_convert.html
+	// RGB色空間からHSV色空間へ変換する 
+	//  r(red)  : 赤色 0-255の値
+	//  g(green): 緑色 0-255の値
+	//  b(blue) : 青色 0-255の値 
+	function rgb2hsv(r, g, b){   
+		var max = Math.max(r, g, b);
+		var min = Math.min(r, g, b);   
+		var hsv = {'h':0,
+		's':0,
+		'v':max}; // V(明度)   
+		if (max != min) {
+			// H(色相)  
+			if (max == r) hsv.h = 60 * (g - b) / (max-min);
+			if (max == g) hsv.h = 60 * (b - r) / (max-min) + 120;
+			if (max == b) hsv.h = 60 * (r - g) / (max-min) + 240;
+			// S(彩度)
+			hsv.s = (max - min) / max;
+		}   
+		if (hsv.h < 0){
+			hsv.h = hsv.h + 360;
+		}
+		hsv.h =  Math.round(hsv.h);
+		hsv.s =  Math.round(hsv.s * 100);
+		hsv.v =  Math.round((hsv.v / 255) * 100);     
+		return hsv;   
+	}
+	// HSV(HSB)色空間からRGB色空間へ変換する 
+	//  h(hue)       : 色相/色合い   0-360度の値
+	//  s(saturation): 彩度/鮮やかさ 0-100%の値
+	//  v(Value)     : 明度/明るさ   0-100%の値 
+	//  ※v は b(Brightness)と同様 
+	function hsv2rgb(h, s, v){
+		var max = v;
+		var min = max - ((s / 255) * max);
+		var rgb = {'r':0,'g':0,'b':0};  
+		if (h == 360){
+			h = 0;
+		}
+		s = s / 100;   
+		v = v / 100;   
+		if (s == 0){
+			rgb.r = v * 255;
+			rgb.g = v * 255;
+			rgb.b = v * 255;
+			return rgb;
+		}
+		var dh = Math.floor(h / 60);
+		var p = v * (1 - s);
+		var q = v * (1 - s * (h / 60 - dh));
+		var t = v * (1 - s * (1 - (h / 60 - dh)));
+		switch (dh){
+			case 0 : rgb.r = v; rgb.g = t; rgb.b = p;  break;
+			case 1 : rgb.r = q; rgb.g = v; rgb.b = p;  break;
+			case 2 : rgb.r = p; rgb.g = v; rgb.b = t;  break;
+			case 3 : rgb.r = p; rgb.g = q; rgb.b = v;  break;
+			case 4 : rgb.r = t; rgb.g = p; rgb.b = v;  break;
+			case 5 : rgb.r = v; rgb.g = p; rgb.b = q;  break
+		}   
+		rgb.r =  Math.round(rgb.r * 255);
+		rgb.g =  Math.round(rgb.g * 255);
+		rgb.b =  Math.round(rgb.b * 255);
+		return rgb; 
+	} 	
+	
+	// geoJsonレンダラ系
+	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm){
+//		console.log("called svgMapGisTool drawGeoJson");
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var svgImage = svgImages[targetSvgDocId];
+		var svgImagesProp = svgImagesProps[targetSvgDocId];
+		var crs = svgImagesProp.CRS;
+		
+		if ( geojson.metadata){ // 2020/1/8
+			metadata=geojson.metadata;
+//			console.log("Set metadata on drawGeoJson:",metadata)
+		} // ISSUE 2020.1.14 本来のgeojsonでは、 properties type:Featureオブジェクト下の "properties"プロパティに{KV,..}としてメタデータを入れる仕様　これをサポートするべき
+		
+		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
+			for ( var i = 0 ; i < geojson.length ; i++ ){
+				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+			}
+		} else if ( geojson.type == "FeatureCollection" ){
+			var features = geojson.features;
+			for ( var i = 0 ; i < features.length ; i++ ){
+				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+			}
+		} else if ( geojson.type == "Feature" ){
+			var geom = geojson.geometry;
+			if(geojson.properties){
+				metadata = "";
+				postMeta = Object.keys(geojson.properties).map(function(key){return geojson.properties[key]});
+				for(var i=0; i<postMeta.length; i++){
+					metadata = metadata + postMeta[i];
+					if(i != postMeta.length - 1){
+						metadata = metadata + ",";
+					}
+				}
+			}
+			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+		} else if ( geojson.type == "GeometryCollection" ){
+			var geoms = geojson.geometries;
+			for ( var i = 0 ; i < geoms.length ; i++ ){
+				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+			}
+		} else if ( geojson.type == "MultiPolygon" ){
+			// これは、pathのサブパスのほうが良いと思うが・・
+			if ( geojson.coordinates.length >0){
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putPolygon(geojson.coordinates[i], svgImage, crs, fillColor, metadata, parentElm);
+				}
+			}
+		} else if ( geojson.type == "Polygon" ){
+			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
+		} else if ( geojson.type == "MultiLineString" ){
+			// これは、pathのサブパスのほうが良いと思うが・・
+			if ( geojson.coordinates.length >0){			
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+				}
+			}
+		} else if ( geojson.type == "LineString" ){
+			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+			
+		} else if ( geojson.type == "MultiPoint" ){
+			// グループで囲んで一括でmetadataつけたほうが良いと思うが・・
+			if ( geojson.coordinates.length >0){
+				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
+					putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+				}
+			}
+		} else if ( geojson.type == "Point" ){
+			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+		}
+		
+		/**
+		for ( var i = 0 ; i < geojson.length ; i++ ){
+			var geom = geojson[i];
+			switch ( geom.type ){
+			case "LineString":
+				var pe = svgImage.createElement("path");
+				var pathD = getPathD( geom.coordinates , crs );
+				pe.setAttribute("d",pathD);
+				pe.setAttribute("fill","none");
+				pe.setAttribute("stroke","blue");
+				pe.setAttribute("stroke-width","3");
+				pe.setAttribute("vector-effect","non-scaling-stroke");
+				svgImage.documentElement.appendChild( pe );
+				break;
+			case "Polygon":
+				svgImage.createElement("path");
+				break;
+			}
+		}
+		**/
+//		console.log(svgImage);
+	}
+	
+
+	/*
+		Styleは未実装
+		Point     : title = name, metadata = descrptionとして格納
+		LineString: metadata = name, descriptionとして格納
+	*/
+
+	function drawKml( kml , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,styleData){
+		console.log("kml draw method.");
+		var svgImages = svgMap.getSvgImages();
+		var svgImagesProps = svgMap.getSvgImagesProps();
+		var svgImage = svgImages[targetSvgDocId];
+		var svgImagesProp = svgImagesProps[targetSvgDocId];
+		var crs = svgImagesProp.CRS;
+		//フォルダについて文法解釈
+		var folders = kml.querySelectorAll('Folder');
+		console.log(folders);
+		if(folders.length > 0){
+			var fld = Array.prototype.slice.call(folders,0); 
+			//NodeListのループ
+			//Firefox/Chrome 
+			//folders.forEach(folder => {
+			//case IE Edge
+			//Array.prototype.forEach.call(folders, (folder) => {
+			//case IE11
+			//fld.forEach(function(folder,index){
+			fld.forEach(function(folder,index){
+				var kmlName = getNameFromKML(folder);
+				var kmlDescription = getDescriptionFromKML(folder);
+				//console.log('FOLDER',folder);
+				drawKml( folder, targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, kmlName, kmlDescription, parentElm,styleData);
+			});
+		}else{
+			//Placemarkについて文法解釈
+			var placemarkAll = kml.querySelectorAll('Placemark');
+			//console.log(placemarkAll);
+			var plm = Array.prototype.slice.call(placemarkAll,0);
+			plm.forEach(function(placemark,index){
+				var kmlName = getNameFromKML(placemark);
+				var kmlDescription = getDescriptionFromKML(placemark);
+				if(kmlName === null && kmlDescription === null){
+					kmlName = poiTitle;
+					kmlDescription = metadata;
+				}
+				var kmlGeometory  = getGeometryFromKML(placemark);
+				var kmlCoordinate = getCordinamteFromKML(placemark);
+
+				if( kmlGeometory == "point" ){
+					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, kmlDescription, parentElm);
+				}else if(kmlGeometory == "linestring"){
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+				}else if( kmlGeometory == "linearring"){
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+				}else if( kmlGeometory == "polygon"){
+				}else if( kmlGeometory == "multigeometry"){
+				
+				}
+			});
+		}
+	}
+
+	function getNameFromKML(item){
+		var nameTag = item.querySelector('name');
+		if(nameTag){
+			return nameTag.textContent.trim();
+		}else{
+			return null;
+		}
+	}
+
+	function getDescriptionFromKML(item){
+		var nameTag = item.querySelector('description');
+		if(nameTag){
+			return nameTag.textContent.trim();
+		}else{
+			return null;
+		}
+	}
+
+
+	function getGeometryFromKML(item){
+		if(item.querySelector('Placemark')){
+			return 'placemark';
+		}else if(item.querySelector('Polygon')){
+			return "polygon";
+		}else if(item.querySelector('Point')){
+			return "point";
+		}else if(item.querySelector('LineString')){
+			return "linestring";
+		}else if(item.querySelector('LinearRing')){
+			return "linearring";
+		}else if(item.querySelector('MultiGeometry')){
+			return "multigeometry";
+		}
+	}
+
+
+	function getCordinamteFromKML(item){
+		var geoArray = []
+		var coordinates = item.querySelector('coordinates').textContent.trim().replace(/\n/g," ").replace(/\t/g," ").split(" ");
+		for (var i = 0; i < coordinates.length; i++){
+			coordinate = coordinates[i].trim().split(",");
+			geoArray.push([coordinate[0],coordinate[1]]);
+		}
+		return geoArray;
+	}
+	
+	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm){
+		var poie = svgImage.createElement("use");
+		var svgc = getSVGcoord(coordinates,crs);
+		poie.setAttribute( "x" , "0" );
+		poie.setAttribute( "y" , "0" );
+		poie.setAttribute( "transform" , "ref(svg," + svgc.x + "," + svgc.y + ")" );
+		poie.setAttribute( "xlink:href" , "#" + POIiconId );
+		if ( poiTitle ){
+			poie.setAttribute( "title", poiTitle);
+		}
+		if ( metadata ){
+			poie.setAttribute( "content", metadata);
+		}
+		if ( parentElm ){
+			parentElm.appendChild( poie );
+		} else {
+			svgImage.documentElement.appendChild( poie );
+		}
+		return ( poie );
+	}
+	
+	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm){
+		if ( !strokeColor ){
+			strokeColor = "blue";
+		}
+		if ( !strokeWidth ){
+			strokeWidth = 3;
+		}
+		var pe = svgImage.createElement("path");
+		var pathD = getPathD( coordinates , crs );
+		pe.setAttribute("d",pathD);
+		pe.setAttribute("fill","none");
+		pe.setAttribute("stroke",strokeColor);
+		pe.setAttribute("stroke-width",strokeWidth);
+		pe.setAttribute("vector-effect","non-scaling-stroke");
+		if ( metadata ){
+			pe.setAttribute( "content", metadata);
+		}
+		if ( parentElm ){
+			parentElm.appendChild( pe );
+		} else {
+			svgImage.documentElement.appendChild( pe );
+		}
+//		console.log("putLineString:",pe);
+		return (pe);
+	}
+	
+	function putPolygon(coordinates, svgImage, crs, fillColor, metadata, parentElm){
+		if ( coordinates.length ==0){
+			return;
+		}
+		if ( !fillColor ){
+			strokeColor = "orange";
+		}
+		
+		var pe = svgImage.createElement("path");
+		
+		var pathD="";
+		for ( var i = 0 ; i < coordinates.length ; i++ ){
+			pathD += getPathD( coordinates[i] , crs )+"z ";
+		}
+		
+		pe.setAttribute("d",pathD);
+		pe.setAttribute("fill",fillColor);
+		pe.setAttribute("stroke","none");
+		pe.setAttribute("fill-rule", "evenodd");
+		if ( metadata ){
+			pe.setAttribute( "content", metadata);
+		}
+		if ( parentElm ){
+			parentElm.appendChild( pe );
+		} else {
+			svgImage.documentElement.appendChild( pe );
+		}
+		return ( pe);
+	}
+	
+	function getPathD( geoCoords , crs ){
+		if ( geoCoords.length ==0){
+			return(" ");
+		}
+		var ans ="M";
+		var svgc = getSVGcoord(geoCoords[0],crs);
+		ans += svgc.x + "," + svgc.y + " L";
+		for ( var i = 1 ; i < geoCoords.length ; i++ ){
+			svgc = getSVGcoord(geoCoords[i],crs);
+			ans += svgc.x + "," + svgc.y + " ";
+		}
+		return ( ans );
+	}
+	
+	function getSVGcoord( geoCoord , crs ){
+		// DEBUG 2017.6.12 geojsonの座標並びが逆だった 正しくは経度,緯度並び
+		return{ 
+			x: geoCoord[0] * crs.a + geoCoord[1] * crs.c + crs.e ,
+			y: geoCoord[0] * crs.b + geoCoord[1] * crs.d + crs.f
+		}
+	}
+	
+	function testCapture( geom ){
+		console.log("called testCapture");
+		console.log("captured Geometry is:" , geom);
+	}
+	
+	function testCapGISgeom(){
+//		console.log("testCapGISgeom:",testCapture);
+		svgMap.captureGISgeometries(testCapture);
+	}
+	
+	function captureGeometries( cbFunc , opt ){
+		svgMap.captureGISgeometries( cbFunc , opt );
+	}
+	
+	function latLng2GeoJsonPoint(lat , lng ){
+		return {
+			type:"Point",
+			coordinates:[ lng , lat]
+		}
+	}
+	
+	
+	
+	// ビットイメージカバレッジ×ポリゴンGIS(getInRangePolygonParts)の結果を直接可視化する
+	function renderImages(sourceDataArray, parentElment, crs, renderingOptions){
+		for ( var tc = 0 ; tc < sourceDataArray.length ; tc++ ){
+			var tile = sourceDataArray[tc];
+			if ( !tile ){ continue;}
+			var tileImageUri = svgMapGIStool.getImage(tile,renderingOptions);
+			var rct = (parentElment.ownerDocument).createElement("image");
+			if ( !tile.transform ){ // 回転成分がない
+				rct.setAttribute("x",Math.min(tile.extent.x * crs.a, (tile.extent.x+tile.extent.width) * crs.a));
+				rct.setAttribute("y",Math.max(tile.extent.y * crs.d, (tile.extent.y+tile.extent.height) * crs.d));
+				rct.setAttribute("width",(tile.extent.width) * crs.a);
+				rct.setAttribute("height",(tile.extent.height) * crs.d);
+			} else {
+				console.log("has transform meshdata");
+				var tMat = svgMap.matMul(tile.transform, crs);
+				rct.setAttribute("x",tile.coordinates[0].x);
+				rct.setAttribute("y",tile.coordinates[0].y);
+				rct.setAttribute("width",tile.coordinates[1].x - tile.coordinates[0].x);
+				rct.setAttribute("height",tile.coordinates[1].y - tile.coordinates[0].y);
+				rct.setAttribute("transform","matrix(" + tMat.a + "," + tMat.b + "," + tMat.c + "," + tMat.d + "," + tMat.e + "," + tMat.f + ")");
+			}
+			rct.setAttribute("xlink:href",tileImageUri);
+			rct.setAttribute("style","image-rendering:pixelated");
+			parentElment.appendChild(rct);
+		}
+		
+	}
+	
+	// メッシュデータからビットイメージを生成
+	// ビットイメージカバレッジ×ポリゴンGIS(getInRangePolygonParts)の結果をビットイメージ化することを第一の目的にしている
+	// sourceData: 
+	// width, height メッシュのピクセル数
+	// rasterData[py][px]
+	//   color
+	//     r,g,b,a
+	//   inRange boolean
+	//
+	// renderingOptions:
+	//   drawOutOfRange : レンジ内ではなくレンジ外を描画する
+	//   fillColor : 上記条件のピクセルを指定した色で描画する
+	//   useCoverageColor : 上記条件のピクセルをカバレッジの色で描画する
+	//   
+	//
+	function getImage(sourceData, renderingOptions ){
+		var width = sourceData.width;
+		var height = sourceData.height;
+		var extent = sourceData.extent;
+		
+		var fillColor = [255,0,0,255];
+		
+		if( !renderingOptions ){
+			renderingOptions ={};
+		} else if ( renderingOptions.fillColor && renderingOptions.fillColor.length >= 3){
+			fillColor=renderingOptions.fillColor;
+			if ( renderingOptions.fillColor.length == 3 ){
+				fillColor.push(255);
+			}
+		}
+		
+		
+		var canvas = document.createElement('canvas');
+		canvas.width = width;
+		canvas.height = height;
+		
+		var context = canvas.getContext('2d');
+		var imageData = context.getImageData(0, 0, width, height);
+		var pixels = imageData.data; 
+//		console.log("width,height,rasterData:",width,height,sourceData.rasterData);
+		for ( var py = 0 ; py < height ; ++py ){
+			for ( var px = 0 ; px < width ; ++px ){
+				var base = (py * width + px) * 4;
+//				console.log("px,py",px,py);
+				var color = sourceData.rasterData[py][px].color;
+				var inRange = sourceData.rasterData[py][px].inRange;
+//				console.log("px,py",px,py," color,inRange:",color,inRange," sourceData.rasterData:",sourceData.rasterData[py][px]);
+				if ( color ){
+					if (inRange ){
+						if ( !renderingOptions.drawOutOfRange){
+							if ( renderingOptions.useCoverageColor ){
+								pixels[base + 0] = color.r;  // Red
+								pixels[base + 1] = color.g;  // Green
+								pixels[base + 2] = color.b;  // Blue
+								pixels[base + 3] = 255;  // Alpha
+							} else {
+								pixels[base + 0] = fillColor[0];  // Red
+								pixels[base + 1] = fillColor[1];  // Green
+								pixels[base + 2] = fillColor[2];  // Blue
+								pixels[base + 3] = fillColor[3];  // Alpha
+							}
+						}
+					} else {
+						if ( renderingOptions.drawOutOfRange){
+							if ( renderingOptions.useCoverageColor ){
+								pixels[base + 0] = color.r;  // Red
+								pixels[base + 1] = color.g;  // Green
+								pixels[base + 2] = color.b;  // Blue
+								pixels[base + 3] = 255;  // Alpha
+							} else {
+								pixels[base + 0] = fillColor[0];  // Red
+								pixels[base + 1] = fillColor[1];  // Green
+								pixels[base + 2] = fillColor[2];  // Blue
+								pixels[base + 3] = fillColor[3];  // Alpha
+							}
+						}
+					}
+				}
+			}
+		}
+		context.putImageData(imageData, 0, 0);
+		var uri = canvas.toDataURL('image/png');
+		return ( uri );
+	}
+	
+	
+	
+return { // svgMapGIStool. で公開する関数のリスト
+	buildDifference : buildDifference,
+	// buildUnion : buildUnion,
+	// buildSymDifference : buildSymDifference,
+	buildIntersection : buildIntersection,
+	captureGeometries : captureGeometries,
+	coverageImageXY2LatLng : coverageImageXY2LatLng,
+	drawGeoJson : drawGeoJson,
+	drawKml : drawKml,
+	getExcludedPoints : getExcludedPoints,
+	getImage: getImage,
+	getIncludedPoints : getIncludedPoints,
+	getInRangeGeometriesOnCoverage : getInRangeGeometriesOnCoverage,
+	getInRangeLineParts : getInRangeLineParts,
+	getInRangePoints : getInRangePoints,
+	getInRangePolygonParts : getInRangePolygonParts,
+	haltComputing : haltComputing,
+	imageUrlEncoder: getImageURL,
+	latLng2coverageImageXY: latLng2coverageImageXY,
+	latLng2GeoJsonPoint: latLng2GeoJsonPoint,
+	renderImages: renderImages,
+	setImageProxy: setImageProxy,
+	testCapGISgeom : testCapGISgeom,
+}
+
+})();
+
+window.svgMapGIStool = svgMapGIStool;
+
+
+})( window );
+
