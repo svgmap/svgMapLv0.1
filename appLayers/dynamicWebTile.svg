@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="-42.8202042942663, -49.9999999999999, 513.842451531196, 600" xmlns:go="http://purl.org/svgmap/profile"  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" property="id,type,latitude,longitude,title,address,spec" >
 <script>
-	// Dynamic DenshiKokudo Layer for SVGMap Sample for SVGMapLevel0 ＞ r10
+	// Dynamic CHIRIHIN Tile Spec Layer for SVGMap for SVGMapLevel0 ＞ r11 (obsolute r10 support)
 	// Programmed by Satoru Takagi
 	// Copyright (C) 2013..2016 by Satoru Takagi @ KDDI CORPORATION
 	// 
@@ -23,7 +23,7 @@
 	// 地図データとしては、OpenStreetMapを利用（比較的容易に他にも置き換えられる）
 	//
 	// この実装の注意：
-	// ＞(&gt;)・＜(&lt;)・＆(&amp;)符号はエスケープしないと動かない
+	// ＞(>)・＜(<)・＆(&)符号はエスケープしないと動かない
 	// 
 	// このコードの動作環境では、以下があらかじめ設定される
 	// document:このドキュメント自身
@@ -41,7 +41,18 @@
 	// dynamicDenshiKokudo2016.svg#map=name||number
 	// nameは、stdとかblankとかenglishとか、あとは数字 (sva配列参照)
 	// see: http://maps.gsi.go.jp/development/ichiran.html
-	// 2016/10/27 地理院ドメインの地図以外でもなんでも出せるようなものにした
+	// 2016/10/27 地理院ドメインの地図以外でもなんでも出せるようなものにした (baseURL)
+	// 2020/01/28 LayerUIからロードするタイルセットを可変にした setServerParams()
+	// 2020/07/27 setServerParams(URL)や、#baseURL=URLで、https://server.name.jp/[[zoom]]/[[tx]]/[[ty]].png みたいなテンプレートを指定可能に
+
+	//
+	// フラグメントオプション：
+	//
+	// map :  sva[]のKey
+	// baseURL : タイルパス値の前までのURL "none"で初期ロード無し
+	// zmax : 最大ズーム値
+	// jpegMedia : jpegの時にtrue (def. png)
+	// 
 	
 	
 	var canvasSize;
@@ -62,7 +73,7 @@
 			
 			canvasSize = getCanvasSize();
 			
-			if (hParams.map &amp;&amp; typeof(hParams.map) == "string" ){
+			if (hParams.map && typeof(hParams.map) == "string" ){
 				if ( sva[hParams.map] ){
 					mapName = baseURL + hParams.map;
 					maxLevel = sva[hParams.map][1];
@@ -81,14 +92,36 @@
 				mapName = baseURL + mapName;
 			}
 			
+			this.getServerParams = getServerParams;
+			this.setServerParams = setServerParams;
+			
 //			console.log("resolved Url:",mapName, " jpg:",jpegMedia);
 		}
 	}
 	
+	function getServerParams(){
+		return {
+			baseURL: mapName,
+			maxLevel: maxLevel,
+			minLevel: minLevel
+		}
+	}
+	function setServerParams(baseURLp,maxLevelp,minLevelp){
+		mapName = baseURLp;
+		maxLevel = maxLevelp;
+		minLevel = minLevelp;
+		var currentTiles =  document.getElementsByTagName("image");
+		for ( var i = currentTiles.length - 1 ; i >= 0 ; i-- ){
+			var oneTile = currentTiles[i];
+			oneTile.parentNode.removeChild(oneTile);
+		}
+		onzoom();
+	}
+	
     function getHashParams( hash ){
     	hash = hash.substring(1);
-    	hash = hash.split("&amp;");
-		for ( var i = 0 ; i &lt; hash.length ; i++ ){
+    	hash = hash.split("&");
+		for ( var i = 0 ; i < hash.length ; i++ ){
 			hash[i] = hash[i].split("="); // "
 			if ( hash[i][1] ){
 				hash[hash[i][0]] = hash[i][1];
@@ -101,21 +134,27 @@
     }
     
 	onzoom = function(){
+//		console.log("webTile onzoom:", this.geoViewBox , geoViewBox , this.scale , scale, this.CRS ,CRS);
+		if ( !mapName || mapName =="none"){
+			return;
+		}
 		var level = 8;
-		var level = Math.floor( Math.LOG2E * Math.log(this.scale) + 7.5);
-		if (level &gt; maxLevel ){
+//		var level = Math.floor( Math.LOG2E * Math.log(this.scale) + 7.5);
+		var level = Math.floor( Math.LOG2E * Math.log(scale) + 7.5);
+		if (level > maxLevel ){
 			level = maxLevel;
-		} else if ( level &lt; minLevel ){
+		} else if ( level < minLevel ){
 			level = minLevel;
 		}
 		++ testIscript2;
 		
-		var tileSet = getTileSet( this.geoViewBox , level )
+//		var tileSet = getTileSet( this.geoViewBox , level )
+		var tileSet = getTileSet( geoViewBox , level )
 		
 		var currentTiles =  document.getElementsByTagName("image");
 //		console.log(currentTiles);
 		
-		for ( var i = currentTiles.length - 1 ; i &gt;= 0 ; i-- ){
+		for ( var i = currentTiles.length - 1 ; i >= 0 ; i-- ){
 			var oneTile = currentTiles[i];
 			var qkey = oneTile.getAttribute("metadata");
 			if ( tileSet[qkey] ){
@@ -131,7 +170,8 @@
 		
 		for ( var tkey in tileSet ){
 			if ( ! tileSet[tkey].exist ){
-				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , this.CRS );
+//				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , this.CRS );
+				var addTile = getTile( tileSet[tkey].x , tileSet[tkey].y , level , CRS );
 				document.getElementsByTagName("svg")[0].appendChild(addTile);
 			}
 		}
@@ -172,8 +212,8 @@
 		var brxy = latLng2XY( geoViewBox.y , geoViewBox.x + geoViewBox.width, level );
 		var tileBRxy = XY2TileXY( brxy );
 		
-		for ( var i = tileTLxy.y ; i &lt;= tileBRxy.y ; i++ ){
-			for ( var j = tileTLxy.x ; j &lt;= tileBRxy.x  ; j++ ){
+		for ( var i = tileTLxy.y ; i <= tileBRxy.y ; i++ ){
+			for ( var j = tileTLxy.x ; j <= tileBRxy.x  ; j++ ){
 				var qkey = getKey( j, i, level);
 				TileSet[qkey] = new Object();
 				TileSet[qkey].x = j;
@@ -208,7 +248,7 @@
 	var tilePix = 256;
 	function lvl2Res( lvl ){
 		var j = 1;
-		for(var i = 0 ; i &lt; lvl ; i++){
+		for(var i = 0 ; i < lvl ; i++){
 			j = j * 2;
 		}
 		return ( j * tilePix );
@@ -292,9 +332,7 @@
 		"20150911dol4" :[10,18],
 		"20150911dol5" :[10,18],
 		"20150911dol" :[14,18],
-		"20150714dol" :[14,18],
-		"did2015" :[8,18],
-		"201807H3007gouu_kurashiki_0707dansaizu" : [6,16]
+		"20150714dol" :[14,18]
 		};
 	
 	function getURL( tx , ty , lvl ){
@@ -303,7 +341,16 @@
 		if ( mapName=="ort" || jpegMedia ){
 			media =".jpg";
 		}
-		var mapServerURL = mapName + "/" + lvl + "/" + tx + "/" + ty + media;
+		var mapServerURL;
+		if ( mapName.indexOf("[[zoom]]") > 0 && mapName.indexOf("[[tx]]") > 0 && mapName.indexOf("[[ty]]") > 0 ){
+			// 2020/7/27 WMTSとかみたいなサーチパートのモノとか、なんでも設定できるように・・・
+			// https://server.name.jp/[[zoom]]/[[tx]]/[[ty]].png" みたいにmapNameをsetServerParams()や、#baseURL=xxxで、設定する
+			mapServerURL = mapName.replace("[[zoom]]", lvl );
+			mapServerURL = mapServerURL.replace("[[tx]]", tx );
+			mapServerURL = mapServerURL.replace("[[ty]]", ty );
+		} else {
+			mapServerURL = mapName + "/" + lvl + "/" + tx + "/" + ty + media;
+		}
 		return {
 			URL : mapServerURL ,
 			Key : tile_ans
