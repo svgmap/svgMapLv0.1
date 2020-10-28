@@ -42,6 +42,7 @@
 // 2019/11/26 : CORSがあれば、別ドメインのレイヤーでもLayerUIframeが動作できるようになった（かも）
 // 2019/12/05 : SVGMap.jsのグローバルエリア"globalMesasge" span要素がある場合、そこに(調停付きで)レイヤー固有UIframeからメッセージを出せるフレームワーク putGlobalMessage()
 // 2020/06/09 : レイヤ固有UIiframeのscriptに、preRenderFunction　という名の関数があると、そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出される。
+// 2020/10/13 : svgImagesProps[layerID]に.controllerWindowを追加
 //
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
@@ -168,6 +169,9 @@ function setLayerListmessage( head , foot ){ // added 2018.2.6
 
 function setLayerTableStep2(){
 	var tableHeight = document.getElementById("layerTable").offsetHeight;
+	if ( tableHeight == 0 ){ // patch 2020/10/28 (レイヤリスト閉じているときにレイヤ追加されたりしてupdateLayerTableすると2クリックしないと開かない微妙な不具合)
+		return;
+	}
 //	console.log(tableHeight, layerListMaxHeight , layerListFoldedHeight , layerListMaxHeightStyle );
 	if ( tableHeight < layerListMaxHeight - layerListFoldedHeight - 2 ){
 		layerList.style.height = (tableHeight + layerListFoldedHeight + 2) + "px";
@@ -909,8 +913,9 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 	
 	iframe.contentWindow.svgMapLayerUI=svgMapLayerUI;
 	iframe.contentWindow.putGlobalMessage = putGlobalMessageForLayer(lid); // added 2019/12/05 今後、この種の"そのレイヤーに対するAPI"が増えると思うが、もう少しきれいにまとめたい。(TBD)
-	
-	iframe.contentWindow.svgImageProps = (svgMap.getSvgImagesProps())[lid];
+	var sip = (svgMap.getSvgImagesProps())[lid];
+	iframe.contentWindow.svgImageProps = sip;
+	sip.controllerWindow = iframe.contentWindow; // 2020/10/13 svgImagesPropにcontrollerWindowを追加
 	iframe.contentWindow.svgImage = (svgMap.getSvgImages())[lid];
 //		iframe.contentWindow.testIframe("hellow from parent");
 	if ( transferCustomEvent2iframe[lid] ){
