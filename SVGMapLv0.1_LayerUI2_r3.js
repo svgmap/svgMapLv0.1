@@ -43,6 +43,7 @@
 // 2019/12/05 : SVGMap.jsのグローバルエリア"globalMesasge" span要素がある場合、そこに(調停付きで)レイヤー固有UIframeからメッセージを出せるフレームワーク putGlobalMessage()
 // 2020/06/09 : レイヤ固有UIiframeのscriptに、preRenderFunction　という名の関数があると、そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出される。
 // 2020/10/13 : svgImagesProps[layerID]に.controllerWindowを追加
+// 2020/12/08 : hiddenOnLayerLoad(内部変数hiddenOnLaunch)が複数あった場合にロジックが破綻していたのを修正
 //
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
@@ -723,52 +724,48 @@ function showLayerSpecificUI(e){
 		
 	}
 	
-	if ( !e.target.hiddenOnLaunch){
+	if ( !e.target.hiddenOnLaunch ){ // e.target.hiddenOnLaunch があるときはlayerSpecificUIの表示状態に関与しない
 		layerSpecificUI.style.display = "inline"; // 全体を表示状態にする
-		
-		var targetIframeId = getIframeId(layerId);
-		
-		var visibleIframeId = getVisibleLayerSpecificUIid();
-	//	console.log("visibleIframeId:",visibleIframeId);
-		
-		if ( visibleIframeId && targetIframeId != visibleIframeId){ // ターゲットとは別の表示中のLayerUIがあればそれを隠す
-			dispatchCutomIframeEvent( hideFrame ,visibleIframeId);
-			document.getElementById( visibleIframeId ).style.display="none";
+	}
+	
+	var targetIframeId = getIframeId(layerId);
+	
+	var visibleIframeId = getVisibleLayerSpecificUIid();
+//	console.log("visibleIframeId:",visibleIframeId);
+	
+	if ( !e.target.hiddenOnLaunch && visibleIframeId && targetIframeId != visibleIframeId){ // hiddenOnLaunchでない場合で、ターゲットとは別の表示中のLayerUIがあればそれを隠す
+		dispatchCutomIframeEvent( hideFrame ,visibleIframeId);
+		document.getElementById( visibleIframeId ).style.display="none";
+	}
+	
+	if ( document.getElementById( targetIframeId ) ){ // すでに対象iframeが存在している場合、表示を復活させる
+		console.log("alreadyCreated iframe");
+		var trgIframe = document.getElementById( targetIframeId );
+		if(trgIframe.tagName == "IMG"){
+			//画像（凡例）の場合は画像を常にリサイズしてスクロールせずに見れるように処理追加
+			imgResize(trgIframe, document.getElementById("layerSpecificUI"), reqSize);
+		}else{
+			trgIframe.style.display="block";
+			testIframeSize( document.getElementById(targetIframeId), reqSize);
 		}
-		
-		
-		if ( document.getElementById( targetIframeId ) ){ // すでに対象iframeが存在している場合、表示を復活させる
-			console.log("alreadyCreated iframe");
-			var trgIframe = document.getElementById( targetIframeId );
-			if(trgIframe.tagName == "IMG"){
-				//画像（凡例）の場合は画像を常にリサイズしてスクロールせずに見れるように処理追加
-				imgResize(trgIframe, document.getElementById("layerSpecificUI"), reqSize);
-			}else{
-				trgIframe.style.display="block";
-				testIframeSize( document.getElementById(targetIframeId), reqSize);
-			}
-			dispatchCutomIframeEvent( appearFrame ,targetIframeId);
+		dispatchCutomIframeEvent( appearFrame ,targetIframeId);
+	} else {
+//		console.log("create new iframe");
+		if ( controllerURL.indexOf(".png")>0 || controllerURL.indexOf(".jpg")>0 || controllerURL.indexOf(".jpeg")>0 || controllerURL.indexOf(".gif")>0){ // 拡張子がビットイメージの場合はimg要素を設置する
+			var img = document.createElement("img");
+			img.src=controllerURL;
+			img.id = targetIframeId;
+			//画像サイズを指定した場合div(layerSpecificUI)のサイズを変更して画像１枚を表示させる
+			var resLayerSpecificUI = document.getElementById("layerSpecificUI");
+			resLayerSpecificUI.addEventListener("wheel" , MouseWheelListenerFunc, false);
+			resLayerSpecificUI.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
+			resLayerSpecificUI.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
+			document.getElementById("layerSpecificUIbody").appendChild(img);
+			setTimeout(imgResize, 100, img, resLayerSpecificUI, reqSize); 
+			setTimeout(setLsUIbtnOffset,100,img);
 		} else {
-	//		console.log("create new iframe");
-			if ( controllerURL.indexOf(".png")>0 || controllerURL.indexOf(".jpg")>0 || controllerURL.indexOf(".jpeg")>0 || controllerURL.indexOf(".gif")>0){ // 拡張子がビットイメージの場合はimg要素を設置する
-				var img = document.createElement("img");
-				img.src=controllerURL;
-				img.id = targetIframeId;
-				//画像サイズを指定した場合div(layerSpecificUI)のサイズを変更して画像１枚を表示させる
-				var resLayerSpecificUI = document.getElementById("layerSpecificUI");
-				resLayerSpecificUI.addEventListener("wheel" , MouseWheelListenerFunc, false);
-				resLayerSpecificUI.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
-				resLayerSpecificUI.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
-				document.getElementById("layerSpecificUIbody").appendChild(img);
-				setTimeout(imgResize, 100, img, resLayerSpecificUI, reqSize); 
-				setTimeout(setLsUIbtnOffset,100,img);
-			} else {
-				initIframe(layerId,controllerURL,reqSize);
-			}
+			initIframe(layerId,controllerURL,reqSize, e.target.hiddenOnLaunch);
 		}
-	} else {  // hiddenOnLaunchフラグが立っているときは、iframeは起動させるが、画面上に表示はさせない 2017.9.22
-		var hideIframe=initIframe(layerId,controllerURL,reqSize);
-		hideIframe.display="none";
 	}
 }
 
@@ -819,19 +816,23 @@ function dispatchCutomIframeEvent(evtName, targetFrameId){
 	}
 }
 
-function initIframe(lid,controllerURL,reqSize){
+function initIframe(lid,controllerURL,reqSize, hiddenOnLaunch){
 	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
 	var iframe = document.createElement("iframe");
 //	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26
 	iframeId = "layerSpecificUIframe_"+ lid;
 	iframe.id = iframeId;
 	
+	if ( hiddenOnLaunch ){
+		iframe.style.display="none";
+	}
+	
 	iframe.addEventListener("load",function(){
 		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL);
 	}, { once: true });
 	
 	var bySrcdoc = false;
-	if ( controllerURL.charAt(0) != ":" ){
+	if ( controllerURL.charAt(0) != ":" ){ // controllerにレイヤUIのhtmlのパスが書かれているケース(通常ケース)
 		if (controllerURL.substr(0,7)=="http://" || controllerURL.substr(0,8)=="https://"){ // startsWithがIEでは・・・
 			// CORS設定されてる別サイトのiframeでもdata-controllerでURL表現状態でも起動可能にする 2019/11/26
 			console.log("Get controller by XHR");
@@ -840,11 +841,11 @@ function initIframe(lid,controllerURL,reqSize){
 			httpObj.open("GET", controllerURL , true );
 			httpObj.send(null);
 			bySrcdoc = true;
-		} else {
+		} else { // 同一ドメインにあるケース(基本ケース)
 			iframe.src=controllerURL;
 			layerSpecificUIbody.appendChild(iframe);
 		}
-	} else {
+	} else { // controller-srcに直接ソースが書かれているケースの処理
 		var controllerSrc = (svgMap.getSvgImagesProps())[lid].controller;
 		
 		
@@ -874,7 +875,9 @@ function initIframe(lid,controllerURL,reqSize){
 	// for iOS Sfari issue:
 	// http://qiita.com/Shoesk/items/9f81ef1fd7b3a0b516b7
 	iframe.style.border ="none";
-	iframe.style.display="block";
+	if ( !hiddenOnLaunch ){
+		iframe.style.display="block";
+	}
 	
 //	console.log("iframe.srcdoc?:",iframe.srcdoc);
 	return (iframe);
