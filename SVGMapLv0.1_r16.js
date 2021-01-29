@@ -167,9 +167,14 @@
 // 2020/03/26 : Rev16 データがLatLngで表示がメルカトルの表示モードを実装
 // 2020/05/20 : DevicePixelRatioをレイヤーごとに設定できる機能を実装（PWAでオフラインモード時、DLしていないズームレンジで白紙表示になるのを抑制する目的を持っている）
 // 2020/06/09 : svgImagesProps[layerID].preRenderControllerFunction, preRenderSuperControllerFunction, svgMap.setPreRenderController() そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出す関数(eval撤去準備工事) (なお、preRenderControllerFunctionは、レイヤ固有UIのscriptで予約関数名preRenderFunctionを定義するだけでも設置される
-//
+// 2020/08/14 : データのほうがメルカトル図法のモノを扱えるようにした。dynamicWebTile_pureMercator.svg参照
+// 2020/08/14 :↑で準備できたのでメルカトル図法のビットイメージをPlateCareeに（その逆も）することを可能にしてみたい実装を開始
+// 2020/08/19 : child2canvasもしくはchild2rootが非線形の(.transform,.inverseがある)場合、そのimgae要素のビットイメージを非線形変換する機能を発動させる。というのが基本路線だね。これにはcanvasへの読み込みとピクセルアクセスが多分必要なので、proxy経由でのimage取得が必要かな。
+// 2020/10/23 : 3/26からのメルカトル図法サポート機能を汎化し、ユーザがscriptやdata-controllerで任意の図法を関数定義可能な機能を実装。これでMaps4WebWSで宣言していた機能要件を満たすことができた。
+// 2021/01/26 : Rev16本流に載せる　効率化＆いくつか検証もできたため ～　16.xはこれにて終了　16とする
 //
 // Issues:
+// 2020/09/11 ビットイメージとベクターの混合レイヤーで、上下関係がDOM編集によっておかしくなることがある～digitalTyphoonレイヤーに風向を追加したとき、風速イメージのimage要素を消去して再追加する処理をすると（モデルを変えるときにそういう処理が入る）、最初は下にイメージが表示されるが、差異追加後上に来てしまう。　この辺昔imageはなるべく上にくるようにした記憶もあるので、いろいろ怪しい感じがする。
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
 // 2018/6/21 SvgImagesProps　もしくは　rootLayersProps?にそのレイヤのデータの特性(POI,Coverage,Line etc)があると便利かも
 // 2018/6/21 もはやXHRでsvgを取得するとき、XMLとして取得しないほうが良いと思われる(独自の編集後にwell formed XMLとして扱っているので)
@@ -227,8 +232,6 @@ var summarizeCanvas = true; // added 2014.5.27 レイヤ単位でcanvas2dを統�
 
 var loadingTransitionTimeout = 7000; // LODの読み込み遷移中のホワイトアウト防止処理や。XMLロード処理のタイムアウト[msec]（この時間を超えたらbitImageもSVGdoc(2020/2/13)もスキップする
 
-var projection={default:0,platecaree:0,mercator:1};
-var mapProjection = projection.mercator;
 
 var mapx=138;
 var mapy=37;
@@ -896,8 +899,8 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 				rPath = getNoCacheRequest(rPath);
 			}
 			
-			if ( typeof getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
-				var pxPath = getUrlViaProxy(rPath);
+			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
+				var pxPath = contentProxyParams.getUrlViaProxy(rPath);
 				httpObj.open("GET", getSvgReq(pxPath) , true );
 			} else {
 				httpObj.open("GET", getSvgReq(rPath) , true );
@@ -1027,6 +1030,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 //		svgImagesProps[docId] = new function(){}; // move to loadSVG()  2014.5.27
 //				console.log("docId:",docId," svgImagesProps[docId]:",svgImagesProps[docId]," docPath:",docPath);
 		svgImagesProps[docId].Path = docPath;
+		svgImagesProps[docId].script = getScript( svgImages[docId] ); // ここに移動した 
 		svgImagesProps[docId].CRS = getCrs( svgImages[docId] ,docId);
 		svgImagesProps[docId].refresh = getRefresh( svgImages[docId] );
 		updateMetaSchema(docId); // added 2017.8.10  2018.2.26 関数化
@@ -1065,7 +1069,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 		
 		// 動的レイヤーを導入～～add 2013/1 (これはドキュメントの読み込み時最初の一回だけの方)
 //		console.log("call getScript");
-		svgImagesProps[docId].script = getScript( svgImages[docId] ); 
+//		svgImagesProps[docId].script = getScript( svgImages[docId] ); 
 		if ( svgImagesProps[docId].script ){
 			var zoom = getZoom(getRootSvg2Canvas( rootViewBox , mapCanvasSize ),docId); 
 			var child2root = getConversionMatrixViaGCS( svgImagesProps[docId].CRS, rootCrs );
@@ -1129,7 +1133,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 		updateCenterPos();
 //		prevGeoViewBox = { x: geoViewBox.x , y: geoViewBox.y , width: geoViewBox.width , height: geoViewBox.height }; // 2016.10.7  2018.6.19 onzoom()でrefreshscreen()すると破綻するのでレイヤ個別化＆移動
 		geoViewBox = getTransformedBox( rootViewBox , root2Geo );
-//		console.log("set geoViewBox:",geoViewBox);
+//		console.log("calc geoViewBox:",geoViewBox,"   rootViewBox:",rootViewBox);
 		if ( !pathHitTest.enable ){
 			delete existNodes;
 			existNodes = new Object();
@@ -1178,6 +1182,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 function handleScript( docId , zoom , child2root){
 	svgImagesProps[docId].script.location = getSvgLocation( svgImagesProps[docId].Path ); // added 2017.9.5 ハッシュが書き換わる可能性を加味
 	svgImagesProps[docId].script.scale = zoom * child2root.scale;
+	// console.log("docId:",docId,"  scale:",svgImagesProps[docId].script.scale,"  zoom:",zoom, "  child2root.scale:",child2root.scale);
 //	console.log("set scale:",svgImagesProps[docId].script.scale,"  docId:",docId,"   svgImageProps:",svgImagesProps[docId]);
 	svgImagesProps[docId].script.actualViewBox = getTransformedBox( rootViewBox , getInverseMatrix( child2root ) ); // *ViewBoxは間違い・viewportが正しい・・互換のために残す・・・
 	svgImagesProps[docId].script.geoViewBox = geoViewBox;
@@ -1221,7 +1226,11 @@ function handlePreRenderControllerScript(docId , zoom , child2root, isSuperContr
 	if ( isSuperController ){
 		preRenderSuperControllerFunction(svgDocStatus);
 	} else {
-		svgImagesProps[docId].preRenderControllerFunction(svgDocStatus);
+		try{ // 2020/09/11 preRenderFunctionがエラーアウトすると NOW LOADING:: delay and retry refreshScreenの無限ループに入るのを防止
+			svgImagesProps[docId].preRenderControllerFunction(svgDocStatus);
+		} catch(e){
+			console.log("Error in handlePreRenderControllerScript:",e);
+		}
 	}
 }
 
@@ -1331,6 +1340,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 	var crs = svgImagesProps[docId].CRS;
 	var child2root = getConversionMatrixViaGCS( crs, rootCrs );
 	svgImagesProps[docId].scale =  zoom * child2root.scale; // この値、多くのケースで必要だと思う 2020.5.18
+	// console.log("docId:",docId,"  scale:",svgImagesProps[docId].scale);
 	
 	var child2canvas;
 	child2canvas = matMul( child2root , s2c ); // 子SVG⇒画面座標へのダイレクト変換行列 2013.8.8
@@ -1488,6 +1498,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 				continue;
 			}
 //				console.log( "c2rs:" + imageRect.c2rScale );
+//			console.log("nodeName:",svgNode.nodeName," isIntersect?:",isIntersect( imageRect , rootViewBox ),"  imageRect:",imageRect,"  rootViewBox:",rootViewBox,"  crs:",crs, "  rootCrs:",rootCrs, "  child2root:",child2root);
 			if ( !eraseAll && isIntersect( imageRect , rootViewBox ) && inZoomRange( ip , zoom ,  imageRect.c2rScale ) && isVisible(ip ) ){ // ロードすべきイメージの場合
 				
 //				console.log(svgNode.nodeName," intersect?: imageRect:",imageRect,"   rootViewBox:",rootViewBox,"   ip:",ip);
@@ -1571,8 +1582,8 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					var img;
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
-						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , isNoCache);
+						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , isNoCache, {docId:docId,svgNode:svgNode} );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -1678,9 +1689,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 //						console.log("AlreadyLoadedBitimage:" + imageId + " dispay:" + imgElem.style.display);
 						// x,y,w,hを書き換える
-						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
+						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId , {docId:docId,svgNode:svgNode} ); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
 					} else if ( childCategory == TEXT ){ // 2014.7.22
-						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId);
+						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId , {docId:docId,svgNode:svgNode} );
 					} else { // animation|iframe要素の場合(svgTile/Layer)
 //						console.log("id:" + imageId );
 //						console.log( " ISsvgImages:" + svgImages[imageId]);
@@ -2119,7 +2130,9 @@ function getScript( svgDoc ){
 			"		handleScriptCf : handleScriptCf , " + 
 			"		onload : onload , " + 
 			"		onzoom : onzoom , " + 
-			"		onscroll : onscroll " + 
+			"		onscroll : onscroll, " + 
+//			"		callFunction : function ( fname ,p1,p2,p3,p4,p5){eval( 'var vFunc = ' + fname); var ans = vFunc.call(null,p1,p2,p3,p4,p5);return ( ans );}, " + 
+			"		getFunction : function ( fname ){eval( 'var vFunc = ' + fname);return ( vFunc );}" + // added 2020/10/14 <script>内の任意の関数を取得できるようにする・・
 			"	} " +
 			"}"
 		);
@@ -2285,117 +2298,46 @@ function getRootSvg2Canvas( rootViewBox , mapCanvasSize_ ){
 	}
 }
 
-/**
-function getRootSvg2CanvasMercatorFactory( rootViewBox , mapCanvasSize_ ){ // 2020/3  メルカトルmercator表示用
-	// ルートSVG座標系(緯度経度とリニアな)のrootViewBoxと、画面座標系のmapCanvasSizeを与えると、
-	// ルートSVG座標系のXY値から、画面座標系のXYに変換する関数が作られる
-	
-	// ただし：mapCanvasSize_のアスペクト比通りのrootViewBoxが設定されている必要がある。そうでないと、メルカトル図法のアスペクトがおかしくなる
-	
-	
-	// まずは効率とかを無視しでコードする
-	// root2Geo:globalVar
-	// 本来rootViewBoxもgeoViewBoxもglobalVarがあるので要整理
-	var normalizedMercatorViewBox = getNormalizedMercatorViewBoxFromRootViewBox( rootViewBox , root2Geo ); 
-	
-	// うえの但し書きの意味
-	// normalizedMercatorViewBox.height / normalizedMercatorViewBox.width == mapCanvasSize_.height / mapCanvasSize_.width
-	
-	function transformFunction(rootSvgX, rootSvgY){
-		var geoCrds = SVG2Geo( rootSvgX , rootSvgY , rootCrs );
-		var normalizedMercatorCrds = latLng2MercatorXY(geoCrds.latitude, geoCrds.longitude); 
-		
-		var canvasX = mapCanvasSize_.width  * (normalizedMercatorCrds.x - normalizedMercatorViewBox.x ) / normalizedMercatorViewBox.width;
-		var canvasY = mapCanvasSize_.height * (normalizedMercatorCrds.y - normalizedMercatorViewBox.y ) / normalizedMercatorViewBox.height;
-		
-		return ( canvasX, canvasY );
+
+function mercator(){
+	function latLng2MercatorXY( lat , lng  ){ // 正規化メルカトル座標と緯度経度との間の変換関数 (下の関数とセット)
+		// lng:-180..180 -> x:0..1,   lat: 85.051128..-85.051128 -> y:0..1 グラフィックスのY反転座標になってる
+		var size=1;
+		var sinLat = Math.sin(lat * Math.PI / 180.0);
+		var pixelX = (( lng + 180.0 ) / 360.0 ) * size;
+		var pixelY = (0.5 - Math.log((1 + sinLat) / (1.0 - sinLat)) / (4 * Math.PI)) * size;
+	//	console.log("latLng2MercatorXY: lat,lng:",lat,lng,"  mercatorXY:",pixelX,pixelY);
+		return {
+			x : pixelX ,
+			y : pixelY
+		}
+	}
+
+	function MercatorXY2latLng( px , py ){ // px,py: 上のx,y　正規化メルカトル座標
+		var size=1;
+		var x = ( px / size ) - 0.5;
+		var y = 0.5 - ( py / size);
+		var lat = 90 - 360 * Math.atan(Math.exp(-y * 2 * Math.PI)) / Math.PI;
+		var lng = 360 * x;
+	//	console.log("MercatorXY2latLng: mercatorXY:",px , py,"  lat,lng:",lat,lng  );
+		return{
+			lat : lat ,
+			lng : lng
+		}
 	}
 	
-	return transformFunction;
-	
-	
-}
-
-function getFulfilledRootViewBox4Mercator( proposedRootViewBox, mapCanvasSize ){
-	// 厳密にはsvgのviewBoxからviewPortを得るための演算(preserveAspectRatio: xMidYMid meet)
-	var proposedMercatorViewBox = getNormalizedMercatorViewBoxFromRootViewBox( proposedRootViewBox , root2Geo );
-	
-	var fulfilledMercatorViewBox=[];
-	
-	if ( (proposedMercatorViewBox.height / proposedMercatorViewBox.width) < (mapCanvasSize_.height / mapCanvasSize_.width) ){ // 提案サイズが横長の場合
-		// 横を合わせて縦を変更する
-		fulfilledMercatorViewBox.width = proposedMercatorViewBox.width;
-		fulfilledMercatorViewBox.height = (mapCanvasSize_.height / mapCanvasSize_.width) * proposedMercatorViewBox.width;
-		fulfilledMercatorViewBox.x = proposedMercatorViewBox.x;
-		fulfilledMercatorViewBox.y = (proposedMercatorViewBox.y + (proposedMercatorViewBox.height / 2)) - (fulfilledMercatorViewBox.height / 2);
-	} else {
-		// 縦を合わせて横を変更する
-		fulfilledMercatorViewBox.height = proposedMercatorViewBox.height;
-		fulfilledMercatorViewBox.width = proposedMercatorViewBox.height / (mapCanvasSize_.height / mapCanvasSize_.width) ;
-		fulfilledMercatorViewBox.y = proposedMercatorViewBox.y;
-		fulfilledMercatorViewBox.x = (proposedMercatorViewBox.x + (proposedMercatorViewBox.width / 2)) - (fulfilledMercatorViewBox.width / 2);
-	}
-	
-	var fulfilledGeoViewBox=[];
-	fulfilledGeoViewBox  = MercatorXY2latLng(fulfilledMercatorViewBox.x, fulfilledMercatorViewBox.y + fulfilledMercatorViewBox.height ); // geo上の左下
-	fulfilledGeoViewBox2 = MercatorXY2latLng(fulfilledMercatorViewBox.x + fulfilledMercatorViewBox.width, fulfilledMercatorViewBox.y ); // geo上の右上
-	fulfilledGeoViewBox.width  = fulfilledGeoViewBox2.x - fulfilledGeoViewBox.x;
-	fulfilledGeoViewBox.height = fulfilledGeoViewBox2.y - fulfilledGeoViewBox.y;
-	var fulfilledRootViewBox = getTransformedBox(fulfilledGeoViewBox, rootCrs );
-	return (fulfilledRootViewBox);
-}
-
-function getRootViewBox_byMercatorCanvasZoomPan(panX, panY, Zoom, prevRootViewBox, mapCanvasSize, root2Geo, noAspectAdjustment ){
-	// メルカトル図法の地図キャンバス上でズーム・パンしたときの、RootViewBox値を得る
-	// panX, panY: px
-	// Zoom: ratio ( >1: up, <1 down)
-	// panとzoomが両方ある場合は、pan後のzoomということにします
-	// noAspectAdjustment: デフォルトは、アスペクト比の丸目誤差をこの関数で除去した値を作る
-	
-	var prevNormalizedMercatorViewBox = getNormalizedMercatorViewBoxFromRootViewBox( prevRootViewBox , root2Geo );
-	
-	var prevCanvasZoomFactor = mapCanvasSize.width / prevNormalizedMercatorViewBox.width; // 横のサイズを使うことにする
-	
-	var prevMercatorViewBox = [];
-//	prevMercatorViewBox.width  = ;
-//	prevMercatorViewBox.height = ;
-	
-}
-
-function getNormalizedMercatorViewBoxFromRootViewBox(rootViewBox, root2Geo){
-	// ルートSVG座標(緯度経度にリニアな座標系) 正規化メルカトル座標におけるビューボックスを得る
-	var geoViewBox = getTransformedBox( rootViewBox , root2Geo );
-	var mercatorViewBox = latLng2MercatorXY(geoViewBox.x, geoViewBox.y+geoViewBox.height);
-	var mercatorViewBox2 = latLng2MercatorXY(geoViewBox.x, geoViewBox.y+geoViewBox.height);
-	mercatorViewBox.width = mercatorViewBox.x - mercatorViewBox.x;
-	mercatorViewBox.height = mercatorViewBox.y - mercatorViewBox.y;
-	return ( mercatorViewBox );
-}
-**/
-
-function latLng2MercatorXY( lat , lng  ){ // 正規化メルカトル座標と緯度経度との間の変換関数 (下の関数とセット)
-	// lng:-180..180 -> x:0..1,   lat: 85.051128..-85.051128 -> y:0..1 グラフィックスのY反転座標になってる
-	var size=1;
-	var sinLat = Math.sin(lat * Math.PI / 180.0);
-	var pixelX = (( lng + 180.0 ) / 360.0 ) * size;
-	var pixelY = (0.5 - Math.log((1 + sinLat) / (1.0 - sinLat)) / (4 * Math.PI)) * size;
-//	console.log("latLng2MercatorXY: lat,lng:",lat,lng,"  mercatorXY:",pixelX,pixelY);
 	return {
-		x : pixelX ,
-		y : pixelY
-	}
-}
-
-function MercatorXY2latLng( px , py ){ // px,py: 上のx,y　正規化メルカトル座標
-	var size=1;
-	var x = ( px / size ) - 0.5;
-	var y = 0.5 - ( py / size);
-	var lat = 90 - 360 * Math.atan(Math.exp(-y * 2 * Math.PI)) / Math.PI;
-	var lng = 360 * x;
-//	console.log("MercatorXY2latLng: mercatorXY:",px , py,"  lat,lng:",lat,lng  );
-	return{
-		lat : lat ,
-		lng : lng
+		transform:function(inp){
+			return ( latLng2MercatorXY(inp.y, inp.x) );
+		},
+		inverse:function(inp){
+			var latlng = MercatorXY2latLng(inp.x, inp.y);
+			return{
+				x: latlng.lng,
+				y: latlng.lat
+			}
+		},
+		scale: (1/360),
 	}
 }
 
@@ -2424,9 +2366,9 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 	}
 }
 
-var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る
+var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , nocache){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , nocache , svgimageInfo){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2446,14 +2388,19 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 		href = getNoCacheRequest(href);
 	}
 	
-	if ( typeof getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
-		href = getUrlViaImageProxy(href);
-		if ( getUrlViaImageProxyCrossOriginAnonymous ){
+	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
+		href = contentProxyParams.getUrlViaImageProxy(href);
+		if ( contentProxyParams.crossOriginAnonymous ){
+			img.crossOrigin="anonymous";
+		}
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
+		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			img.crossOrigin="anonymous";
 		}
 	}
 	
-	setLoadingImagePostProcessing(img,href,id);
+	setLoadingImagePostProcessing(img, href, id, false, svgimageInfo);
 	
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
@@ -2500,7 +2447,7 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	return ( img );
 }
 
-function setLoadingImagePostProcessing(img, href, id, forceSrcIE){
+function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo ){
 	if ( verIE > 8 ){
 //		console.log("el",href);
 		img.addEventListener('load', handleLoadSuccess); // for Safari
@@ -2516,7 +2463,7 @@ function setLoadingImagePostProcessing(img, href, id, forceSrcIE){
 		img.style.filter = "inherit"; // 同上 (http://www.jacklmoore.com/notes/ie-opacity-inheritance/)
 	}
 	setTimeout( timeoutLoadingImg , loadingTransitionTimeout , img);
-	loadingImgs[id] = true;
+	loadingImgs[id] = svgimageInfo; // // 2021/1/26 loadingImgsには画像の場合booleanではなくsvgimageInfoを入れ、ビットイメージ非線形変換を容易にした
 }
 
 function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , style , areaHeight , nonScaling){ // 2014.7.22
@@ -2564,7 +2511,7 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	return ( img );
 }
 
-function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id ){
+function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id , svgimageInfo ){
 	if ( ! cdx ){
 		cdx = 0;
 	}
@@ -2592,16 +2539,28 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.width = width;
 		img.height = height;
 	}
-	if ( !txtFlg &&  href!="" && typeof getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
-		href = getUrlViaImageProxy(href);
-		if ( getUrlViaImageProxyCrossOriginAnonymous ){
+	
+	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
+		href = contentProxyParams.getUrlViaImageProxy(href);
+		if ( contentProxyParams.crossOriginAnonymous ){
+			img.crossOrigin="anonymous";
+		}
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
+		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			img.crossOrigin="anonymous";
 		}
 	}
-	if ( !txtFlg && img.src && href && isHrefChanged(img.getAttribute("src"), href)  ){ // firefoxでは(同じURLかどうかに関わらず)srcを書き換えるとロードしなおしてしまうのを抑制 2014.6.12 絶対パスになってバグが出てない？2015.7.8 getAttrで取れば絶対パスにならないで破たんしない。
+	
+	var imgSrc = img.getAttribute("data-preTransformedHref");
+	if (!imgSrc){
+		imgSrc = img.getAttribute("src");
+	}
+	if ( !txtFlg && img.src && href && isHrefChanged(imgSrc, href)  ){ // firefoxでは(同じURLかどうかに関わらず)srcを書き換えるとロードしなおしてしまうのを抑制 2014.6.12 絶対パスになってバグが出てない？2015.7.8 getAttrで取れば絶対パスにならないで破たんしない。
 //		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
 //		img.src = href; // これは下で行う(2020.2.4)
-		setLoadingImagePostProcessing(img,href,id , true); 
+		img.removeAttribute("data-preTransformedHref");
+		setLoadingImagePostProcessing(img, href, id, true, svgimageInfo); 
 	}
 	if ( transform ){ // ま、とりあえず 2014.6.18
 		img.style.transform = "matrix(" + transform.a + ","  + transform.b + "," + transform.c + "," + transform.d + "," + transform.e + "," + transform.f + ")";
@@ -2677,6 +2636,18 @@ function getCrs( svgDoc ,docId){
 	var globalView=getElementByIdNoNS( svgDoc , "globe");
 //	console.log("call getCrs:",getElementByIdNoNS( svgDoc , "globe"),globalView,svgDoc.getElementsByTagName("globalCoordinateSystem")[0],svgDoc.getElementsByTagName("view")[0].getAttribute("id"),svgDoc.getElementsByTagName("view")[0]);
 	try{
+		var genericCRS =null;
+		/**
+		var genericCRS ={
+			a : 1 ,
+			b : 0 ,
+			c : 0 ,
+			d : 1 , // -1から1に変更　余計なお節介感があるので(2020/10/13)
+			e : 0 ,
+			f : 0 ,
+			isSVG2 : false
+		};
+		**/
 		if ( globalView && globalView.nodeName =="view"){
 			var gv = globalView.getAttribute("viewBox").split(/\s*,\s*|\s/);
 			crs = new Array(6);
@@ -2688,49 +2659,66 @@ function getCrs( svgDoc ,docId){
 			crs[5]= Number(gv[1]) -  90.0 * crs[3];
 			isSVG2 = true;
 	//		console.log("found global view:" , gv, " : " , crs);
+			genericCRS ={
+				a : crs[0],
+				b : crs[1],
+				c : crs[2],
+				d : crs[3],
+				e : crs[4],
+				f : crs[5],
+				isSVG2 : isSVG2
+			}
 		} else {
 			var gcsElem = svgDoc.getElementsByTagName("globalCoordinateSystem")[0];
-	//		console.log("getcrs: svgDoc:",svgDoc);
-			if ( (gcsElem.getAttribute("transform")).indexOf("mercator")>=0){ // 2020/3/24 add mercator support
-				if ( docId=="root"){
-					return {
-						transform:function(inp){
-							return ( latLng2MercatorXY(inp.y, inp.x) );
-						},
-						inverse:function(inp){
-							var latlng = MercatorXY2latLng(inp.x, inp.y);
-							return{
-								x: latlng.lng,
-								y: latlng.lat
+			if ( gcsElem ){
+				var tf = gcsElem.getAttribute("transform");
+				if ( tf ){
+					//		console.log("getcrs: svgDoc:",svgDoc);
+					if (tf.indexOf("matrix")>=0){
+						crs = gcsElem.getAttribute("transform").replace("matrix(","").replace(")","").split(",");
+						if ( crs.length == 6){
+							genericCRS ={
+								a : Number(crs[0]) ,
+								b : Number(crs[1]) ,
+								c : Number(crs[2]) ,
+								d : Number(crs[3]) ,
+								e : Number(crs[4]) ,
+								f : Number(crs[5]) ,
+								isSVG2 : isSVG2
 							}
-						},
-						scale: (1/360), // ひずみがないポイント(緯度０度～標準緯線）における地理座標とその図法の座標との間のスケールということにする
-						isSVG2 : false
+						}
+					} else if ( tf.toLowerCase()=="mercator"){ // 2020/3/24 add mercator support
+						console.log("isMercator");
+						genericCRS =  mercator();
+						genericCRS.isSVG2 = false;
+					} else if ( tf.indexOf("controller.")==0 ){ // この機能は動かしたことはない。未完成 2021/1/26
+						var cntlWin = svgImagesProps[svgImagesProps[docId].rootLayer].controllerWindow;
+						if ( cntlWin ){
+							// 地図コンテンツ(のルートレイヤ)に紐づいたcontroller windowに(接頭詞の後に)同前の関数があればそれを設定する
+							var tfName = tf.substring(11);
+							if ( cntlWin[tfName]){
+								genericCRS = cntlWin[tfName];
+								if ( !genericCRS.isSVG2 ){
+									genericCRS.isSVG2 = false;
+								}
+							}
+						}
+					} else if ( svgImagesProps[docId].script ){ // こちらは動作する実装
+						// 地図コンテンツのscript要素中にtransform属性値と同前の関数があればそれを設定する
+						var tFunc = svgImagesProps[docId].script.getFunction(tf);
+						if ( tFunc ){
+							genericCRS = tFunc();
+							if ( !genericCRS.isSVG2 ){
+								genericCRS.isSVG2 = false;
+							}
+						}
 					}
-				} else {
-					return {
-						a : 1 ,
-						b : 0 ,
-						c : 0 ,
-						d : -1 ,
-						e : 0 ,
-						f : 0 ,
-						isSVG2 : false
-					};
 				}
+			//		console.log("found globalCoords",genericCRS);
 			}
-			crs = gcsElem.getAttribute("transform").replace("matrix(","").replace(")","").split(",");
-	//		console.log("found globalCoords",crs);
 		}
-		return {
-			a : Number(crs[0]) ,
-			b : Number(crs[1]) ,
-			c : Number(crs[2]) ,
-			d : Number(crs[3]) ,
-			e : Number(crs[4]) ,
-			f : Number(crs[5]) ,
-			isSVG2 : isSVG2
-		};
+//		console.log("genericCRS : ",genericCRS);
+		return ( genericCRS );
 	} catch ( e ){
 //		console.log( "No CRS:",new XMLSerializer().serializeToString( svgDoc ) );
 		// CRSがない文書にとりあえず応じる 2014.5.27
@@ -2738,7 +2726,7 @@ function getCrs( svgDoc ,docId){
 			a : 1 ,
 			b : 0 ,
 			c : 0 ,
-			d : -1 ,
+			d : 1 , // ここも同様 2020/10/13
 			e : 0 ,
 			f : 0 ,
 			isSVG2 : false
@@ -2833,19 +2821,11 @@ function getViewBox( svgDoc ){
 }
 
 
-function getTransformedBox( inBox , matrix ){
-//	console.log("called getTransformedBox:",inBox , matrix ,getTransformedBox.caller);
-	if ( matrix.transform){
-		var p0 = matrix.transform( {x:inBox.x, y:inBox.y} );
-		var p1 = matrix.transform( {x:inBox.x+inBox.width, y:inBox.y+inBox.height} );
-		return {
-			x: Math.min(p0.x,p1.x),
-			y: Math.min(p0.y,p1.y),
-			width:Math.abs(p0.x - p1.x),
-			height:Math.abs(p0.y - p1.y),
-		}
-	} else if ( matrix.b == 0 && matrix.c == 0){
-	// b,c==0のときのみの簡易関数・・
+function getTransformedBox( inBox , matrix){
+	// transformRectと被っていると思われる・・ので実質統合化した 2020/10/22
+	// console.log("called getTransformedBox: ac",accuracy, " : ", inBox , matrix ,getTransformedBox.caller);
+	if ( !matrix.transform && matrix.b == 0 && matrix.c == 0 ){
+		// 線形且つ b,c==0のときのみの簡易関数・・ もう不要な気はする・・
 		var x , y , w , h;
 		if ( matrix.a > 0 ){
 			x = matrix.a * inBox.x + matrix.e;
@@ -2868,6 +2848,38 @@ function getTransformedBox( inBox , matrix ){
 			y : y ,
 			width : w ,
 			height : h
+		}
+	} else if ( matrix.transform){
+		// transformRectと同様の処理に変更
+		// 対角での処理から四隅に変更したが、もっと非線形なものはこれでもダメです 2020/10/20
+		// ということで、p4..8を追加した・・・苦しぃ　何か根本的に変えるべき
+		var ptx=[];
+		var pty=[];
+		var iPart = 4;
+		for ( var iy = 0 ; iy <=iPart ; iy++ ){
+			for ( var ix = 0 ; ix <=iPart ; ix++ ){
+				var pt = matrix.transform( {x:inBox.x+ ix * inBox.width / iPart , y:inBox.y+ iy * inBox.height / iPart} ) ;
+				ptx.push(pt.x);
+				pty.push(pt.y);
+			}
+		}
+		
+		/**
+		var x = Math.min(p0.x,p1.x,p2.x,p3.x);
+		var y = Math.min(p0.y,p1.y,p2.y,p3.y);
+		var width = Math.max(p0.x,p1.x,p2.x,p3.x) - x;
+		var height = Math.max(p0.y,p1.y,p2.y,p3.y) - y;
+		**/
+		var x = Math.min.apply(null,ptx);
+		var y = Math.min.apply(null,pty);
+		var width = Math.max.apply(null,ptx) - x;
+		var height = Math.max.apply(null,pty) - y;
+//		console.log("getTransformedBox:",p0,p1,p2,p3,x,y,width,height);
+		return {
+			x: x,
+			y: y,
+			width: width,
+			height: height,
 		}
 	} else {
 		return ( null );
@@ -2911,6 +2923,7 @@ function SVG2Geo( svgX , svgY , crs , inv ){
 }
 
 function transform( x , y , mat , calcSize , nonScaling){
+//	console.log("called transform:", x , y , mat , calcSize , nonScaling);
 	if ( calcSize == true ){
 		if ( mat.transform ){
 			var origin = mat.transform(0,0);
@@ -2951,8 +2964,9 @@ function transform( x , y , mat , calcSize , nonScaling){
 	
 	if ( mat ){
 		if ( mat.transform ){
-//			console.log("called mecrator transform normal:",x,y);
+//			console.log("called nonlinear transform:",x,y," caller:",transform.caller);
 			var ans = mat.transform({x:x,y:y});
+//			console.log("ans:",ans);
 			return (ans );
 		} else {
 			return {
@@ -2970,28 +2984,44 @@ function transform( x , y , mat , calcSize , nonScaling){
 
 function getConversionMatrixViaGCS( fromCrs , toCrs ){
 	// Child 2 Rootのzoomを計算できるよう、ちゃんとした式を算出するように変更 2012/11/2
-	var icCrs = getInverseMatrix(fromCrs);
+	var ifCrs = getInverseMatrix(fromCrs);
 	
-	if ( toCrs.transform){ // マトリクスの代わりに関数を返却する 2020.3.17
+	if ( toCrs.transform || fromCrs.transform ){ // マトリクスの代わりに関数を返却する 2020.3.17
+		var itCrs = getInverseMatrix(toCrs);
 		// スケールはどうするか‥　原点でのスケールにしておくか？ TBD
 		var conversionFunc = function( inCrd ){
-			var globalCrds = transform(inCrd.x, inCrd.y, icCrs);
-			var ans = toCrs.transform(globalCrds);
+			var globalCrds = transform(inCrd.x, inCrd.y, ifCrs);
+//			var ans = toCrs.transform(globalCrds);
+			var ans = transform(globalCrds.x, globalCrds.y, toCrs);
 //			console.log("in:",inCrd,"  globalCrd:",globalCrds," rootCrd:",ans);
 			return ( ans );
 		}
 		var inverseFunc = function(inCrd ){
-			var globalCrds = toCrs.inverse(inCrd);
+//			var globalCrds = toCrs.inverse(inCrd);
+			var globalCrds = transform(inCrd.x, inCrd.y, itCrs);
 			var ans = transform(globalCrds.x, globalCrds.y, fromCrs);
 			return ( ans );
 		}
-		var scale;
-		if ( icCrs.inverse ){
-//			scale = (1/icCrs.scale) * toCrs.scale; // インバースのインバースになってる・これはバグだと思う 2020/6/9
-			scale = icCrs.scale * toCrs.scale;
+		var scale, sif, sit;
+		if ( ifCrs.inverse ){
+			sif = ifCrs.scale;
 		} else {
-			scale = Math.sqrt( Math.abs(icCrs.a * icCrs.d - icCrs.b * icCrs.c ) ) * toCrs.scale;
+			sif = Math.sqrt( Math.abs(ifCrs.a * ifCrs.d - ifCrs.b * ifCrs.c ) );
 		}
+		if ( toCrs.inverse ){
+			st = toCrs.scale;
+		} else {
+			st = Math.sqrt( Math.abs(toCrs.a * toCrs.d - toCrs.b * toCrs.c ) );
+		}
+		/**
+		if ( ifCrs.inverse ){
+//			scale = (1/ifCrs.scale) * toCrs.scale; // インバースのインバースになってる・これはバグだと思う 2020/6/9
+			scale = ifCrs.scale * toCrs.scale;
+		} else {
+			scale = Math.sqrt( Math.abs(ifCrs.a * ifCrs.d - ifCrs.b * ifCrs.c ) ) * toCrs.scale;
+		}
+		**/
+		scale = sif * st;
 		return {
 			transform: conversionFunc,
 			inverse: inverseFunc,
@@ -2999,13 +3029,13 @@ function getConversionMatrixViaGCS( fromCrs , toCrs ){
 		};
 	}
 	
-	var a = toCrs.a * icCrs.a + toCrs.c * icCrs.b;
-	var b = toCrs.b * icCrs.a + toCrs.d * icCrs.b;
-	var c = toCrs.a * icCrs.c + toCrs.c * icCrs.d;
-	var d = toCrs.b * icCrs.c + toCrs.d * icCrs.d;
+	var a = toCrs.a * ifCrs.a + toCrs.c * ifCrs.b;
+	var b = toCrs.b * ifCrs.a + toCrs.d * ifCrs.b;
+	var c = toCrs.a * ifCrs.c + toCrs.c * ifCrs.d;
+	var d = toCrs.b * ifCrs.c + toCrs.d * ifCrs.d;
 	
-	var e = toCrs.a * icCrs.e + toCrs.c * icCrs.f + toCrs.e;
-	var f = toCrs.b * icCrs.e + toCrs.d * icCrs.f + toCrs.f;
+	var e = toCrs.a * ifCrs.e + toCrs.c * ifCrs.f + toCrs.e;
+	var f = toCrs.b * ifCrs.e + toCrs.d * ifCrs.f + toCrs.f;
 	
 	return {
 		a : a ,
@@ -3040,7 +3070,7 @@ function matMul( m1 , m2 ){ // getConversionMatrixViaGCSとほとんど同じで
 			}
 			return ( ans );
 		}
-		return ( {transform:mulFunc} );
+		return ( {transform:mulFunc} ); // inverseがないのは不十分だと思われる 2020/8/18
 	}
 	return {
 		a: m2.a * m1.a + m2.b * m1.b ,
@@ -3055,47 +3085,54 @@ function matMul( m1 , m2 ){ // getConversionMatrixViaGCSとほとんど同じで
 // child SVG文書のrootSVG文書座標系における領域サイズを計算
 // ちゃんとした式で演算数を改善し、scaleも常に算出できるようにした (2012/11/2)
 // (子だけでなく、孫も対応(CRSをベースとしてるので))
-function transformRect( rect ,  c2r ){
+// 2020/10/20 整理
+function transformRect_duplicated( rect ,  c2r ){ // 廃止
+//	console.log("transformRect:",rect ,  c2r);
 	var x , y , width , height;
 //	var c2r = getChild2RootMatrix( rootCrs , childCrs );
+	var mm;
 	if ( ! rect.transform ){
-		var pos1 = transform( rect.x , rect.y , c2r );
-		var pos2 = transform( rect.x + rect.width , rect.y + rect.height , c2r );
-		if ( pos1.x > pos2.x ){
-			x = pos2.x;
-			width = pos1.x - pos2.x;
-		} else {
-			x = pos1.x;
-			width = pos2.x - pos1.x;
-		}
-		if ( pos1.y > pos2.y ){
-			y = pos2.y;
-			height = pos1.y - pos2.y;
-		} else {
-			y = pos1.y;
-			height = pos2.y - pos1.y;
-		}
-	} else { // transformがある場合は、Boundin Boxが設定されるので注意 2014.6.18
-		var mm = matMul( rect.transform , c2r ); // debug 逆だったねぇ・・
-		var pos1 = transform( rect.x , rect.y , mm );
-		var pos2 = transform( rect.x + rect.width , rect.y + rect.height , mm );
-		var pos3 = transform( rect.x , rect.y + rect.height , mm );
-		var pos4 = transform( rect.x + rect.width , rect.y , mm );
-		x = Math.min(pos1.x, pos2.x, pos3.x, pos4.x);
-		y = Math.min(pos1.y, pos2.y, pos3.y, pos4.y);
-		width  = Math.max(pos1.x, pos2.x, pos3.x, pos4.x) - x;
-		height = Math.max(pos1.y, pos2.y, pos3.y, pos4.y) - y;
-//		console.log("has Transform elem_transform:",rect.transform , " c2r:" , c2r, " mul:", mm , " x:", x," y:", y , " w:", width , " h:", height);
+		mm = c2r;
+	} else {
+		mm = matMul( rect.transform , c2r );
 	}
-	
+	var pos1 = transform( rect.x , rect.y , mm );
+	var pos2 = transform( rect.x + rect.width , rect.y + rect.height , mm );
+	var pos3 = transform( rect.x , rect.y + rect.height , mm );
+	var pos4 = transform( rect.x + rect.width , rect.y , mm );
+	x = Math.min(pos1.x, pos2.x, pos3.x, pos4.x);
+	y = Math.min(pos1.y, pos2.y, pos3.y, pos4.y);
+	width  = Math.max(pos1.x, pos2.x, pos3.x, pos4.x) - x;
+	height = Math.max(pos1.y, pos2.y, pos3.y, pos4.y) - y;
 	return {
 		x : x ,
 		y : y ,
 		width : width ,
 		height : height ,
-		c2rScale : c2r.scale
+		c2rScale : c2r.scale // mm.scaleじゃなくて良いのか？ 2020/10/20
 	}
 }
+
+function transformRect( rect ,  c2r ){ // 2020/10/22 getTransformedBox()を使うようにした
+//	console.log("transformRect:",rect ,  c2r);
+	var x , y , width , height;
+//	var c2r = getChild2RootMatrix( rootCrs , childCrs );
+	var mm;
+	if ( ! rect.transform ){
+		mm = c2r;
+	} else {
+		mm = matMul( rect.transform , c2r );
+	}
+	
+	var tbox = getTransformedBox( rect , mm)
+	
+	tbox.c2rScale = c2r.scale; // mm.scaleじゃなくて良いのか？ 2020/10/20
+	
+	return ( tbox );
+	
+}
+
+
 
 
 // 逆座標変換のための変換マトリクスを得る
@@ -3221,9 +3258,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			href = imgE.getAttribute("src");
 			
 			// original 2014.2.25 by konno
-//			if ( typeof getUrlViaProxy == "function" ){ // このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
+//			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){ // このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
 //				//Proxyサーバ経由でアクセス
-//				href = getUrlViaProxy(href);
+//				href = contentProxyParams.getUrlViaProxy(href);
 //			}
 			var idx = href.indexOf("globe",href.lastIndexOf("#"));
 			var postpone = imgE.getAttribute("postpone");
@@ -3315,9 +3352,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			}
 			
 			// このルーチンはもっとサイドエフェクトが小さいところ(実際にXHRしている場所)に移動 s.takagi 2016.8.10
-//			if ( typeof getUrlViaProxy == "function" ){
+//			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){
 				//Proxyサーバ経由でアクセス
-//				href = getUrlViaProxy(href);
+//				href = contentProxyParams.getUrlViaProxy(href);
 //			}
 		}
 		elemClass = imgE.getAttribute("class");
@@ -4933,6 +4970,9 @@ function setImgViewport(target, href_fragment){
 function handleLoadSuccess(obj){ // (bitImage)画像の読み込み完了処理
 
 	var target = obj.target || obj.srcElement;
+	
+	target.removeEventListener("load",handleLoadSuccess);
+	
 //	console.log("call handle load success",target);
 	
 	var href = target.src;
@@ -4947,9 +4987,161 @@ function handleLoadSuccess(obj){ // (bitImage)画像の読み込み完了処理
 	target.style.display="";
 	target.style.visibility="";
 //	console.log("LoadSuccess:",target.id,target.style.display);
+	var svgimageInfo = loadingImgs[target.id]; // 2021/1/26 loadingImgsには画像の場合booleanではなくcrs等を入れるようにした。
 	delete loadingImgs[target.id];
+//	console.log("image load completed: target:",target);
+	imageTransform(target,svgimageInfo);
 //	console.log("call checkLoadCompleted : handleLoadSuccess");
 	checkLoadCompleted();
+}
+
+function imageTransform(imgElem, svgimageInfo){
+	// ビットイメージタイルの内部について、任意の図法変換を加える機構 2020/08- まだまだ現在開発中だからいろいろ怪しい状態です2020/09/18
+	// 2021/01/26 実用ユースケースが出てきたので、ブラッシュアップし、本流に載せることにする
+	/** crsを直接得るようにしたのでこれは不要になった
+	var imagesLayerId=imgElem.parentNode.id;
+	var imageId = imgElem.id;
+	var imageElem;
+	try{
+		imageElem= getElementByImgIdNoNS(svgImages[imagesLayerId],imageId); // オリジナルのsvg image要素の検索が少し非効率かも？
+	} catch ( e ){
+		return;
+	}
+	**/
+	if ( !svgimageInfo ){
+		console.log("NO image Element...");
+		return;
+	}
+	var imageElem= svgimageInfo.svgNode;
+	
+	var tf = imageElem.getAttribute("transform");
+	//console.log(tf);
+	if ( tf && tf.indexOf("ref")==0 ){ // transform ref属性が付いている場合はスキップする(TBD)
+		return;
+	}
+	var crs = svgImagesProps[svgimageInfo.docId].CRS; // 長い過程を経て、直接取れるようにした・・
+//	var rootCrs = svgImagesProps["root"].CRS; // これはグローバルなので不要
+	if( !crs.transform && !rootCrs.transform ){
+		// 非線形変換関数がないのでピクセル変換は不要
+		// console.log("NO Non-Linear Transformation skip");
+		return;
+	}
+	// console.log("imagesLayerId:",imagesLayerId,"  crs:",crs,"  imageElem:",imageElem);
+	var sc = document.getElementById("imageTransformCanvas");
+	if ( !sc ){
+		sc = document.createElement("canvas");
+		sc.id="imageTransformCanvas";
+		// sc.setAttribute("style","position:absolute;right:10px,bottom:10px");
+		// document.documentElement.appendChild(sc); // 実装完了したらコメントアウト
+	}
+	
+	var ciw = imgElem.naturalWidth;
+	var cih = imgElem.naturalHeight;
+	
+	var  sctx = sc.getContext("2d");
+	sc.width = ciw;
+	sc.height = cih;
+	sctx.drawImage(imgElem, 0, 0);
+	
+	var srcData = sctx.getImageData(0,0,ciw,cih);
+	var dstData = sctx.createImageData(ciw,cih);
+	
+	// ソースsvgコンテンツにおけるソース画像の座標
+	var csix = Number(imageElem.getAttribute("x"));
+	var csiy = Number(imageElem.getAttribute("y"));
+	var csiw = Number(imageElem.getAttribute("width"));
+	var csih = Number(imageElem.getAttribute("height"));
+	
+	var cs2ci = {// ソースSVG系->ソース画像系変換行列(ひとまずtransform属性は無視)
+		a: ciw / csiw,
+		b: 0,
+		c: 0,
+		d: cih / csih,
+		e: -csix * ciw / csiw,
+		f: -csiy * cih / csih
+	};
+	
+	var rs2cs = getConversionMatrixViaGCS(rootCrs,crs);// ルートSVG->ソース(個々のコンテンツ)SVG変換
+	var cs2rs = getConversionMatrixViaGCS(crs,rootCrs);// ソース(個々のコンテンツ)SVG->ルートSVG変換
+	
+	/**
+	if ( !rs2cs.transform ){
+		// 非線形変換関数がないのでピクセル変換は不要
+		return;
+	}
+	**/
+	if ( imgElem.getAttribute("data-preTransformedHref")){
+		console.log("Already Transformed image");
+		return;
+	}
+	
+	var rib=transformRect({x:csix,y:csiy,width:csiw,height:csih},cs2rs); //ルートSVG座標系における該当イメージの領域 "image bounds on root"
+	var cib=transformRect(rib,rs2cs); // 今のところ使ってない・・
+	// console.log("ImageBounds: cont:",{x:csix,y:csiy,width:csiw,height:csih},"  root:",rib, "  reConvConte:",cib);
+	
+	
+	// console.log("image bounds on root:",rib);
+	// ルート(画面表示)系上のビットイメージも、ひとまずソースと同一サイズで作ることにする
+	
+	var ri2rs = { // ルートSVG系上のイメージ画像系->ルートSVG
+		a: rib.width / ciw,
+		b: 0,
+		c: 0,
+		d: rib.height / cih,
+		e: rib.x,
+		f: rib.y
+	};
+	
+	// ピクセルごとに座標変換実行　重すぎれば離散的なアンカーを選んで線形補間するというのもありだが、今は全ピクセル変換
+	var prevRowHasData=[];
+	var prow = ciw * 4;
+	for ( var riy = 0 ; riy < cih ; riy++ ){
+		var prevColHasData=false;
+		for ( var rix = 0 ; rix < ciw ; rix++ ){ // ルートSVGにおける画像の座標
+			var daddr = (rix + riy * ciw)*4;
+			
+			var rsxy = transform(rix, riy, ri2rs ); // ルートのSVG系の座標
+			var csxy = transform(rsxy.x, rsxy.y, rs2cs ); // コンテンツSVG系の座標 (この変換が非線形になることがある)
+			var cixy;
+			if ( csxy ){
+				cixy = transform(csxy.x, csxy.y, cs2ci ); // コンテンツSVGにおける画像の座標
+			}
+			
+			if ( cixy && cixy.x >= 0 && cixy.x < ciw && cixy.y >= 0 && cixy.y < cih){
+				var saddr = (Math.floor(cixy.x) + Math.floor(cixy.y) * ciw)*4;
+				dstData.data[daddr] = srcData.data[saddr];         // r
+				dstData.data[daddr + 1] = srcData.data[saddr + 1]; // g
+				dstData.data[daddr + 2] = srcData.data[saddr + 2]; // b
+				dstData.data[daddr + 3] = srcData.data[saddr + 3]; // a
+				prevColHasData=true;
+				prevRowHasData[rix]=true;
+			} else {
+				if ( prevColHasData ){ // prevColHasData
+					// サブピクセルオーダーの継ぎ目を消す処理(X方向) 
+					// x方向ひとつ前のピクセルに値があればその値をコピーする
+					// キャンバスの完全に隅にある継ぎ目は消えない。これも気にするなら1ピクセル大きいキャンバス作れば良いと思うね。
+					dstData.data[daddr] = dstData.data[daddr-4];         // r
+					dstData.data[daddr + 1] = dstData.data[daddr-4 + 1]; // g
+					dstData.data[daddr + 2] = dstData.data[daddr-4 + 2]; // b
+					dstData.data[daddr + 3] = dstData.data[daddr-4 + 3]; // a
+				} else if ( prevRowHasData[rix] ){
+					// サブピクセルオーダーの継ぎ目を消す処理(Y方向)
+					// y方向ひとつ前のピクセルに値があればその値をコピーする
+					dstData.data[daddr] = dstData.data[daddr-prow];         // r
+					dstData.data[daddr + 1] = dstData.data[daddr-prow + 1]; // g
+					dstData.data[daddr + 2] = dstData.data[daddr-prow + 2]; // b
+					dstData.data[daddr + 3] = dstData.data[daddr-prow + 3]; // a
+				}
+				prevColHasData=false;
+				prevRowHasData[rix]=false;
+			}
+		}
+	}
+	sctx.putImageData(dstData, 0, 0);
+	var iuri = sc.toDataURL('image/png');
+	//console.log("imgElem:",imgElem,"  iuri:",iuri);
+	imgElem.setAttribute("data-preTransformedHref",imgElem.getAttribute("src"));
+	imgElem.setAttribute("src",iuri);
 }
 
 function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,403)した画像(bitImage)を強制的に読み込み完了とみなしてしまう処理
@@ -5261,7 +5453,7 @@ function getElementByImgIdNoNS( XMLNode , searchId ){
 //	}
 }
 
-function getElementByAttr( XMLNode , searchId , atName ){ // Firefox用・・（IE11でも同じことがおきる場合がある 2014.6.20)
+function getElementByAttr_obsoluted( XMLNode , searchId , atName ){ // Firefox用・・（IE11でも同じことがおきる場合がある 2014.6.20)
 	// TODO: これはquerySelectorで処理すべき
 //	console.log(XMLNode , searchId,XMLNode.hasChildNodes());
 	if ( ! XMLNode.hasChildNodes() ){
@@ -5285,6 +5477,16 @@ function getElementByAttr( XMLNode , searchId , atName ){ // Firefox用・・（
 	}
 	return ( null );
 }
+
+function getElementByAttr( XMLNode , searchId , atName ){ // 2020/09/28 元のをgetElementByAttr_obsolutedにした ISSUE対応
+	if ( !XMLNode || ! XMLNode.hasChildNodes() ){
+		return ( null );
+	}
+	var ans = XMLNode.querySelector('['+atName+'="'+searchId+'"]');
+//	console.log("XMLNode:",XMLNode,"  searchId:",searchId,"  atName:",atName,"  ans:",ans);
+	return ( ans );
+}
+
 
 function getDocumentId( svgelement ){
 //	console.log("docId:::",svgelement.ownerDocument,svgelement.ownerDocument.documentElement.getAttribute("about"));
@@ -6103,7 +6305,6 @@ function initGISgeometry( cat, subCat , svgNode ){
 		// nothing
 		break;
 	case BITIMAGE:
-		// nothing
 		if ( BitImageGeometriesCaptureFlag ){
 			GISgeometry = new Object();
 			GISgeometry.type = "Coverage"; 
@@ -7058,6 +7259,7 @@ function showModal( htm , maxW, maxH ){
 	modalDiv.addEventListener("mousewheel" , MouseWheelListenerFunc, false); //chrome
 	modalDiv.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false); //firefox
 	document.getElementsByTagName("body")[0].appendChild(modalDiv);
+	return(infoDiv);
 }
 
 
@@ -7089,7 +7291,12 @@ function refreshScreen(noRetry, parentCaller, isRetryCall){
 		return;
 	}
 	
-	var rsCaller = ((refreshScreen.caller).toString()).substring(0,25);
+	var rsCaller;
+	if ( refreshScreen.caller ){
+		rsCaller = ((refreshScreen.caller).toString()).substring(0,25);
+	} else {
+		rsCaller = "undefined";
+	}
 	if ( rsCaller.indexOf(")")>0){
 		rsCaller = rsCaller.substring(0,rsCaller.indexOf(")")+1);
 	}
@@ -7684,27 +7891,49 @@ function removeChildren( targetElem ){
 
 }
 
-var getUrlViaImageProxy;
-var getUrlViaImageProxyCrossOriginAnonymous = false;
+var contentProxyParams = { // プロキシ経由でコンテンツを取得するための設定オブジェクト
+	getUrlViaProxy: null, // プロキシ経由URL生成関数(svg用)
+	getUrlViaImageProxy: null, // 同上(image用)
+	crossOriginAnonymous: false,
+	getNonlinearTransformationProxyUrl: null, // 2021/1/27 ビットイメージの非線形変換を行うときだけプロキシを使う設定
+	crossOriginAnonymousNonlinearTF: false,
+}
+
 //, getUrlViaProxy;
-function setProxyURLFactory( documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous ){ // 2020/1/30 proxyURL生成のsetterを設けるとともに、ビットイメージに対するproxyも設定できるように
-	if ( documentURLviaProxyFunction ){
-		getUrlViaProxy = documentURLviaProxyFunction;
-	} else {
-		getUrlViaProxy = null;
+function setProxyURLFactory( documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous , imageURLviaProxyFunctionForNonlinearTransformation , imageCrossOriginAnonymousForNonlinearTransformation){
+	// 2020/1/30 proxyURL生成のsetterを設けるとともに、ビットイメージに対するproxyも設定できるように
+	// 2021/1/27 ビットイメージの非線形変換のためだけに用いるプロキシを別設定可能にした。 APIの仕様がイケてない・・
+	if ( typeof ( documentURLviaProxyFunction ) == "function" ){
+		contentProxyParams.getUrlViaProxy = documentURLviaProxyFunction;
+	} else if ( documentURLviaProxyFunction === null ){
+		contentProxyParams.getUrlViaProxy = null;
 	}
 	
-	if ( imageURLviaProxyFunction ){
-		getUrlViaImageProxy = imageURLviaProxyFunction;
-	} else {
-		getUrlViaImageProxy = null;
+	if ( typeof ( imageURLviaProxyFunction ) == "function" ){
+		contentProxyParams.getUrlViaImageProxy = imageURLviaProxyFunction;
+	} else if(imageURLviaProxyFunction === null ){
+		contentProxyParams.getUrlViaImageProxy = null;
 	}
-	if ( imageCrossOriginAnonymous ){
-		getUrlViaImageProxyCrossOriginAnonymous = true;
-	} else {
-		getUrlViaImageProxyCrossOriginAnonymous = false;
+	
+	if ( imageCrossOriginAnonymous == true ){
+		contentProxyParams.crossOriginAnonymous = true;
+	} else if ( imageCrossOriginAnonymous == false ) {
+		contentProxyParams.crossOriginAnonymous = false;
 	}
-	console.log("called setProxyURLFactory: docProxy, imgProxy:",getUrlViaProxy,getUrlViaImageProxy);
+	
+	if ( typeof ( imageURLviaProxyFunctionForNonlinearTransformation ) == "function" ){
+		contentProxyParams.getNonlinearTransformationProxyUrl = imageURLviaProxyFunctionForNonlinearTransformation;
+	} else if(imageURLviaProxyFunctionForNonlinearTransformation===null){ // undefinedのときは何もしないようにした方が良いかもということで 2021/1/27
+		contentProxyParams.getNonlinearTransformationProxyUrl = null;
+	}
+	
+	if ( imageCrossOriginAnonymousForNonlinearTransformation == true ){
+		contentProxyParams.crossOriginAnonymousNonlinearTF = true;
+	} else if ( imageCrossOriginAnonymousForNonlinearTransformation == false ) {
+		contentProxyParams.crossOriginAnonymousNonlinearTF = false;
+	}
+	
+	console.log("called setProxyURLFactory: contentProxyParams:",contentProxyParams,"    input params:",documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous , imageURLviaProxyFunctionForNonlinearTransformation , imageCrossOriginAnonymousForNonlinearTransformation);
 }
 
 function getLinearTransformMatrix(x1i,y1i,x2i,y2i,x3i,y3i,x1o,y1o,x2o,y2o,x3o,y3o){
@@ -7837,6 +8066,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	isIntersect : isIntersect,
 	linkedDocOp : linkedDocOp,
 	loadSVG : loadSVG,
+	matMul : matMul,
 	numberFormat : numberFormat,
 	override : function ( mname , mval ){
 //		console.log("override " + mname );
@@ -7861,7 +8091,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	setMapCanvas : function( mc ){ mapCanvas = mc },
 	setMapCanvasCSS : setMapCanvasCSS,
 	setMapCanvasSize : function( mcs ){ mapCanvasSize = mcs },
-	setPreRenderController( layerId, pcf ){
+	setPreRenderController : function( layerId, pcf ){ // SVGMapLv0.1_PWAで使用
 		if ( typeof(pcf)=="function"){
 			if ( layerId ){
 				svgImagesProps[layerId].preRenderControllerFunction=pcf;
