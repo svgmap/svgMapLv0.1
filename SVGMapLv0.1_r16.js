@@ -953,8 +953,8 @@ function handleErrorResult( docId , docPath, httpRes){
 	// ERR404時や、timeout時に行う処理(2020/2/13 timeout処理を追加)
 	delete loadingImgs[docId]; // debug 2013.8.22
 	console.log( "File get failed: Err:",httpRes.status," Path:",docPath," id:",docId);
-	if ( svgImagesProps[docId] ){ // 2020/2/13 removeUnusedDocs() により恐らく以下の処理は不要
-		svgImagesProps[docId].Path = "ERR"; // ERR404例外処理 2017.8.29
+	if ( svgImagesProps[docId] ){ // 2020/2/13 removeUnusedDocs() により恐らく以下の処理は不要 じゃなかった(2021/2/17)
+		svgImagesProps[docId].loadError = true; // 2021/2/17
 	}
 	checkLoadCompleted();
 	return;
@@ -980,6 +980,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			checkLoadCompleted();
 			return;
 			**/
+			return; // 2021/2/17 ERR404強化
 		}
 //		console.log("called HandleResult id,path:" + docId+" , " +docPath);
 //		console.log("End loading");
@@ -1979,14 +1980,14 @@ function getSvgReq( href ){ // ハッシュなどの扱いをきちんとした 
 // documentElemの生成(読み込み)が完了してないとエラーになる。生成を待つ必要があるため 2013.8.21
 function parseSVGwhenLoadCompleted(svgImages , imageId , imgElem , ct){
 //	console.log("parseSVGwhenLoadCompleted",imageId , "  svgImagesProps:", svgImagesProps[imageId], "  svgImages:", svgImages[imageId], " count:",ct);
+	if ( svgImagesProps[imageId] && svgImagesProps[imageId].loadError ){ // 2021/2/17 ERR404強化
+		return;
+	}
 	if ( svgImages[imageId] && svgImagesProps[imageId] ){
-		
-		if ( svgImagesProps[imageId].Path !="ERR"){
-			loadingImgs[imageId]=true;
-			var symbols =  getSymbols(svgImages[imageId]);
-			parseSVG( svgImages[imageId].documentElement , imageId , imgElem , false , symbols , null , null );
-			delete loadingImgs[imageId];
-		}
+		loadingImgs[imageId]=true;
+		var symbols =  getSymbols(svgImages[imageId]);
+		parseSVG( svgImages[imageId].documentElement , imageId , imgElem , false , symbols , null , null );
+		delete loadingImgs[imageId];
 	} else {
 		if ( ct < 20 ){
 			++ct;
@@ -3592,6 +3593,8 @@ function removeChildDocs( imageId ){
 			svgImagesProps[imageId].script.handleScriptCf(true); // やはりこの仕組みは一度見直しが必要・・・ 2018.9.7
 		}
 		delete svgImages[imageId];
+		delete svgImagesProps[imageId];
+	} else if ( svgImagesProps[imageId] && svgImagesProps[imageId].loadError ){
 		delete svgImagesProps[imageId];
 	}
 }
