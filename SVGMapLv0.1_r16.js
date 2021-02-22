@@ -2850,6 +2850,29 @@ function getTransformedBox( inBox , matrix){
 			width : w ,
 			height : h
 		}
+	} else if (!matrix.transform){ // 2021/2/22 debug c,d!=0対応してなかった
+		var ptx=[];
+		var pty=[];
+		var iPart = 1;
+		for ( var iy = 0 ; iy <=iPart ; iy++ ){
+			for ( var ix = 0 ; ix <=iPart ; ix++ ){
+				var pt = transform( inBox.x+ ix * inBox.width / iPart , inBox.y+ iy * inBox.height / iPart , matrix ) ;
+				ptx.push(pt.x);
+				pty.push(pt.y);
+			}
+		}
+		
+		var x = Math.min.apply(null,ptx);
+		var y = Math.min.apply(null,pty);
+		var width = Math.max.apply(null,ptx) - x;
+		var height = Math.max.apply(null,pty) - y;
+		return {
+			x: x,
+			y: y,
+			width: width,
+			height: height,
+		}
+		
 	} else if ( matrix.transform){
 		// transformRectと同様の処理に変更
 		// 対角での処理から四隅に変更したが、もっと非線形なものはこれでもダメです 2020/10/20
