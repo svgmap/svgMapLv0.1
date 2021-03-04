@@ -2412,6 +2412,7 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	img.style.top = y + "px";
 	img.style.display = "none"; // for Safari
 	img.style.position = "absolute";
+	img.style.maxWidth = "initial";
 	img.width = width;
 	img.height = height;
 	img.id = id;
