@@ -37,6 +37,7 @@
 // 2019/12/27 refreshScreen後コールバック処理の精密化
 // 2020/01/21 同上マイナー修正
 // 2020/07/17 redis用でブランチしていた機能を取り込み(poiToolsの帰り値オプション)
+// 2021/03/16 POIregistTool(initPOIregistToolの方)でタッチイベントでの座標入力に対応、また座標入力のキャンセル関数を設けた
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -768,6 +769,33 @@ function setPoiRegPosition(e,targetTxtBoxId, directPutPoiParams){ // setPoiPosit
 	} 
 }
 
+// 2021/3/16 マウスクリックだけでなくタッチイベントにも対応させる
+// キャンセルも可能にする(cancelPointingPoiRegister)
+function pointingPoiRegister(targetTxtBoxId,directPutPoiParams){
+	cancelPointingPoiRegister();
+	pointingPoiRegObject={
+		targetTxtBoxId:targetTxtBoxId,
+		directPutPoiParams:directPutPoiParams
+	}
+	addEventListener("click",pointingPoiRegisterListener,false);
+	addEventListener("touchend",pointingPoiRegisterListener,false);
+}
+
+// POIのUIのクリック・タッチイベント聞き取り状態は排他的なのでクロージャ内に一個の管理オブジェクトがあれば良いはず
+var pointingPoiRegObject={};
+function pointingPoiRegisterListener(event){
+	setPoiRegPosition(event, pointingPoiRegObject.targetTxtBoxId, pointingPoiRegObject.directPutPoiParams);
+	cancelPointingPoiRegister();
+}
+
+function cancelPointingPoiRegister(){
+	pointingPoiRegObject={};
+	removeEventListener("click",pointingPoiRegisterListener,false);
+	removeEventListener("touchend",pointingPoiRegisterListener,false);
+}
+
+
+
 function callAfterRefreshed(cbf,cbfParam0,cbfParam1){ // refreshが完了してから呼ぶための関数(2019/12/27)
 	window.addEventListener('screenRefreshed', (function(cbf,cbfParam0,cbfParam1) {
 		return function f() {
@@ -786,7 +814,9 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 		if ( e.target.parentNode.id =="pointUI"){// 緯度経度のカーソル入力用
 			console.log("pointUIev");
 			setTimeout(function(){
-				document.addEventListener("click", function(ev){setPoiRegPosition(ev , "poiEditorPosition" )} , false );
+				pointingPoiRegister("poiEditorPosition");
+				
+//				document.addEventListener("click", function(ev){setPoiRegPosition(ev , "poiEditorPosition" )} , false );
 			},100);
 		} else if ( e.target.parentNode.id =="iconselection"){
 			for ( var i = 0 ; i < e.target.parentNode.childNodes.length ; i++ ){
@@ -800,10 +830,13 @@ function setPoiRegUiEvents( targetDiv ){ // setPoiUiEventsはこれで置き換�
 			console.log("coordInputButton event numb:",targetUInumber);
 			
 			setTimeout(function(){
+				pointingPoiRegister("coordTextBox"+targetUInumber , uiMapping.poiParams[targetUInumber]);
+				/** pointingPoiRegisterで置き換え(2021/3/16)
 				document.addEventListener("click", function(ev){
 					setPoiRegPosition(ev , "coordTextBox"+targetUInumber , uiMapping.poiParams[targetUInumber]);
 					document.removeEventListener("click", arguments.callee, false);
 				} , false );
+				**/
 			},100);
 		} else if ( (e.target.id).indexOf("cernterRegButton")==0){
 			var targetUInumber =  Number((e.target.id).substring(16));
@@ -1752,6 +1785,7 @@ function clearTools_with_UI(){
 }
 	
 return { // svgMapGIStool. で公開する関数のリスト
+	cancelPointingPoiRegister: cancelPointingPoiRegister,
 	editPoint: editPoint,
 	initPOItools: initPOItools,
 	initPOIregistTool: initPOIregistTool,
