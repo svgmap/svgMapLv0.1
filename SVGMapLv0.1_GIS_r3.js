@@ -39,7 +39,7 @@
 // 2020/07/10 ラスターGIS: Plygon実装  - これでRev3の重要機能完成
 // 2020/07/15 ラスターGIS(Polygon)結果のビットイメージ可視化用関数　＆　コード整理
 // 2020/07/27 Rev3 : ラスターGIS: 非対角成分あるラスターカバレッジでもPolyline,Polygonサポート
-//
+// 2021/04/13 drawGeoJson: geoJsonのスタイリング仕様(mapbox)をサポート
 //
 // ISSUES:
 //
@@ -2356,6 +2356,8 @@ var svgMapGIStool = ( function(){
 	
 	
 	function getImageURL(imageUrl){
+		// ローカル（同一ドメイン）コンテンツもしくはそれと見做せる(directURLlistにあるもの)もの以外をproxy経由のURLに変換する
+		// proxyの仕様は、 encodeURIComponent(imageUrl)でオリジナルのURLをエンコードしたものをURL末尾(もしくはクエリパート)につけたGETリクエストを受け付けるタイプ
 		if ( proxyUrl && imageUrl.indexOf("http") == 0){
 			if (isDirectURL(imageUrl)){
 				// Do nothing (Direct Connection)
@@ -2447,7 +2449,7 @@ var svgMapGIStool = ( function(){
 	} 	
 	
 	// geoJsonレンダラ系
-	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm){
+	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary){
 //		console.log("called svgMapGisTool drawGeoJson");
 		var svgImages = svgMap.getSvgImages();
 		var svgImagesProps = svgMap.getSvgImagesProps();
@@ -2460,17 +2462,27 @@ var svgMapGIStool = ( function(){
 //			console.log("Set metadata on drawGeoJson:",metadata)
 		} // ISSUE 2020.1.14 本来のgeojsonでは、 properties type:Featureオブジェクト下の "properties"プロパティに{KV,..}としてメタデータを入れる仕様　これをサポートするべき
 		
+		if (geojson.properties){ // 拡張メタデータ機構：標準geojsonはFeature下のみ許されるがどこでもOKに、下層はそれを継承上書き（デフォ属性可に）
+			if (!metadata){
+				metadata={};
+			}
+			for ( var mkey in geojson.properties){
+				metadata[mkey]=geojson.properties[mkey];
+			}
+		}
+		
 		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
 			for ( var i = 0 ; i < geojson.length ; i++ ){
-				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+				drawGeoJson( geojson[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 			}
 		} else if ( geojson.type == "FeatureCollection" ){
 			var features = geojson.features;
 			for ( var i = 0 ; i < features.length ; i++ ){
-				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+				drawGeoJson( features[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 			}
 		} else if ( geojson.type == "Feature" ){
 			var geom = geojson.geometry;
+			/**
 			if(geojson.properties){
 				metadata = "";
 				postMeta = Object.keys(geojson.properties).map(function(key){return geojson.properties[key]});
@@ -2481,68 +2493,48 @@ var svgMapGIStool = ( function(){
 					}
 				}
 			}
-			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+			**/
+			drawGeoJson( geom , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 		} else if ( geojson.type == "GeometryCollection" ){
 			var geoms = geojson.geometries;
 			for ( var i = 0 ; i < geoms.length ; i++ ){
-				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm);
+				drawGeoJson( geoms[i] , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 			}
 		} else if ( geojson.type == "MultiPolygon" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
 			if ( geojson.coordinates.length >0){
 				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-					putPolygon(geojson.coordinates[i], svgImage, crs, fillColor, metadata, parentElm);
+					putPolygon(geojson.coordinates[i], svgImage, crs, fillColor, metadata, parentElm,metaDictionary);
 				}
 			}
 		} else if ( geojson.type == "Polygon" ){
-			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm);
+			putPolygon(geojson.coordinates, svgImage, crs, fillColor, metadata, parentElm,metaDictionary);
 		} else if ( geojson.type == "MultiLineString" ){
 			// これは、pathのサブパスのほうが良いと思うが・・
 			if ( geojson.coordinates.length >0){			
 				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-					putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+					putLineString(geojson.coordinates[i], svgImage, crs, strokeColor, strokeWidth, metadata, parentElm,metaDictionary);
 				}
 			}
 		} else if ( geojson.type == "LineString" ){
-			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm);
+			putLineString(geojson.coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm,metaDictionary);
 			
 		} else if ( geojson.type == "MultiPoint" ){
 			// グループで囲んで一括でmetadataつけたほうが良いと思うが・・
 			if ( geojson.coordinates.length >0){
 				for ( var i = 0 ; i < geojson.coordinates.length ; i++ ){
-					putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+					putPoint(geojson.coordinates[i], svgImage, crs, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 				}
 			}
 		} else if ( geojson.type == "Point" ){
-			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm);
+			putPoint(geojson.coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm,metaDictionary);
 		}
 		
-		/**
-		for ( var i = 0 ; i < geojson.length ; i++ ){
-			var geom = geojson[i];
-			switch ( geom.type ){
-			case "LineString":
-				var pe = svgImage.createElement("path");
-				var pathD = getPathD( geom.coordinates , crs );
-				pe.setAttribute("d",pathD);
-				pe.setAttribute("fill","none");
-				pe.setAttribute("stroke","blue");
-				pe.setAttribute("stroke-width","3");
-				pe.setAttribute("vector-effect","non-scaling-stroke");
-				svgImage.documentElement.appendChild( pe );
-				break;
-			case "Polygon":
-				svgImage.createElement("path");
-				break;
-			}
-		}
-		**/
-//		console.log(svgImage);
 	}
 	
 
 	/*
-		Styleは未実装
+		Styleは実装
 		Point     : title = name, metadata = descrptionとして格納
 		LineString: metadata = name, descriptionとして格納
 	*/
@@ -2647,7 +2639,44 @@ var svgMapGIStool = ( function(){
 		return geoArray;
 	}
 	
-	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm){
+	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm,metaDictionary){
+		var metastyle = getSvgMapSimpleMeta(metadata,metaDictionary);
+		//console.log("putPoint: style:",metastyle.styles);
+		var metaString = array2string(metastyle.normalized);
+		if ( ! metaString && metastyle.styles.description ){
+			metaString = metastyle.styles.description
+		}
+		if ( ! POIiconId ){
+			POIiconId = "p0"; // 適当だ・・
+		}
+		if ( metastyle.styles["marker-symbol"] ){
+			POIiconId = metastyle.styles["marker-symbol"];
+		}
+		var fill,stroke;
+		var opacity=1;
+		var strokeWidth = 0;
+		if ( metastyle.styles.opacity ){
+			opacity = Number(metastyle.styles.opacity);
+		}
+		if ( metastyle.styles.fill ){
+			fill = metastyle.styles.fill;
+		}
+		if ( metastyle.styles["marker-color"] ){
+			fill = metastyle.styles["marker-color"];
+		}
+		if ( metastyle.styles.stroke ){
+			stroke = metastyle.styles.stroke;
+			strokeWidth = 1;
+		}
+		if ( metastyle.styles["stroke-width"] ){
+			strokeWidth = metastyle.styles["stroke-width"];
+		}
+		
+		if ( metastyle.styles.title ){
+			poiTitle = metastyle.styles.title;
+		}
+		
+		
 		var poie = svgImage.createElement("use");
 		var svgc = getSVGcoord(coordinates,crs);
 		poie.setAttribute( "x" , "0" );
@@ -2655,11 +2684,25 @@ var svgMapGIStool = ( function(){
 		poie.setAttribute( "transform" , "ref(svg," + svgc.x + "," + svgc.y + ")" );
 		poie.setAttribute( "xlink:href" , "#" + POIiconId );
 		if ( poiTitle ){
-			poie.setAttribute( "title", poiTitle);
+			poie.setAttribute( "xlink:title", poiTitle);
 		}
-		if ( metadata ){
-			poie.setAttribute( "content", metadata);
+		if ( metaString ){
+			poie.setAttribute( "content", metaString);
 		}
+		if ( fill ){
+			poie.setAttribute( "fill", fill);
+		}
+		if ( strokeWidth > 0 ){
+			poie.setAttribute("stroke",strokeColor);
+			poie.setAttribute("stroke-width",strokeWidth);
+			poie.setAttribute("vector-effect","non-scaling-stroke");
+		} else {
+			poie.setAttribute("stroke","none");
+		}
+		if ( opacity <1){
+			poie.setAttribute("opacity",opacity);
+		}
+		//console.log(poie);
 		if ( parentElm ){
 			parentElm.appendChild( poie );
 		} else {
@@ -2668,13 +2711,34 @@ var svgMapGIStool = ( function(){
 		return ( poie );
 	}
 	
-	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm){
+	function putLineString(coordinates, svgImage, crs, strokeColor, strokeWidth, metadata, parentElm,metaDictionary){
+		var metastyle = getSvgMapSimpleMeta(metadata,metaDictionary);
+		var metaString = array2string(metastyle.normalized);
+		if ( ! metaString && metastyle.styles.description ){
+			metaString = metastyle.styles.description
+		}
 		if ( !strokeColor ){
 			strokeColor = "blue";
 		}
 		if ( !strokeWidth ){
 			strokeWidth = 3;
 		}
+		var opacity=1;
+		if ( metastyle.styles.opacity ){
+			opacity = Number(metastyle.styles.opacity);
+		}
+		
+		if ( metastyle.styles.stroke ){
+			strokeColor = metastyle.styles.stroke;
+		}
+		if ( metastyle.styles["stroke-width"] ){
+			strokeWidth = metastyle.styles["stroke-width"];
+		}
+		var title;
+		if ( metastyle.styles.title ){
+			title = metastyle.styles.title;
+		}
+		
 		var pe = svgImage.createElement("path");
 		var pathD = getPathD( coordinates , crs );
 		pe.setAttribute("d",pathD);
@@ -2682,8 +2746,14 @@ var svgMapGIStool = ( function(){
 		pe.setAttribute("stroke",strokeColor);
 		pe.setAttribute("stroke-width",strokeWidth);
 		pe.setAttribute("vector-effect","non-scaling-stroke");
-		if ( metadata ){
-			pe.setAttribute( "content", metadata);
+		if ( opacity <1){
+			pe.setAttribute("opacity",opacity);
+		}
+		if ( title ){
+			pe.setAttribute( "xlink:title", title);
+		}
+		if ( metaString ){
+			pe.setAttribute( "content", metaString);
 		}
 		if ( parentElm ){
 			parentElm.appendChild( pe );
@@ -2694,13 +2764,45 @@ var svgMapGIStool = ( function(){
 		return (pe);
 	}
 	
-	function putPolygon(coordinates, svgImage, crs, fillColor, metadata, parentElm){
+	function putPolygon(coordinates, svgImage, crs, fillColor, metadata, parentElm,metaDictionary){
+		var metastyle = getSvgMapSimpleMeta(metadata,metaDictionary);
+		var metaString = array2string(metastyle.normalized);
+		if ( ! metaString && metastyle.styles.description ){
+			metaString = metastyle.styles.description
+		}
 		if ( coordinates.length ==0){
 			return;
 		}
+		var strokeColor = "none";
+		var strokeWidth = 0;
 		if ( !fillColor ){
-			strokeColor = "orange";
+			fillColor = "orange";
 		}
+		
+		if ( metastyle.styles.fill){
+			fillColor = metastyle.styles.fill;
+		}
+		
+		if ( metastyle.styles.stroke ){
+			strokeWidth = 1;
+			strokeColor = metastyle.styles.stroke;
+		}
+		
+		if ( metastyle.styles["stroke-width"] ){
+			strokeWidth = metastyle.styles["stroke-width"];
+		}
+		
+		var opacity=1;
+		if ( metastyle.styles.opacity ){
+			opacity = Number(metastyle.styles.opacity);
+		}
+		
+		var title;
+		if ( metastyle.styles.title ){
+			title = metastyle.styles.title;
+		}
+		
+		
 		
 		var pe = svgImage.createElement("path");
 		
@@ -2711,10 +2813,22 @@ var svgMapGIStool = ( function(){
 		
 		pe.setAttribute("d",pathD);
 		pe.setAttribute("fill",fillColor);
-		pe.setAttribute("stroke","none");
 		pe.setAttribute("fill-rule", "evenodd");
-		if ( metadata ){
-			pe.setAttribute( "content", metadata);
+		if ( strokeWidth > 0 ){
+			pe.setAttribute("stroke",strokeColor);
+			pe.setAttribute("stroke-width",strokeWidth);
+			pe.setAttribute("vector-effect","non-scaling-stroke");
+		} else {
+			pe.setAttribute("stroke","none");
+		}
+		if ( opacity <1){
+			pe.setAttribute("opacity",opacity);
+		}
+		if ( title ){
+			pe.setAttribute( "xlink:title", title);
+		}
+		if ( metaString ){
+			pe.setAttribute( "content", metaString);
 		}
 		if ( parentElm ){
 			parentElm.appendChild( pe );
@@ -2744,6 +2858,74 @@ var svgMapGIStool = ( function(){
 			x: geoCoord[0] * crs.a + geoCoord[1] * crs.c + crs.e ,
 			y: geoCoord[0] * crs.b + geoCoord[1] * crs.d + crs.f
 		}
+	}
+	
+	// geoJsonのpropertyに以下の予約語が入っていたらスタイルと見做す(mapboxのgeojson拡張Simplestyleをベース)
+	// See https://github.com/mapbox/simplestyle-spec
+	// この実装では、opacity追加、"marker-size"の実装をどうしようか考え中です・・
+	var styleDict =["title","description","marker-size","marker-symbol","marker-color","stroke","stroke-width","fill","opacity"];
+	
+	function getSvgMapSimpleMeta(metadata,metaDictionary){
+		var others={};
+		var hitMeta=[];
+		var style={};
+		if ( metadata.length ){
+			hitMeta = metadata;
+		} else {
+			if (metaDictionary){
+				hitMeta = new Array(metaDictionary.length);
+				for ( var key in metadata){
+					var idx = metaDictionary.indexOf(key);
+					if ( idx >= 0 ){
+						// hit
+						hitMeta[idx]=metadata[key];
+					} else {
+						var styleIndex = styleDict.indexOf(key);
+						if ( styleIndex >= 0 ){
+							style[styleDict[styleIndex]]=metadata[key];
+						} else {
+							// ユーザメタデータにもスタイルにもヒットしない
+							others[key]=metadata[key];
+						}
+					}
+				}
+			} else {
+				// Prop Name(Key)順にソートしてならべるのが良いかと・・
+//				console.log("sort by prop name");
+				var keys = Object.keys(metadata);
+				keys.sort();
+				for(var key of keys) {
+					if ( styleDict.indexOf(key) >=0 ){
+						style[key]=metadata[key];
+					} else {
+						hitMeta.push(metadata[key]);
+					}
+				}
+			}
+		}
+		var ans = {
+			normalized: hitMeta,
+			others:others,
+			styles:style
+		};
+		
+//		console.log("getSvgMapSimpleMeta:",ans);
+		return ans;
+	}
+	
+	function array2string(arr){
+		var ans;
+		if ( arr.length == 0 ){
+			return(null);
+		}
+		for ( var i = 0 ; i < arr.length ; i++ ){
+			if (i==0){
+				ans = arr[i];
+			} else {
+				ans += "," + arr[i];
+			}
+		}
+		return ( arr );
 	}
 	
 	function testCapture( geom ){
