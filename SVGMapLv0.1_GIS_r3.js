@@ -2672,8 +2672,8 @@ var svgMapGIStool = ( function(){
 			strokeWidth = metastyle.styles["stroke-width"];
 		}
 		
-		if ( metastyle.styles.title ){
-			poiTitle = metastyle.styles.title;
+		if ( metastyle.styles.title !=null && metastyle.styles.title !=undefined  ){
+			poiTitle = metastyle.styles.title+"";
 		}
 		
 		
@@ -2919,13 +2919,17 @@ var svgMapGIStool = ( function(){
 			return(null);
 		}
 		for ( var i = 0 ; i < arr.length ; i++ ){
+			var s = "";
+			if ( arr[i]!=null && arr[i]!=undefined  ){
+				s=arr[i];
+			}
 			if (i==0){
-				ans = arr[i];
+				ans = s;
 			} else {
-				ans += "," + arr[i];
+				ans += "," + s;
 			}
 		}
-		return ( arr );
+		return ( ans );
 	}
 	
 	function testCapture( geom ){
