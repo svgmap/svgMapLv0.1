@@ -7565,19 +7565,20 @@ function checkResume(documentElement, symbols){
 		}
 		removeCookies("resume"); // resumeという名前のモノだけ削除する
 		
-		if ( !resumeObj || (resumeObj && !resumeObj.vbLat )){
-			resumeFirstTime = false;
-			return;
-		}
+//		if ( !resumeObj || (resumeObj && !resumeObj.vbLat )){ // これはハッシュ処理が通らないのでまずい・・ 2021/4/20
+//			resumeFirstTime = false;
+//			return;
+//		}
 		
 //		console.log("Resume on startup");
 //		console.log("geoViewBox:",geoViewBox);
-		var vbLat = Number(resumeObj.vbLat);
-		var vbLng = Number(resumeObj.vbLng);
-		var vbLatSpan = Number(resumeObj.vbLatSpan);
-		var vbLngSpan = Number(resumeObj.vbLngSpan);
 		
-		if ( resume && resumeObj && vbLat && vbLng && vbLatSpan && vbLngSpan ){
+		if ( resume && resumeObj  ){
+			var vbLat = Number(resumeObj.vbLat);
+			var vbLng = Number(resumeObj.vbLng);
+			var vbLatSpan = Number(resumeObj.vbLatSpan);
+			var vbLngSpan = Number(resumeObj.vbLngSpan);
+			
 //			var lp = getRootLayersProps();
 			var lprev = resumeObj.layersProperties;
 			
