@@ -2964,9 +2964,9 @@ var svgMapGIStool = ( function(){
 			var rct = (parentElment.ownerDocument).createElement("image");
 			if ( !tile.transform ){ // 回転成分がない
 				rct.setAttribute("x",Math.min(tile.extent.x * crs.a, (tile.extent.x+tile.extent.width) * crs.a));
-				rct.setAttribute("y",Math.max(tile.extent.y * crs.d, (tile.extent.y+tile.extent.height) * crs.d));
-				rct.setAttribute("width",(tile.extent.width) * crs.a);
-				rct.setAttribute("height",(tile.extent.height) * crs.d);
+				rct.setAttribute("y",Math.min(tile.extent.y * crs.d, (tile.extent.y+tile.extent.height) * crs.d));
+				rct.setAttribute("width",Math.abs((tile.extent.width) * crs.a));
+				rct.setAttribute("height",Math.abs((tile.extent.height) * crs.d));
 			} else {
 				console.log("has transform meshdata");
 				var tMat = svgMap.matMul(tile.transform, crs);
