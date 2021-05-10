@@ -25,7 +25,8 @@
 //  2021/04/01 Rev1完成かな
 //  2021/04/06 カスタムビューポート設定パネルを構築
 
-
+// ISSUE:
+//  同じオリジンに複数のコンテナがある場合、localStorageはオリジンで共通なので、コンテナのURLを相対パスで扱っているため矛盾が起きる・・
 
 // =================================================================================================
 // =================================================================================================
@@ -58,10 +59,13 @@ async function reset(){
 }
 
 async function loadOriginal(svgMapObj){
+	var originalPath;
 	if ( !svgMapObj && window.opener && typeof(window.opener.svgMap)=="object"){
 		svgMapObj = window.opener.svgMap;
+		originalPath = new URL(svgMapObj.getSvgImagesProps()["root"].Path,window.opener.location.href).href;
+	} else {
+		originalPath = new URL(svgMapObj.getSvgImagesProps()["root"].Path,location.href).href;
 	}
-	var originalPath = svgMapObj.getSvgImagesProps()["root"].Path;
 	var lpOriginal = await svgMapCustomLayersManager.getDetailedLayersPropertySetFromPath(originalPath,true);
 	svgMapCustomLayersManager.originalLayersProperty = lpOriginal;
 }
@@ -85,7 +89,8 @@ async function buildFromOriginal(orgPath_or_svgMapObj){
 		}
 	} else if (window.opener && typeof(window.opener.svgMap)=="object" ){
 		console.log("get original path from opener");
-		originalPath = window.opener.svgMap.getSvgImagesProps()["root"].Path;
+//		originalPath = window.opener.svgMap.getSvgImagesProps()["root"].Path;
+		originalPath = new URL(window.opener.svgMap.getSvgImagesProps()["root"].Path,window.opener.location.href).href;
 	}
 	
 	var lpOriginal = await svgMapCustomLayersManager.getDetailedLayersPropertySetFromPath(originalPath,true);
@@ -412,7 +417,8 @@ async function selectSetting(event){
 
 // カスタムレイヤー設定UIを既存の設定から生成する
 async function generateLayerTableFromCustomSetting(setting,customLayersObject){
-	var baseLayersPropertySet = await svgMapCustomLayersManager.getDetailedLayersPropertySetFromPath( window.opener.svgMap.getSvgImagesProps()["root"].Path, true);
+	var originalHref = new URL(window.opener.svgMap.getSvgImagesProps()["root"].Path, window.opener.location.href).href;
+	var baseLayersPropertySet = await svgMapCustomLayersManager.getDetailedLayersPropertySetFromPath( originalHref, true);
 	var appliedLPset;
 	console.log("baseLayersPropertySet:",baseLayersPropertySet);
 	if ( setting ){
