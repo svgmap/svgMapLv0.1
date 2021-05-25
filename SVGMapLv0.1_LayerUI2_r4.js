@@ -1,11 +1,10 @@
 // 
 // Description:
-// SVGMap Standard LayerUI2 for SVGMapLv0.1 >rev12
-// Programmed by Satoru Takagi
+// SVGMap Standard LayerUI2 for SVGMapLv0.1 >rev17
 // 
 //  Programmed by Satoru Takagi
 //  
-//  Copyright (C) 2016-2019 by Satoru Takagi @ KDDI CORPORATION
+//  Copyright (C) 2016-2021 by Satoru Takagi @ KDDI CORPORATION
 //  
 // License: (GPL v3)
 //  This program is free software: you can redistribute it and/or modify
@@ -44,6 +43,26 @@
 // 2020/06/09 : レイヤ固有UIiframeのscriptに、preRenderFunction　という名の関数があると、そのレイヤーの描画前(svgの<script>要素のonzoom,onscroll関数と同じタイミング)に同期的に呼び出される。
 // 2020/10/13 : svgImagesProps[layerID]に.controllerWindowを追加
 // 2020/12/08 : hiddenOnLayerLoad(内部変数hiddenOnLaunch)が複数あった場合にロジックが破綻していたのを修正
+// 2020/11/17-: id:layerList,layerSpecificUIの要素がなかった時ちゃんと動くようにケアした後(特にlayerSpecificUIは今や動的レイヤーで必須の要素化しているので)、layerSpecificUIを別で指定できるようにしたい
+//              checkLayerListAndRegistLayerUIがid;layerList要素がないときでも動くようにした (checkControllerを発動させている)
+//              checkControllerなどでshowLayerSpecificUIが発動する。次はこれをid:layerSpecificUIがないケースでも動くようにする
+// 2021/03/09 : Rev.4: 2020/11-2020/12のSVGMapFrame用の改修を導入し、SVGMapCustomLayersManagerの起動機能を実装 (#layerList data-customizerで、カスタマイザを指定するとそれを起動するボタンが出現)
+
+
+// global vars
+/**
+ var layerList, uiOpen , layerTableDiv , uiOpened , layerGroupStatus ; // layerGroupStatusは今はグループ折り畳み状態のみ管理
+ var layerSpecificUI; // layerSpecificUIの要素
+ var layerListMaxHeightStyle, layerListMaxHeight, layerListFoldedHeight , layerSpecificUiDefaultStyle = {} , layerSpecificUiMaxHeight = 0;
+ var lsUIbdy, lsUIbtn;
+ var preDefinedTargetUiElement=null;
+ var transferCustomEvent2iframe = [];
+ var GlobalMessageprefix = "gMsg_";
+ var maxGlobalMessages = 5;
+ var globalMessageID="globalMessage";
+**/
+
+
 //
 // ISSUES, ToDo:
 //	(FIXED?) IE,Edgeでdata-controller-src動作しない
@@ -62,10 +81,14 @@ var location = window.location;
 
 var svgMapLayerUI = ( function(){ 
 
-
-var UTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARElEQVQoU2NkIAEwkqCWAaviUIaD/1cz2GPIYQiAFMJsQ9eAohhZITYNcMXYFKJrACvGpxBZAyMxCmEaKA86XGFPkskAu/sRITlJWQUAAAAASUVORK5CYII=";
-var DTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARklEQVQoU2NkIAEwkqCWgTTFoQwH/xNrOthkYjSsZrBnhDsDnwaQQpChKG7GpgGmEEMxupOQFWJVDNOArhCnYlyhQ1I4AwDsgxEhKAdQXgAAAABJRU5ErkJggg==";
-var RTpng = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAAQUlEQVQoU2NkQAKhDAf/r2awZ0QWQ2ajSIAUgyRxacCqGJcGnIqxacCrGF0DQcXIGggqRvYsddyMLfgoC2d8MQgAdTkhDCcGd3MAAAAASUVORK5CYII=";
+	var buildinImgs={
+		UTpng : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARElEQVQoU2NkIAEwkqCWAaviUIaD/1cz2GPIYQiAFMJsQ9eAohhZITYNcMXYFKJrACvGpxBZAyMxCmEaKA86XGFPkskAu/sRITlJWQUAAAAASUVORK5CYII=",
+		DTpng : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAARklEQVQoU2NkIAEwkqCWgTTFoQwH/xNrOthkYjSsZrBnhDsDnwaQQpChKG7GpgGmEEMxupOQFWJVDNOArhCnYlyhQ1I4AwDsgxEhKAdQXgAAAABJRU5ErkJggg==",
+		RTpng : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAALCAYAAACprHcmAAAAQUlEQVQoU2NkQAKhDAf/r2awZ0QWQ2ajSIAUgyRxacCqGJcGnIqxacCrGF0DQcXIGggqRvYsddyMLfgoC2d8MQgAdTkhDCcGd3MAAAAASUVORK5CYII=",
+		setting:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEVrZXIAAABXsNZ8AAAAAXRSTlMAQObYZgAAAAFiS0dEAIgFHUgAAAAJcEhZcwAALiMAAC4jAXilP3YAAAAuSURBVAjXY2BsYBDyYNAKYXBRYlBgYRDsYEhyY2hRBCEgA8gFCgKlgAqAyhgbALVHB5MYHdneAAAAAElFTkSuQmCC",
+	hamburger:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAQMAAAAlPW0iAAAABlBMVEVlAGRCQkJgmRPnAAAAAXRSTlMAQObYZgAAABJJREFUCNdjYAAD+z8gBAe4uQCvKQdj5EQSJQAAAABJRU5ErkJggg==",
+	hamburgerEdit:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAgMAAABinRfyAAAACVBMVEVkAFb/AABCQkIPrhq8AAAAAXRSTlMAQObYZgAAACJJREFUCNdjYIADrlWrFkAINIApEQLEjKFAsZVQAirGwAAA4sIMW9pBuDwAAAAASUVORK5CYII=",
+	}
 
 var layerList, uiOpen , layerTableDiv , uiOpened , layerGroupStatus ; // layerGroupStatusは今はグループ折り畳み状態のみ管理
 var layerSpecificUI; // layerSpecificUIの要素
@@ -75,12 +98,12 @@ function layerListOpenClose(){
 	if ( layerList.style.height== layerListFoldedHeight + "px" ){ // layer list is colsed
 		updateLayerTable();
 		layerList.style.height=layerListMaxHeightStyle;
-		uiOpenBtn.firstChild.src=UTpng;
+		uiOpenBtn.firstChild.src=buildinImgs.UTpng;
 		layerTableDiv.style.display="";
 		uiOpened = true;
 	} else { // opened
 		layerList.style.height= layerListFoldedHeight + "px";
-		uiOpenBtn.firstChild.src=DTpng;
+		uiOpenBtn.firstChild.src=buildinImgs.DTpng;
 		layerTableDiv.style.display="none";
 		uiOpened = false;
 	}
@@ -98,10 +121,13 @@ function getGroupFoldingStatus( groupName ){ // グループ折り畳み状況�
 }
 
 function updateLayerTable(){
-//	console.log("CALLED updateLayerTable");
+	console.log("CALLED updateLayerTable");
 	var tb = document.getElementById("layerTable");
-	removeAllLayerItems(tb);
-	setLayerTable(tb);
+	if ( tb ){
+		removeAllLayerItems(tb);
+		setLayerTable(tb);
+	}
+	checkLayerListAndRegistLayerUI();
 }
 
 function setLayerTable(tb){
@@ -151,7 +177,6 @@ function setLayerTable(tb){
 	}
 	document.getElementById("layerListmessage").innerHTML = layerListmessageHead + visibleLayers + layerListmessageFoot;
 	document.getElementById("layerListmessage").title = visibleLayersNameArray;
-	checkLayerList();
 	window.setTimeout(setLayerTableStep2,30);
 }
 
@@ -234,7 +259,7 @@ function getLayerTR(title, id ,visible,hasLayerList,groupName){
 	// レイヤ固有UIのボタン生成
 	var td = document.createElement("td");
 	var btn = document.createElement("button");
-	btn.innerHTML="<img style='pointer-events: none;' src='"+RTpng+"'>";
+	btn.innerHTML="<img style='pointer-events: none;' src='"+buildinImgs.RTpng+"'>";
 //	btn.type="button";
 	btn.className="layerUiButton";
 	btn.id = btid;
@@ -260,10 +285,9 @@ function getLayerTR(title, id ,visible,hasLayerList,groupName){
 
 var hasUnloadedLayers = false;
 
-function checkLayerList(count){
-//	console.log("checkLayerList:");
+function checkLayerListAndRegistLayerUI(){
 	// レイヤーの読み込み完了まで　レイヤーリストのチェックを行い、レイヤ固有UIを設置する
-	if ( !count ){count=1}
+//	if ( !count ){count=1}
 	var layerProps=svgMap.getRootLayersProps();
 	hasUnloadedLayers = false;
 	for ( var i = 0 ; i < layerProps.length ; i++ ){
@@ -272,7 +296,7 @@ function checkLayerList(count){
 			if ( layerProps[i].svgImageProps && layerProps[i].hasDocument ){ // svgImagePropsが設定されていたとしてもまだ読み込み完了していると保証できないと思うので、hasDocumentを併せて評価する 2017.9.8
 //				var ctbtn = document.getElementById("bt_"+layerProps[i].id);
 //				setTimeout(checkController,50,layerProps[i].svgImageProps, ctbtn); // 時々失敗するので50msec待って実行してみる・・ 2016.11.17　このTimeOutはもう不要と思う 2017.9.8
-				checkController(layerProps[i].svgImageProps, layerProps[i].id, layerProps[i].id); // 上記より直接呼出しに戻してみる 2017.9.8
+				checkController(layerProps[i].svgImageProps, layerProps[i].id); // 上記より直接呼出しに戻してみる 2017.9.8
 				
 			} else {
 				hasUnloadedLayers = true;
@@ -282,22 +306,44 @@ function checkLayerList(count){
 //	console.log( "hasUnloadedLayers:",hasUnloadedLayers,count);
 	/** 2020/2/13このループは、unloadedLayersUIupdateを動かすことで不要にできたはず
 	if ( hasUnloadedLayers && count < 5){ // 念のためリミッターをかけておく
-		setTimeout(checkLayerList,200,count+1);
+		setTimeout(checkLayerListAndRegistLayerUI,200,count+1);
 	}
 	**/
 }
 
 function unloadedLayersUIupdate(){ // 2020/2/13 ロードの遅延が大きいレイヤーのレイヤUIボタンが出現しないケースの対策
 	if ( hasUnloadedLayers ){
-		checkLayerList();
+		checkLayerListAndRegistLayerUI();
 	}
 }
 
-function checkController(svgImageProps, layerId){
+function launchController(layerID, cbf){ // 2021/05/06 APIからレイヤ固有UI(コントローラ)を起動する機能を追加中
+	// cbfの第一引数にコントローラwindowが入るようにしたい
+	var layerProps=svgMap.getRootLayersProps();
+	if ( layerProps[layerID].svgImageProps ){
+		if ( layerProps[layerID].svgImageProps.controller ){
+			if ( layerProps[layerID].svgImageProps.controllerWindow ){
+				console.warn("Already launched");
+				if ( cbf ){
+					cbf(layerProps[layerID].svgImageProps.controllerWindow);
+				}
+			} else {
+				checkController(layerProps[layerID].svgImageProps, layerProps[layerID].id, true, cbf );
+			}
+		} else {
+			console.error("This layer has NO controller, EXIT.");
+		}
+	} else {
+		console.error("This layer is not yet loaded, EXIT.");
+	}
+}
+
+function checkController(svgImageProps, layerId, forceLaunch, cbf ){
 	// レイヤ固有UIを実際に設置する
 	// さらに、レイヤ固有UIのオートスタートなどの制御を加える 2017.9.8 - 9.22
 	if ( svgImageProps.controller ){
 //		console.log("checkController:",svgImageProps.controller);
+		var lsuiDoc = layerSpecificUI.ownerDocument;
 		var ctrUrl;
 		if ( svgImageProps.controller.indexOf("src:")==0 ){
 			ctrUrl=":";
@@ -316,8 +362,11 @@ function checkController(svgImageProps, layerId){
 		// Added autostart function of layerUI 2017.9.8 (名称変更 9/22)
 		// 対応するレイヤー固有UIframeがないときだけ、appearOnLayerLoad||hiddenOnLayerLoad処理が走る
 		// #exec=appearOnLayerLoad,hiddenOnLayerLoad,onClick(default) 追加
-		if ( !document.getElementById( getIframeId(layerId) ) ){
+		if ( !lsuiDoc.getElementById( getIframeId(layerId) ) ){
 			var lhash = getHash(ctrUrl);
+			if ( forceLaunch ){
+				lhash = {exec:"appearOnLayerLoad"};
+			}
 			if (lhash && lhash.exec){
 				if ( lhash.exec=="appearOnLayerLoad" || lhash.exec=="hiddenOnLayerLoad" ){
 					var psEvt = {
@@ -330,6 +379,9 @@ function checkController(svgImageProps, layerId){
 					};
 					if ( lhash.exec=="hiddenOnLayerLoad" ){
 						psEvt.target.hiddenOnLaunch = true;
+					}
+					if ( cbf ){
+						psEvt.target.callBackFunction = cbf;
 					}
 					console.log("Find #exec=appearOnLayerLoad,hiddenOnLayerLoad Auto load LayerUI : pseudo Event:", psEvt);
 					showLayerSpecificUI(psEvt); // showLayerSpecificUIを強制起動 ただしUIは非表示にしたいケースある(hiddenOnLayerLoad)
@@ -417,9 +469,9 @@ function getGroupTR(lp, gfolded){ // グループ項目を生成する
 //	foldButton.type="button";
 	foldButton.addEventListener("click",toggleGroupFold,false);
 	if ( ! gfolded ){
-		foldButton.innerHTML="<img style='pointer-events: none;' src='"+UTpng+"'>";
+		foldButton.innerHTML="<img style='pointer-events: none;' src='"+buildinImgs.UTpng+"'>";
 	} else {
-		foldButton.innerHTML="<img style='pointer-events: none;' src='"+DTpng+"'>";
+		foldButton.innerHTML="<img style='pointer-events: none;' src='"+buildinImgs.DTpng+"'>";
 	}
 	foldTd.appendChild(foldButton);
 	groupTr.appendChild(foldTd);
@@ -488,90 +540,107 @@ function initLayerList(){
 	layerGroupStatus = new Object();
 	layerList = document.getElementById("layerList");
 //	console.log("ADD EVT");
-	layerList.addEventListener("wheel" , MouseWheelListenerFunc, false); // added 2019/04/15
-	layerList.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
-	layerList.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
-	layerList.style.zIndex="20";
-	layerListMaxHeightStyle = layerList.style.height;
-	layerSpecificUI = document.getElementById("layerSpecificUI");
-	var lps = svgMap.getRootLayersProps();
-	var visibleLayers=0;
-	var visibleLayersNameArray=[];
-	const visibleNum=5;  // 表示レイヤ名称数
-	for ( var i = lps.length -1 ; i >=0  ; i-- ){
-		if (lps[i].visible){
-			++visibleLayers;
-			if ( visibleLayers <= visibleNum ){ visibleLayersNameArray.push(lps[i].title); }
-			else if ( visibleLayers == visibleNum+1 ){ visibleLayersNameArray.push("..."); }
+	
+	var llUItop;
+	if ( layerList ){
+		layerList.addEventListener("wheel" , MouseWheelListenerFunc, false); // added 2019/04/15
+		layerList.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
+		layerList.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
+		layerList.style.zIndex="20";
+		layerListMaxHeightStyle = layerList.style.height;
+		var lps = svgMap.getRootLayersProps();
+		var visibleLayers=0;
+		var visibleLayersNameArray=[];
+		const visibleNum=5;  // 表示レイヤ名称数
+		for ( var i = lps.length -1 ; i >=0  ; i-- ){
+			if (lps[i].visible){
+				++visibleLayers;
+				if ( visibleLayers <= visibleNum ){ visibleLayersNameArray.push(lps[i].title); }
+				else if ( visibleLayers == visibleNum+1 ){ visibleLayersNameArray.push("..."); }
+			}
 		}
+		
+		llUItop = document.createElement("div");
+		
+		var llUIlabel = document.createElement("label");
+		llUIlabel.id="layerListmessage";
+		llUIlabel.setAttribute("for","layerListOpenButton");
+		llUIlabel.setAttribute("title", visibleLayersNameArray);
+	//	layerList.appendChild(llUIlabel);
+		llUItop.appendChild(llUIlabel);
+		
+		var llUIbutton = document.createElement("button");
+		llUIbutton.id="layerListOpenButton";
+	//	llUIbutton.type="button";
+		llUIbutton.innerHTML="<img style='pointer-events: none;' src='"+buildinImgs.DTpng+"'>";
+		llUIbutton.style.position="absolute";
+		llUIbutton.style.right="0px";
+		llUIbutton.addEventListener("click",layerListOpenClose);
+	//	layerList.appendChild(llUIbutton);
+		llUItop.appendChild(llUIbutton);
+		
+		var layersCustomizerPath = layerList.getAttribute("data-customizer");
+		if ( layersCustomizerPath ){
+			var layersCustomizerIcon = document.createElement("img");
+			layersCustomizerIcon.src = buildinImgs.hamburger;
+			layersCustomizerIcon.style.position="absolute";
+			layersCustomizerIcon.style.right="35px";
+			layersCustomizerIcon.style.cursor="pointer";
+			llUItop.appendChild(layersCustomizerIcon);
+			layersCustomizerIcon.addEventListener("click",function(){
+				window.open(layersCustomizerPath,"layersCustomizer","toolbar=yes,menubar=yes,scrollbars=yes");
+			});
+		}
+		
+		layerList.appendChild(llUItop);
+		
+		
+		
+		var llUIdiv = document.createElement("div");
+		llUIdiv.id="layerTableDiv";
+		llUIdiv.style.width = "100%";
+		llUIdiv.style.height = "100%";
+		llUIdiv.style.overflowY = "scroll";
+		llUIdiv.style.display = "none";
+		
+		layerList.appendChild(llUIdiv);
+		
+		var llUItable = document.createElement("table");
+		llUItable.id="layerTable";
+		llUItable.setAttribute("border" , "0");
+		llUItable.style.width="100%";
+		llUItable.style.tableLayout ="fixed";
+		llUItable.style.whiteSpace ="nowrap";
+		
+		
+		llUItable.appendChild(getColgroup());
+		
+		llUIdiv.appendChild(llUItable);
+		
+		llUIlabel.innerHTML = layerListmessageHead + visibleLayers + layerListmessageFoot;
 	}
-	
-	var llUItop = document.createElement("div");
-	
-	var llUIlabel = document.createElement("label");
-	llUIlabel.id="layerListmessage";
-	llUIlabel.setAttribute("for","layerListOpenButton");
-	llUIlabel.setAttribute("title", visibleLayersNameArray);
-//	layerList.appendChild(llUIlabel);
-	llUItop.appendChild(llUIlabel);
-	
-	var llUIbutton = document.createElement("button");
-	llUIbutton.id="layerListOpenButton";
-//	llUIbutton.type="button";
-	llUIbutton.innerHTML="<img style='pointer-events: none;' src='"+DTpng+"'>";
-	llUIbutton.style.position="absolute";
-	llUIbutton.style.right="0px";
-	llUIbutton.addEventListener("click",layerListOpenClose);
-//	layerList.appendChild(llUIbutton);
-	llUItop.appendChild(llUIbutton);
-	
-	layerList.appendChild(llUItop);
-	
-	
-	
-	var llUIdiv = document.createElement("div");
-	llUIdiv.id="layerTableDiv";
-	llUIdiv.style.width = "100%";
-	llUIdiv.style.height = "100%";
-	llUIdiv.style.overflowY = "scroll";
-	llUIdiv.style.display = "none";
-	
-	layerList.appendChild(llUIdiv);
-	
-	var llUItable = document.createElement("table");
-	llUItable.id="layerTable";
-	llUItable.setAttribute("border" , "0");
-	llUItable.style.width="100%";
-	llUItable.style.tableLayout ="fixed";
-	llUItable.style.whiteSpace ="nowrap";
-	
-	
-	llUItable.appendChild(getColgroup());
-	
-	llUIdiv.appendChild(llUItable);
-	
-	llUIlabel.innerHTML = layerListmessageHead + visibleLayers + layerListmessageFoot;
+	window.setTimeout(initLayerListStep2,30, llUItop);
 	
 	initLayerSpecificUI();
-	
-	window.setTimeout(initLayerListStep2,30, llUItop);
 }
 
 function initLayerListStep2(llUItop){ // レイヤリストのレイアウト待ち後サイズを決める　もうちょっとスマートな方法ないのかな・・
-	layerListFoldedHeight = llUItop.offsetHeight;
-	
-	if ( layerList.offsetHeight < 60 ){
-		layerListMaxHeightStyle = "90%";
+	if ( llUItop ){
+		layerListFoldedHeight = llUItop.offsetHeight;
+		
+		if ( layerList.offsetHeight < 60 ){
+			layerListMaxHeightStyle = "90%";
+		}
+		
+		layerListMaxHeight = layerList.offsetHeight;
+		
+	//	console.log("LL dim:",layerListMaxHeightStyle,layerListFoldedHeight);
+		
+		layerList.style.height = layerListFoldedHeight + "px";
 	}
-	
-	layerListMaxHeight = layerList.offsetHeight;
-	
-//	console.log("LL dim:",layerListMaxHeightStyle,layerListFoldedHeight);
-	
-	layerList.style.height = layerListFoldedHeight + "px";
 	addEventListener("zoomPanMap",unloadedLayersUIupdate,false); // 2020/2/13
 	addEventListener("screenRefreshed",unloadedLayersUIupdate,false); // ^
-	checkLayerList(); // 2017.9.8 この関数の先にあるcheckControllerで#loadTiming=layerLoad|uiAppear(default) を起動時処理する
+	checkLayerListAndRegistLayerUI(); // 2017.9.8 この関数の先にあるcheckControllerで#loadTiming=layerLoad|uiAppear(default) を起動時処理する
 }
 
 
@@ -605,14 +674,39 @@ function getColgroup(){
 var lsUIbdy, lsUIbtn;
 
 function initLayerSpecificUI(){
+//	console.log("initLayerSpecificUI");
+	if ( preDefinedTargetUi.element ){ // 要素をpreDefinedTargetUiElementで明示してあった場合は、それで初期化する(assignLayerSpecificUiElement()があらかじめ呼ばれている)
+		console.log("Found preDefinedTargetUiElement! : ", preDefinedTargetUi)
+		layerSpecificUI = preDefinedTargetUi.element;
+		if (preDefinedTargetUi.isInline ){ 
+			layerSpecificUI.style.display="none";
+		}
+	} else {
+		layerSpecificUI = document.getElementById("layerSpecificUI");
+	}
+	if ( layerSpecificUI ){
+		// layerSpecificUI要素が与えられている場合、レイヤ固有UIの基本配置を設定
+	//	console.log("initLayerSpecificUI:",layerSpecificUI.style ,layerSpecificUI);
+	//	console.log("layerSpecificUiDefaultStyle:",layerSpecificUiDefaultStyle);
+		layerSpecificUI.style.zIndex="20";
+		layerSpecificUI.style.display="none";
+	} else {
+		console.log("can't find id:initLayerSpecificUI elem ... create it"); // 2020/12/01 うまく動いてない？
+		layerSpecificUI = document.createElement("div");
+		layerSpecificUI.setAttribute("id","layerSpecificUI");
+		
+		layerSpecificUI.setAttribute("style","right :10px; top: 40px; width:400px;height:400px; position: absolute; background-color: white;opacity:0.8;display:none;zIndex:20;");
+		
+		document.body.appendChild(layerSpecificUI);
+	}
+	
 	layerSpecificUiDefaultStyle.height = layerSpecificUI.style.height;
 	layerSpecificUiDefaultStyle.width = layerSpecificUI.style.height;
 	layerSpecificUiDefaultStyle.top = layerSpecificUI.style.top;
 	layerSpecificUiDefaultStyle.left = layerSpecificUI.style.left;
 	layerSpecificUiDefaultStyle.right = layerSpecificUI.style.right;
-//	console.log("initLayerSpecificUI:",layerSpecificUI.style ,layerSpecificUI);
-//	console.log("layerSpecificUiDefaultStyle:",layerSpecificUiDefaultStyle);
-	layerSpecificUI.style.zIndex="20";
+	
+	// レイヤ固有UIのキャンバス
 	lsUIbdy = document.createElement("div");
 	lsUIbdy.id = "layerSpecificUIbody";
 	lsUIbdy.style.overflow="auto"; // for iOS safari http://qiita.com/Shoesk/items/9f81ef1fd7b3a0b516b7
@@ -622,17 +716,32 @@ function initLayerSpecificUI(){
 //	lsUIbdy.style.overflowY="scroll";
 	layerSpecificUI.appendChild(lsUIbdy);
 //	console.log("lsUIbdy:",lsUIbdy);
-	lsUIbtn = document.createElement("input");
-	lsUIbtn.type="button";
-	lsUIbtn.value="x";
-	lsUIbtn.style.webkitTransform ="translateZ(10)";
-	lsUIbtn.style.zIndex ="3";
-	lsUIbtn.id="layerSpecificUIclose";
-	lsUIbtn.style.position="absolute";
-	lsUIbtn.style.right="0px";
-	lsUIbtn.style.top="0px";
-	layerSpecificUI.appendChild(lsUIbtn);
-	lsUIbtn.addEventListener("click",layerSpecificUIhide,false);
+	
+	// レイヤ固有UIを閉じるボタン
+	if ( !preDefinedTargetUi.element || preDefinedTargetUi.isInline){ // 基本的にpreDefinedTargetUiが設定されていたら閉じる機能は動かさない ただし、inlineにするなら消せるようにする　2020/12/08
+		lsUIbtn = document.createElement("input");
+		lsUIbtn.type="button";
+		lsUIbtn.value="x";
+		lsUIbtn.style.webkitTransform ="translateZ(10)";
+		lsUIbtn.style.zIndex ="3";
+		lsUIbtn.id="layerSpecificUIclose";
+		lsUIbtn.style.position="absolute";
+		lsUIbtn.style.right="0px";
+		lsUIbtn.style.top="0px";
+		layerSpecificUI.appendChild(lsUIbtn);
+		lsUIbtn.addEventListener("click",layerSpecificUIhide,false);
+	}
+}
+
+var preDefinedTargetUi={};
+function assignLayerSpecificUiElement( targetElement , isInline , autoSizing){
+	// この関数は、initLayerList()が呼び出される前に呼ばれないと無効 2020/12/02
+	// すなわち、大元のsvgMap.registLayerUiSetter( initLayerList , updateLayerTable);でセットされた関数が呼ばれる前
+	// 上記でセットされる関数(svgMapのsetLayerUI)は、ルートコンテナのXMLが最初に読み込まれた直後に呼び出される
+	
+	// isInline: 指定した要素をインライン要素として扱い、UIが存在しえない場合は消えるし、消すボタンも付く
+	// autoSizing: 自動リサイズを発動する
+	preDefinedTargetUi = {element:targetElement, isInline:isInline , autoSizing:autoSizing};
 }
 
 svgMap.registLayerUiSetter( initLayerList , updateLayerTable);
@@ -686,7 +795,8 @@ function getHash(url){
 
 // 表示中のレイヤ固有UI要素を返す
 function getVisibleLayerSpecificUIid(){
-	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
+//	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
+	var layerSpecificUIbody = lsUIbdy;
 	for ( var i = layerSpecificUIbody.childNodes.length-1;i>=0;i--){
 		if ( layerSpecificUIbody.childNodes[i].style.display != "none" ){
 			return ( layerSpecificUIbody.childNodes[i].id );
@@ -697,7 +807,8 @@ function getVisibleLayerSpecificUIid(){
 
 
 function showLayerSpecificUI(e){
-//	console.log("showLayerSpecificUI: catch event ",e);
+	var lsuiDoc = layerSpecificUI.ownerDocument;
+//	console.log("showLayerSpecificUI: catch event ",e,"    e.target.hiddenOnLaunch:",e.target.hiddenOnLaunch);
 	var layerId = getLayerId(e);
 //	var lprops = svgMap.getRootLayersProps();
 //	var controllerURL = lprops[layerId].svgImageProps.controller;
@@ -724,8 +835,12 @@ function showLayerSpecificUI(e){
 		
 	}
 	
-	if ( !e.target.hiddenOnLaunch ){ // e.target.hiddenOnLaunch があるときはlayerSpecificUIの表示状態に関与しない
-		layerSpecificUI.style.display = "inline"; // 全体を表示状態にする
+	if ( !e.target.hiddenOnLaunch){
+		if ( !preDefinedTargetUi.element || preDefinedTargetUi.isInline){
+			layerSpecificUI.style.display = "inline"; // 全体を表示状態にする
+		} else {
+			layerSpecificUI.style.display = "block"; // 全体を表示状態にする
+		}
 	}
 	
 	var targetIframeId = getIframeId(layerId);
@@ -735,36 +850,37 @@ function showLayerSpecificUI(e){
 	
 	if ( !e.target.hiddenOnLaunch && visibleIframeId && targetIframeId != visibleIframeId){ // hiddenOnLaunchでない場合で、ターゲットとは別の表示中のLayerUIがあればそれを隠す
 		dispatchCutomIframeEvent( hideFrame ,visibleIframeId);
-		document.getElementById( visibleIframeId ).style.display="none";
+		lsuiDoc.getElementById( visibleIframeId ).style.display="none";
 	}
 	
-	if ( document.getElementById( targetIframeId ) ){ // すでに対象iframeが存在している場合、表示を復活させる
+	var trgIframe = lsuiDoc.getElementById( targetIframeId );
+	if ( trgIframe ){ // すでに対象iframeが存在している場合、表示を復活させる
 		console.log("alreadyCreated iframe");
-		var trgIframe = document.getElementById( targetIframeId );
 		if(trgIframe.tagName == "IMG"){
 			//画像（凡例）の場合は画像を常にリサイズしてスクロールせずに見れるように処理追加
-			imgResize(trgIframe, document.getElementById("layerSpecificUI"), reqSize);
+			imgResize(trgIframe, lsuiDoc.getElementById("layerSpecificUI"), reqSize);
 		}else{
 			trgIframe.style.display="block";
-			testIframeSize( document.getElementById(targetIframeId), reqSize);
+			testIframeSize( trgIframe, reqSize);
 		}
 		dispatchCutomIframeEvent( appearFrame ,targetIframeId);
 	} else {
 //		console.log("create new iframe");
 		if ( controllerURL.indexOf(".png")>0 || controllerURL.indexOf(".jpg")>0 || controllerURL.indexOf(".jpeg")>0 || controllerURL.indexOf(".gif")>0){ // 拡張子がビットイメージの場合はimg要素を設置する
-			var img = document.createElement("img");
+			var img = lsuiDoc.createElement("img");
 			img.src=controllerURL;
 			img.id = targetIframeId;
 			//画像サイズを指定した場合div(layerSpecificUI)のサイズを変更して画像１枚を表示させる
-			var resLayerSpecificUI = document.getElementById("layerSpecificUI");
+			var resLayerSpecificUI = lsuiDoc.getElementById("layerSpecificUI");
 			resLayerSpecificUI.addEventListener("wheel" , MouseWheelListenerFunc, false);
 			resLayerSpecificUI.addEventListener("mousewheel" , MouseWheelListenerFunc, false);
 			resLayerSpecificUI.addEventListener("DOMMouseScroll" , MouseWheelListenerFunc, false);
-			document.getElementById("layerSpecificUIbody").appendChild(img);
+			lsUIbdy.appendChild(img);
+//				document.getElementById("layerSpecificUIbody").appendChild(img);
 			setTimeout(imgResize, 100, img, resLayerSpecificUI, reqSize); 
 			setTimeout(setLsUIbtnOffset,100,img);
 		} else {
-			initIframe(layerId,controllerURL,reqSize, e.target.hiddenOnLaunch);
+			initIframe(layerId, controllerURL, reqSize, e.target.hiddenOnLaunch, e.target.callBackFunction);
 		}
 	}
 }
@@ -802,8 +918,9 @@ var hideFrame = "hideFrame";
 function dispatchCutomIframeEvent(evtName, targetFrameId){
 	// added 2016.12.21 オーサリングツール等でUIが閉じられたときにイベントを流す
 	// 今のところ、openFrame(新たに生成), closeFrame(消滅), appearFrame(隠されていたのが再度現れた), hideFrame(隠された) の４種で利用
-	if ( document.getElementById(targetFrameId) && document.getElementById(targetFrameId).contentWindow ){
-		var ifr = document.getElementById(targetFrameId);
+	var lsuiDoc = layerSpecificUI.ownerDocument;
+	if ( lsuiDoc.getElementById(targetFrameId) && lsuiDoc.getElementById(targetFrameId).contentWindow ){
+		var ifr = lsuiDoc.getElementById(targetFrameId);
 		var customEvent = ifr.contentWindow.document.createEvent("HTMLEvents");
 		customEvent.initEvent(evtName, true , false );
 		ifr.contentWindow.document.dispatchEvent(customEvent);
@@ -816,23 +933,27 @@ function dispatchCutomIframeEvent(evtName, targetFrameId){
 	}
 }
 
-function initIframe(lid,controllerURL,reqSize, hiddenOnLaunch){
-	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
-	var iframe = document.createElement("iframe");
+function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf){
+	console.log("initIframe:",controllerURL, "  hiddenOnLaunch?:",hiddenOnLaunch);
+//	var layerSpecificUIbody = document.getElementById("layerSpecificUIbody");
+	var layerSpecificUIbody = lsUIbdy;
+	var lsuiDoc = layerSpecificUI.ownerDocument;
+	var iframe = lsuiDoc.createElement("iframe");
 //	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26
-	iframeId = "layerSpecificUIframe_"+ lid;
+	iframeId = getIframeId(lid);
 	iframe.id = iframeId;
 	
 	if ( hiddenOnLaunch ){
+		console.log("iframe:",iframe," display:",iframe.style.display);
 		iframe.style.display="none";
 	}
 	
 	iframe.addEventListener("load",function(){
-		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL);
+		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf);
 	}, { once: true });
 	
 	var bySrcdoc = false;
-	if ( controllerURL.charAt(0) != ":" ){ // controllerにレイヤUIのhtmlのパスが書かれているケース(通常ケース)
+	if ( controllerURL.charAt(0) != ":" ){ // controllerにレイヤUIのhtmlのパスが書かれているケース(通常ケース) 
 		if (controllerURL.substr(0,7)=="http://" || controllerURL.substr(0,8)=="https://"){ // startsWithがIEでは・・・
 			// CORS設定されてる別サイトのiframeでもdata-controllerでURL表現状態でも起動可能にする 2019/11/26
 			console.log("Get controller by XHR");
@@ -841,7 +962,7 @@ function initIframe(lid,controllerURL,reqSize, hiddenOnLaunch){
 			httpObj.open("GET", controllerURL , true );
 			httpObj.send(null);
 			bySrcdoc = true;
-		} else { // 同一ドメインにあるケース(基本ケース)
+		} else { // 同一ドメインにあるケース(基本ケース)  
 			iframe.src=controllerURL;
 			layerSpecificUIbody.appendChild(iframe);
 		}
@@ -883,7 +1004,7 @@ function initIframe(lid,controllerURL,reqSize, hiddenOnLaunch){
 	return (iframe);
 }
 
-function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
+function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf){
 	// srcdocだと、xxmsぐらい待たないと、contentWindowへの設定がwindowに保持されないので、初期化されるまでリトライすることに。
 	// xxmsの時間もなんかまちまち・・(on chrome) 2019/11/26
 	// DOMContentLoaded イベントで動作させれば良いんじゃないかな とも思ったがどうだろう
@@ -934,6 +1055,9 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL){
 	document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
 	document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
 	setTimeout( testIframeSize , 1000 , iframe ,reqSize);
+	if ( cbf ){
+		cbf(iframe.contentWindow);
+	}
 }
 
 
@@ -948,7 +1072,8 @@ function initIframePh2(httpRes, iframe , lid, reqSize ){
 	console.log("initIframePh2(byXHR): httpRes: ",httpRes, "   lid:",  lid);
 	var sourceDoc = httpRes.responseText;
 	iframe.srcdoc = sourceDoc;
-	layerSpecificUIbody.appendChild(iframe);
+//	layerSpecificUIbody.appendChild(iframe);
+	lsUIbdy.appendChild(iframe);
 	if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
 		console.log("patch for IE&Edge");
 		sourceDoc = sourceDoc.replace(/&quot;/g,'"');
@@ -971,6 +1096,10 @@ function setLsUIbtnOffset( targetElem , isRetry ){ // 2017.2.17 レイヤ固有U
 	// targetElem：レイヤ固有UIに配置されるimg要素もしくはiframeのdocumentElement
 //	console.log("setLsUIbtnOffset:", targetElem, targetElem.offsetWidth);
 //	console.log("targetElem.~Width:",targetElem,targetElem.clientWidth,targetElem.offsetWidth, ":::" , lsUIbdy.clientWidth, layerSpecificUI.clientWidth);
+	
+	if (!lsUIbtn){
+		return;
+	}
 	
 	if ( targetElem.offsetWidth == 0 ){
 		lsUIbtn.style.right="0px";
@@ -998,7 +1127,7 @@ function testIframeSize( iframe ,reqSize){
 	var maxWidth = window.innerWidth - pxNumb(layerSpecificUiDefaultStyle.left) - pxNumb(layerSpecificUiDefaultStyle.right) - 50;
 //	console.log("reqSize:",reqSize, " window:",window.innerWidth,window.innerHeight, "  available w/h",maxWidth,maxHeight) - 50;
 	
-	if ( ! iframe.contentWindow ){
+	if ( ! iframe.contentWindow || (preDefinedTargetUi.element && !preDefinedTargetUi.autoSizing) ){
 		return;
 	}
 	setLsUIbtnOffset(iframe.contentWindow.document.documentElement);
@@ -1041,8 +1170,9 @@ function transferCustomEvent4layerUi(layerId){
 	return function(ev){
 //		console.log("get event from root doc : type: ",ev.type);
 		// レイヤー固有UIがある場合のみイベントを転送する
-		if ( document.getElementById("layerSpecificUIframe_"+layerId) ){
-			var ifr = document.getElementById("layerSpecificUIframe_"+layerId);
+		var lsuiDoc = layerSpecificUI.ownerDocument;
+		var ifr = lsuiDoc.getElementById(getIframeId(layerId))
+		if ( ifr ){
 			var customEvent = ifr.contentWindow.document.createEvent("HTMLEvents");
 			customEvent.initEvent(ev.type, true , false );
 //			console.log("transferCustomEvent:", ev.type , " to:",layerId);
@@ -1055,23 +1185,27 @@ function transferCustomEvent4layerUi(layerId){
 
 
 function layerSpecificUIhide(){
+	var lsuiDoc = layerSpecificUI.ownerDocument;
 	var visibleIframeId = getVisibleLayerSpecificUIid();
 	
 	dispatchCutomIframeEvent("hideFrame",visibleIframeId);
-	document.getElementById(visibleIframeId).style.display = "none";
+	lsuiDoc.getElementById(visibleIframeId).style.display = "none";
 	
-	layerSpecificUI.style.display = "none";
-	layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
+	if ( !preDefinedTargetUi.element || preDefinedTargetUi.isInline ){
+		layerSpecificUI.style.display = "none";
+		layerSpecificUI.style.height = layerSpecificUiDefaultStyle.height;
+	}
 }
 
 function syncLayerSpecificUiExistence( layerId, visivility ){
+	var lsuiDoc = layerSpecificUI.ownerDocument;
 	var visibleIframeId = getVisibleLayerSpecificUIid();
 	var targetIframeId = getIframeId(layerId);
-	if ( visivility == false && document.getElementById(targetIframeId) ){
+	if ( visivility == false && lsuiDoc.getElementById(targetIframeId) ){
 		if ( visibleIframeId == targetIframeId){
 			layerSpecificUIhide();
 		}
-		targetIframe= document.getElementById(targetIframeId)
+		targetIframe= lsuiDoc.getElementById(targetIframeId)
 		console.log("close layer specific UI for:",layerId);
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);
@@ -1153,8 +1287,10 @@ function clearGlobalMessage(layerId){
 
 
 return { // svgMapLayerUI. で公開する関数のリスト
+	launchController: launchController,
 	layerSpecificUIhide : layerSpecificUIhide,
 	setLayerListmessage : setLayerListmessage,
+	assignLayerSpecificUiElement : assignLayerSpecificUiElement,
 //	putGlobalMessage: putGlobalMessage,
 }
 

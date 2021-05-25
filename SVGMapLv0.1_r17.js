@@ -7596,7 +7596,7 @@ function checkResume(documentElement, symbols){
 						delete lprev[key];
 					} else {
 						// hrefが変更されている！！　skipしておく
-						console.error("href is unmatched!!!: title:",key,"  href:",href,"  SKIP IT");
+						console.warn("href is unmatched!!!: title:",key,"  href:",lprev[key].href ," : ", lp[i].href,"  SKIP IT");
 					}
 				}
 			}
