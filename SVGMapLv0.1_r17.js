@@ -2400,20 +2400,22 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	if ( nocache ) { // ビットイメージにもnocacheを反映させてみる 2019.3.18
 		href = getNoCacheRequest(href);
 	}
-	
+	var crossOriginFlag = false;
 	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
 		href = contentProxyParams.getUrlViaImageProxy(href);
 		if ( contentProxyParams.crossOriginAnonymous ){
-			img.crossOrigin="anonymous";
+			// img.crossOrigin="anonymous";
+			crossOriginFlag = true;
 		}
 	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
-			img.crossOrigin="anonymous";
+			// img.crossOrigin="anonymous";
+			crossOriginFlag = true;
 		}
 	}
 	
-	setLoadingImagePostProcessing(img, href, id, false, svgimageInfo);
+	setLoadingImagePostProcessing(img, href, id, false, svgimageInfo, crossOriginFlag);
 	
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
@@ -2461,14 +2463,20 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	return ( img );
 }
 
-function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo ){
+function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, crossOriginFlag ){
 	if ( verIE > 8 ){
 //		console.log("el",href);
 		img.addEventListener('load', handleLoadSuccess); // for Safari
 		img.addEventListener('error', timeoutLoadingImg ); // 2016.10.28 for ERR403,404 imgs (especially for sloppy tiled maps design)
 		img.src = href;
-	} else {
+		if (crossOriginFlag){ // crossOrigin属性はsrc書き換えと同タイミングとする。2021.6.9 crossOrigin特性だけ変更するケースはない(Imageのproxy設定と一体)という想定でいる・・
+			img.crossOrigin="anonymous";
+		}
+	} else { // for IE  to be obsoluted..
 		img.attachEvent('onload', handleLoadSuccess);
+		if (crossOriginFlag){ // これは意味あるのか？
+			img.crossOrigin="anonymous";
+		}
 		if ( forceSrcIE ){
 			img.src = href;
 		} else {
@@ -2553,16 +2561,18 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.width = width;
 		img.height = height;
 	}
-	
+	var crossOriginFlag=false;
 	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
 		href = contentProxyParams.getUrlViaImageProxy(href);
 		if ( contentProxyParams.crossOriginAnonymous ){
-			img.crossOrigin="anonymous";
+			crossOriginFlag=true;
+			//img.crossOrigin="anonymous"; // これを無造作に設定すると強制ロードされロード完了検知できない問題が起きたため 2021.6.9
 		}
 	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
-			img.crossOrigin="anonymous";
+			crossOriginFlag=true;
+			//img.crossOrigin="anonymous";
 		}
 	}
 	
@@ -2574,7 +2584,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 //		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
 //		img.src = href; // これは下で行う(2020.2.4)
 		img.removeAttribute("data-preTransformedHref");
-		setLoadingImagePostProcessing(img, href, id, true, svgimageInfo); 
+		setLoadingImagePostProcessing(img, href, id, true, svgimageInfo, crossOriginFlag ); 
 	}
 	if ( transform ){ // ま、とりあえず 2014.6.18
 		img.style.transform = "matrix(" + transform.a + ","  + transform.b + "," + transform.c + "," + transform.d + "," + transform.e + "," + transform.f + ")";
