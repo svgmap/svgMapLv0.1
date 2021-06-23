@@ -38,11 +38,13 @@
 // 2020/01/21 同上マイナー修正
 // 2020/07/17 redis用でブランチしていた機能を取り込み(poiToolsの帰り値オプション)
 // 2021/03/16 POIregistTool(initPOIregistToolの方)でタッチイベントでの座標入力に対応、また座標入力のキャンセル関数を設けた
+// 2021/06/23 複数のレイヤーでツールが起動されたとき、処理が破綻したのをひとまず回避（まだ不完全かも。特に状態を保持するline/polygon系）
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
 //  編集UIを出した状態で、TypeError: svgImagesProps[layerId] is undefined[詳細]  SVGMapLv0.1_r14.js:3667:3
 // POIToolsとPolytoolsが排他処理が完全ではない
+// 複数のレイヤーでツールが起動されたとき、処理が破綻している このライブラリは基本的にレイヤーにカプセル化されていない・・リファクタリングすべき ひとまず破綻しないようにしてみた
 
 // Notes:
 //  root containerでclass=editableの設定がないと、再編集や、レイヤ消去後の再表示での編集結果の保持はできない 2018.2.5
@@ -57,8 +59,8 @@ var svgMapAuthoringTool = ( function(){
 	console.log("Hello this is svgMapAuthoringTool");
 
 
-var editLayerTitle = ""; // 編集対象のレイヤーのtitle属性（もしくは
-var action = "none"; // 起こしたアクションがなんなのか（かなりいい加減・・）2013/1 (for Dynamic Layer)
+//var editLayerTitle = ""; // 編集対象のレイヤーのtitle属性（もしくは
+//var action = "none"; // 起こしたアクションがなんなのか（かなりいい加減・・）2013/1 (for Dynamic Layer)
 
 
 // handleResultに入れてある
@@ -78,7 +80,28 @@ var action = "none"; // 起こしたアクションがなんなのか（かな�
 // toolsCbFuncParam : コールバック関数の任意パラメータ
 var uiMapping = {};
 
-
+var uiMappingG ={}; //  uiMapping[layerID]:uiMapping  layerID毎にuiMappingを入れる 2021/6/23
+function setGlobalVars(){ // 2021/6/23 グローバル変数を、レイヤ固有UIの切り替えに応じて変更する
+	uiMappingG[uiMapping.editingLayerId]=uiMapping;
+	console.log("Authoring: setGlobalVars :",uiMappingG);
+	// appearなどしたときにuiMappingを切り替えるためのフックを設置する
+	var layerId = uiMapping.editingLayerId;
+	var mdoc = uiMapping.uiDoc;
+	mdoc.addEventListener("appearFrame",function(){
+		console.log("change uiMapping var : ",layerId,uiMappingG);
+		uiMapping=uiMappingG[layerId];
+		prevMouseXY={x:0,y:0};
+	});
+	mdoc.addEventListener("closeFrame",function(){
+		console.log("delete uiMappingGloval var");
+		delete uiMappingG[layerId];
+	});
+	
+	// polyCanvas //初期化は？
+	// poiCursor // 初期化は？
+	// selectedObjectID // 初期化は？
+	prevMouseXY={x:0,y:0};
+}
 
 function editPoint( x , y ){
 	var geop = svgMap.screen2Geo( x , y );
@@ -148,7 +171,6 @@ function clearTools( e ){
 	uiMapping.editingGraphicsElement = false;
 	console.log( "get iframe close/hide event from authoring tools framework.");
 	svgMap.setRootLayersProps(uiMapping.editingLayerId, null , false );
-//	uiMapping = {};
 	
 	removePointEvents( editPolyPoint );
 	
@@ -178,7 +200,7 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 		console.log("NEW uiMapping");
 		uiDoc.removeEventListener("hideFrame", clearTools, false);
 		uiDoc.removeEventListener("closeFrame", clearTools, false);
-		uiDoc.removeEventListener("closeFrame", setTools, false);
+		uiDoc.removeEventListener("appearFrame", setTools, false);
 		uiDoc.addEventListener('hideFrame',clearTools);
 		uiDoc.addEventListener('closeFrame',clearTools);
 		uiDoc.addEventListener('appearFrame',setTools);
@@ -194,6 +216,7 @@ function initPOIregistTool(targetDiv,poiDocId,poiId,iconId,title,metaData,cbFunc
 			returnSvgElement:returnSvgElement,
 			selectedPointsIndex:-1
 		} ;
+		setGlobalVars();
 		if ( cbFunc ){
 			uiMapping.toolsCbFunc = cbFunc;
 			uiMapping.toolsCbFuncParam = cbFuncParam;
@@ -258,7 +281,7 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly,returnS
 	var uiDoc = targetDiv.ownerDocument;
 	uiDoc.removeEventListener("hideFrame", clearTools, false);
 	uiDoc.removeEventListener("closeFrame", clearTools, false);
-	uiDoc.removeEventListener("closeFrame", setTools, false);
+	uiDoc.removeEventListener("appearFrame", setTools, false);
 	uiDoc.addEventListener('hideFrame',clearTools);
 	uiDoc.addEventListener('closeFrame',clearTools);
 	uiDoc.addEventListener('appearFrame',setTools);
@@ -340,6 +363,7 @@ function initPOItools(targetDiv,poiDocId,cbFunc,cbFuncParam,getPointOnly,returnS
 		returnSvgElement: returnSvgElement,
 		selectedPointsIndex:-1
 	} ;
+	setGlobalVars();
 	if ( cbFunc ){
 		uiMapping.toolsCbFunc = cbFunc;
 		uiMapping.toolsCbFuncParam = cbFuncParam;
@@ -513,8 +537,12 @@ function clearForms(targetDoc){
 		document.getElementById(uiMapping.modifyTargetElement.getAttribute("iid")).style.backgroundColor="";
 		uiMapping.modifyTargetElement = null;
 	}
-	targetDoc.getElementById("pepdel").disabled=true;
-	targetDoc.getElementById("editMode").innerHTML="newObject";
+	if ( targetDoc.getElementById("pepdel") ){
+		targetDoc.getElementById("pepdel").disabled=true;
+	}
+	if ( targetDoc.getElementById("editMode") ){
+		targetDoc.getElementById("editMode").innerHTML="newObject";
+	}
 	if ( uiMapping.editingMode ==="POI"){
 		var tbl = targetDoc.getElementById("poiEditor");
 		var symbs = tbl.rows[0].cells[0].childNodes;
@@ -538,11 +566,12 @@ function clearForms(targetDoc){
 	}
 	
 	var tbl = targetDoc.getElementById("metaEditor");
-	for ( var i = 0 ; i < tbl.rows.length ; i++ ){
-//		console.log(tbl.rows[i].cells[1]);
-		tbl.rows[i].cells[1].childNodes[0].value="";
+	if ( tbl){
+		for ( var i = 0 ; i < tbl.rows.length ; i++ ){
+	//		console.log(tbl.rows[i].cells[1]);
+			tbl.rows[i].cells[1].childNodes[0].value="";
+		}
 	}
-	
 }
 
 function setPoiSvg(poiParams, poiDocId, targetPoiId){
@@ -1493,7 +1522,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 	var uiDoc = targetDiv.ownerDocument;
 	uiDoc.removeEventListener("hideFrame", clearTools, false);
 	uiDoc.removeEventListener("closeFrame", clearTools, false);
-	uiDoc.removeEventListener("closeFrame", setTools, false);
+	uiDoc.removeEventListener("appearFrame", setTools, false);
 	uiDoc.addEventListener('hideFrame',clearTools);
 	uiDoc.addEventListener('closeFrame',clearTools);
 	uiDoc.addEventListener('appearFrame',setTools);
@@ -1556,6 +1585,7 @@ function initPolygonTools(targetDiv,poiDocId,cbFunc,cbFuncParam,isPolylineMode){
 		insertPointsIndex : -1
 
 	};
+	setGlobalVars();
 	if ( cbFunc ){
 		uiMapping.toolsCbFunc = cbFunc;
 		uiMapping.toolsCbFuncParam = cbFuncParam;
