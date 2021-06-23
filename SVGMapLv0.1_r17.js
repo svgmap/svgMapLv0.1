@@ -173,6 +173,7 @@
 // 2020/10/23 : 3/26からのメルカトル図法サポート機能を汎化し、ユーザがscriptやdata-controllerで任意の図法を関数定義可能な機能を実装。これでMaps4WebWSで宣言していた機能要件を満たすことができた。
 // 2021/01/26 : Rev16本流に載せる　効率化＆いくつか検証もできたため ～　16.xはこれにて終了　16とする
 // 2021/04/02 : Rev17 cookie->localStorage, now loading の抑制, root documentをlocalStorageの設定をベースにした編集後のものを投入可能に　など, レイヤ構成編集用のツールを別フレームワークで用意(こちらはレイヤ編集用ページ別建てか？)
+// 2021/06/14 : getLoadErrorStatistics() timeout等のロードエラーの統計
 //
 // Issues:
 // 2020/09/11 ビットイメージとベクターの混合レイヤーで、上下関係がDOM編集によっておかしくなることがある～digitalTyphoonレイヤーに風向を追加したとき、風速イメージのimage要素を消去して再追加する処理をすると（モデルを変えるときにそういう処理が入る）、最初は下にイメージが表示されるが、差異追加後上に来てしまう。　この辺昔imageはなるべく上にくるようにした記憶もあるので、いろいろ怪しい感じがする。
@@ -895,7 +896,7 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 		setLayerDivProps( id, parentElem, parentSvgDocId );
 		
 //		var httpObj = createXMLHttpRequest( function(){ return handleResult(id , path , parentElem , this); } );
-		var httpObj = createXMLHttpRequest( function(){ handleResult(id , path , parentElem , this , parentSvgDocId ) } , function(){handleErrorResult(id,path,this)});
+		var httpObj = createXMLHttpRequest( function(){ handleResult(id , path , parentElem , this , parentSvgDocId ) } , function(){handleErrorResult(id,path,this,true)});
 		
 		if ( httpObj ) {
 //			console.log(" path:" + path);
@@ -958,12 +959,17 @@ function getControllerSrc( resTxt , svgImageProps ){ // 2017.2.21
 
 var ns_svg = "http://www.w3.org/2000/svg";
 
-function handleErrorResult( docId , docPath, httpRes){
+function handleErrorResult( docId , docPath, httpRes, isTimeout){
 	// ERR404時や、timeout時に行う処理(2020/2/13 timeout処理を追加)
 	delete loadingImgs[docId]; // debug 2013.8.22
 	console.log( "File get failed: Err:",httpRes.status," Path:",docPath," id:",docId);
 	if ( svgImagesProps[docId] ){ // 2020/2/13 removeUnusedDocs() により恐らく以下の処理は不要 じゃなかった(2021/2/17)
 		svgImagesProps[docId].loadError = true; // 2021/2/17
+	}
+	if (isTimeout){
+		++loadErrorStatistics.timeoutSvgDocCount;
+	} else {
+		++loadErrorStatistics.otherSvgDocCount;
 	}
 	checkLoadCompleted();
 	return;
@@ -1152,7 +1158,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 //		console.log(svgDoc.documentElement);
 		checkResume(svgDoc.documentElement, symbols ); // 2016/12/08 bug fix 2016/12/13 more bug fix
 		
-		
+		clearLoadErrorStatistics();
 	}
 //	console.log("crs:", svgImagesProps[docId].CRS );
 //	console.log("docPath:" , svgDoc.docPath);
@@ -5213,14 +5219,20 @@ function imageTransform(imgElem, svgimageInfo){
 
 function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,403)した画像(bitImage)を強制的に読み込み完了とみなしてしまう処理
 	var target;
+	var timeout=false;
 	if ( obj.id ){
 		target = obj;
+		timeout=true;
 	} else { // added 2016.10.28 ( for err403,404 imgs )
 		target = obj.target || obj.srcElement;
+		++ loadErrorStatistics.otherBitImagesCount;
 //		console.log ("probably err403,404 :",target, " id:",target.id);
 	}
 	if ( loadingImgs[target.id] ){
 //		console.log("LoadImg TimeOut!!!!!");
+		if ( timeout){
+			++ loadErrorStatistics.timeoutBitImagesCount;
+		}
 		delete loadingImgs[target.id];
 //	console.log("call checkLoadCompleted : timeoutLoadingImg");
 		checkLoadCompleted();
@@ -5292,6 +5304,20 @@ function buildPixelatedImages4Edge(){ // pixelatedimgに対する、MS Edgeの�
 	}
 }
 
+var loadErrorStatistics={};
+function clearLoadErrorStatistics(){
+	loadErrorStatistics={
+		timeoutBitImagesCount:0,
+		timeoutSvgDocCount:0,
+		
+		otherBitImagesCount:0,
+		otherSvgDocCount:0,
+	}
+}
+function getLoadErrorStatistics(){
+	return ( loadErrorStatistics );
+}
+
 var loadCompleted = true;
 function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし、必要な処理を起動する。
 // 具体的には、読み込み中のドキュメントをチェックし、もうなければ遅延img削除処理を実行、読み込み完了イベントを発行
@@ -5348,7 +5374,6 @@ function checkLoadCompleted( forceDel ){ // 読み込み完了をチェックし
 			}
 		}
 		loadCompleted = true;
-		
 		startRefreshTimeout(); // 要確認：2016.10.14 この処理、複数のレイヤーでリフレッシュが起こっていたり一旦ロードされた後、消されたりした場合におかしなことが起きないでしょうか？
 		
 //		console.log("Load Complete");
@@ -8142,6 +8167,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getLayerId : getLayerId,
 	getLayers : getLayers,
 	getLinearTransformMatrix: getLinearTransformMatrix,
+	getLoadErrorStatistics:getLoadErrorStatistics,
 	getMapCanvas : function(){ return (mapCanvas) },
 	getMapCanvasSize : function( ){ return (mapCanvasSize) },
 	getMouseXY : getMouseXY,

@@ -47,7 +47,8 @@
 //              checkLayerListAndRegistLayerUIがid;layerList要素がないときでも動くようにした (checkControllerを発動させている)
 //              checkControllerなどでshowLayerSpecificUIが発動する。次はこれをid:layerSpecificUIがないケースでも動くようにする
 // 2021/03/09 : Rev.4: 2020/11-2020/12のSVGMapFrame用の改修を導入し、SVGMapCustomLayersManagerの起動機能を実装 (#layerList data-customizerで、カスタマイザを指定するとそれを起動するボタンが出現)
-
+// 2021/06/17 : レイヤ固有UIでloadイベント時にSVGMapフレームワークがセットされるように
+// 2021/06/22 : zoomPanMapCompletedイベントを実装。レイヤ固有UIでzoomPanMapイベント後 独自のXHRによりデータの取得＆描画更新が行われるようなケースでも、その読み込み完了を検知後に発行するイベント。
 
 // global vars
 /**
@@ -90,6 +91,8 @@ var svgMapLayerUI = ( function(){
 	hamburgerEdit:"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQAgMAAABinRfyAAAACVBMVEVkAFb/AABCQkIPrhq8AAAAAXRSTlMAQObYZgAAACJJREFUCNdjYIADrlWrFkAINIApEQLEjKFAsZVQAirGwAAA4sIMW9pBuDwAAAAASUVORK5CYII=",
 	}
 
+var totalLoadCompletedGuardTime = 20; // XHRでの非同期読み込みを含め読み込み完了検知のためのガードタイム 2021/6/18
+	
 var layerList, uiOpen , layerTableDiv , uiOpened , layerGroupStatus ; // layerGroupStatusは今はグループ折り畳み状態のみ管理
 var layerSpecificUI; // layerSpecificUIの要素
 function layerListOpenClose(){
@@ -639,6 +642,7 @@ function initLayerListStep2(llUItop){ // レイヤリストのレイアウト待
 		layerList.style.height = layerListFoldedHeight + "px";
 	}
 	addEventListener("zoomPanMap",unloadedLayersUIupdate,false); // 2020/2/13
+	addEventListener("zoomPanMap",zpm_checkLoadingFlag,false); // 2021/6/21
 	addEventListener("screenRefreshed",unloadedLayersUIupdate,false); // ^
 	checkLayerListAndRegistLayerUI(); // 2017.9.8 この関数の先にあるcheckControllerで#loadTiming=layerLoad|uiAppear(default) を起動時処理する
 }
@@ -939,7 +943,7 @@ function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf){
 	var layerSpecificUIbody = lsUIbdy;
 	var lsuiDoc = layerSpecificUI.ownerDocument;
 	var iframe = lsuiDoc.createElement("iframe");
-//	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26
+	layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26　⇒　いや・・・そのloadイベントはabout:blankからくるものだった(特にsrcdoc設定が遅延するinitIframePh2ケース)　この辺を抑制した関数(iFrameReady)を得たのでその必要はなくなったはず 2021/6/17
 	iframeId = getIframeId(lid);
 	iframe.id = iframeId;
 	
@@ -948,9 +952,14 @@ function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf){
 		iframe.style.display="none";
 	}
 	
+	/**
 	iframe.addEventListener("load",function(){
 		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf);
 	}, { once: true });
+	**/
+	iFrameReady(iframe, function(){ // 2021/6/17 layerUIのonload()でsetTimeout要の課題をついに対策できたか
+		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf);
+	}, false);
 	
 	var bySrcdoc = false;
 	if ( controllerURL.charAt(0) != ":" ){ // controllerにレイヤUIのhtmlのパスが書かれているケース(通常ケース) 
@@ -964,7 +973,7 @@ function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf){
 			bySrcdoc = true;
 		} else { // 同一ドメインにあるケース(基本ケース)  
 			iframe.src=controllerURL;
-			layerSpecificUIbody.appendChild(iframe);
+//			layerSpecificUIbody.appendChild(iframe);
 		}
 	} else { // controller-srcに直接ソースが書かれているケースの処理
 		var controllerSrc = (svgMap.getSvgImagesProps())[lid].controller;
@@ -979,7 +988,7 @@ function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf){
 		}
 		
 		iframe.srcdoc = sourceDoc;
-		layerSpecificUIbody.appendChild(iframe);
+//		layerSpecificUIbody.appendChild(iframe);
 		bySrcdoc = true;
 		if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
 			console.log("patch for IE&Edge:");
@@ -1009,6 +1018,10 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf){
 	// xxmsの時間もなんかまちまち・・(on chrome) 2019/11/26
 	// DOMContentLoaded イベントで動作させれば良いんじゃないかな とも思ったがどうだろう
 	// 参考: https://ja.javascript.info/onload-ondomcontentloaded 2019/12/05
+	// https://stackoverflow.com/questions/16960829/detect-domcontentloaded-in-iframe
+	// DOMContentLoadedはiframeでは発行されない。が、力技で解決する手法を作った人がいる。
+	// https://stackoverflow.com/questions/24603580/how-can-i-access-the-dom-elements-within-an-iframe/24603642#comment38157462_24603642
+	
 	var iframeId = iframe.id;
 	console.log("initIframe load eventListen : controllerURL:", controllerURL);
 	dispatchCutomIframeEvent(openFrame,iframeId);
@@ -1045,6 +1058,7 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf){
 	if ( transferCustomEvent2iframe[lid] ){
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[lid], false);
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[lid], false);
+		document.removeEventListener("zoomPanMapCompleted", transferCustomEvent2iframe[lid], false);
 	} else {
 		transferCustomEvent2iframe[lid] = transferCustomEvent4layerUi(lid);
 	}
@@ -1052,14 +1066,188 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf){
 		console.log("Register preRenderControllerFunction for layerID:",lid);
 		(svgMap.getSvgImagesProps())[lid].preRenderControllerFunction = iframe.contentWindow.preRenderFunction;
 	}
+	setXHRhooks(iframe.contentWindow); // 2021/06/17 
 	document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
 	document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
+	document.addEventListener("zoomPanMapCompleted", transferCustomEvent2iframe[lid] , false);
 	setTimeout( testIframeSize , 1000 , iframe ,reqSize);
 	if ( cbf ){
 		cbf(iframe.contentWindow);
 	}
 }
 
+function iFrameReady(iFrame, fn, backupLoadEventEnable) {
+	// loadより前の段階(ほぼDOMContentLoadedの段階)でfnを実行する。力技のポーリングをしている
+	// https://stackoverflow.com/questions/24603580/how-can-i-access-the-dom-elements-within-an-iframe/24603642#comment38157462_24603642
+	// This function ONLY works for iFrames of the same origin as their parent
+	var timer;
+	var fired = false;
+	function ready() {
+		if (!fired) {
+			fired = true;
+			clearTimeout(timer);
+			fn.call(this);
+		}
+	}
+	function readyState() {
+		if (this.readyState === "complete") {
+			ready.call(this);
+		}
+	}
+	// cross platform event handler for compatibility with older IE versions
+	function addEvent(elem, event, fn) {
+		if (elem.addEventListener) {
+			return elem.addEventListener(event, fn);
+		} else {
+			return elem.attachEvent("on" + event, function () {
+				return fn.call(elem, window.event);
+			});
+		}
+	}
+	// use iFrame load as a backup - though the other events should occur first
+	if ( backupLoadEventEnable ){
+		addEvent(iFrame, "load", function () {
+			ready.call(iFrame.contentDocument || iFrame.contentWindow.document);
+		});
+	}
+	function checkLoaded() {
+		var doc = iFrame.contentDocument || iFrame.contentWindow.document;
+		// We can tell if there is a dummy document installed because the dummy document
+		// will have an URL that starts with "about:".  The real document will not have that URL
+		if (doc.URL.indexOf("about:") !== 0) {
+			if (doc.readyState === "complete") {
+				ready.call(doc);
+			} else {
+				// set event listener for DOMContentLoaded on the new document
+				addEvent(doc, "DOMContentLoaded", ready);
+				addEvent(doc, "readystatechange", readyState);
+			}
+		} else {
+			// still same old original document, so keep looking for content or new document
+			timer = setTimeout(checkLoaded, 1);
+		}
+	}
+	checkLoaded();
+}
+
+function setXHRhooks(ifWin){ 
+	// 伸縮スクロール処理が完了したかどうかをより正確に把握するため、レイヤ固有UIにおいて、データ処理中（ネットワークからデータをDL中）かどうかをモニタするためのフックを導入 2021/6/17
+	// layerUIでXHRが走っている間はまだ再描画がかかる可能性があり、これを検知して完全な描画完了をできるだけ判定できるようにしたい。これを通知する新しいイベントを作る。
+	
+	// fetchのためのフック
+	
+	var fetchRes=["blob","text","arrayBuffer","formData","json"];
+	var sip = svgMap.getSvgImagesProps();
+	
+	//console.log("setXHRhooks:this:",this,this.location);
+	ifWin.fetch = function (fetch) {
+	    return function () {
+	//    	console.log("fetch v1:",v1);
+	    	//console.log("[layerUI] fetch HOOK arguments:",arguments);
+			registLoadingFlag(ifWin.layerID,sip);
+//	        return fetch.apply(this, arguments); // これはコンテキストが間違っていました‥ 2021/6/17
+	        return fetch.apply(ifWin, arguments);
+	    };
+	}(ifWin.fetch);
+	
+	for ( var i = 0 ; i < fetchRes.length ; i++ ){
+		(function(frf){
+			ifWin.Response.prototype[fetchRes[i]] = function () {
+				//console.log("[layerUI] Response:"+fetchRes[i]+": HOOK:arguments:",arguments," this:",this);
+				releaseLoadingFlag(ifWin.layerID,sip);
+				return frf.apply(this, arguments); // これは上のfetchで作られたインスタンスに関するものなので良いのかな
+			}
+		}(ifWin.Response.prototype[fetchRes[i]]));
+	}
+	
+	// XHRのためのフック
+	(function(send) {
+		ifWin.XMLHttpRequest.prototype.send = function () {
+			// console.log("[layerUI] XHR HOOK: send:arguments:",arguments,"  this:",this);
+			registLoadingFlag(ifWin.layerID,sip);
+			var callback = this.onreadystatechange
+			this.onreadystatechange = function() {
+				if (this.readyState == 4) {
+					var responseURL = this.responseURL
+					// console.log("[layerUI] XHR: send:onreadystatechange HOOK:readyState:",this.readyState,"  resURL:",responseURL," resTXT:",this.responseText.substring(0,20));
+					releaseLoadingFlag(ifWin.layerID,sip);
+				}
+				if (callback) {
+					callback.apply(this, arguments)
+				}
+			}
+			send.apply(this, arguments)
+		}
+	}(ifWin.XMLHttpRequest.prototype.send));
+
+	(function(open){
+		ifWin.XMLHttpRequest.prototype.open = function () {
+			// console.log("[layerUI] XHR HOOK: open:arguments:",arguments);
+			open.apply(this, arguments)
+		}
+	}(ifWin.XMLHttpRequest.prototype.open));
+}
+
+function registLoadingFlag(layerId,sip){
+	if ( sip[layerId].xhrLoading ){
+		++sip[layerId].xhrLoading;
+	} else {
+		sip[layerId].xhrLoading=1;
+	}
+	aboutToFireXHRCevent=false;
+}
+
+function releaseLoadingFlag(layerId,sip){
+	if ( sip[layerId].xhrLoading ){
+		--sip[layerId].xhrLoading;
+	} else {
+		console.error("svgImagesProps["+layerId+"].xhrLoading flag is inconsistent.");
+	}
+//	setTimeout( function(){checkLoadingFlag(sip);}, totalLoadCompletedGuardTime );
+	checkLoadingFlag(sip);
+}
+
+function zpm_checkLoadingFlag(){
+	// console.log("zpm_checkLoadingFlag");
+	var sip = svgMap.getSvgImagesProps();
+	zpm_XHRCevent = true;
+	checkLoadingFlag(sip);
+}
+
+function checkLoadingFlag(sip){
+	var totalLoading=0;
+	for ( var lid in sip){
+		if ( sip[lid].xhrLoading){
+			totalLoading+=sip[lid].xhrLoading;
+		}
+	}
+	if ( totalLoading == 0 && aboutToFireXHRCevent==false){
+		aboutToFireXHRCevent = true;
+		setTimeout(fireXHRCevent, totalLoadCompletedGuardTime);
+	} else {
+		// console.log("reject toFireXHRCevent");
+	}
+}
+
+var zpm_XHRCevent=false; // zoomPanMapに際して起きたXHRCeventの時はtrue
+var aboutToFireXHRCevent=false;//ガードタイム中に一回しか出さないようにする
+function fireXHRCevent(){
+	if ( aboutToFireXHRCevent ){
+		if ( zpm_XHRCevent ){
+			zpm_XHRCevent = false;
+			// console.log("XHR processes on zoomPanMap are totally completed!!");
+			var customEvent = document.createEvent("HTMLEvents");
+			customEvent.initEvent("zoomPanMapCompleted", true , false );
+			document.dispatchEvent(customEvent);
+		} else {
+			// console.log("XHR processes others are totally completed!!");
+			// zoomPanMapに伴って発生していないXHRはどうしようか・・・
+		}
+		aboutToFireXHRCevent = false;
+	} else {
+		// console.log("REJECT fireXHRCevent");
+	}
+}
 
 function initIframePh2(httpRes, iframe , lid, reqSize ){
 	if (( httpRes.readyState != 4 ) ){
@@ -1073,7 +1261,7 @@ function initIframePh2(httpRes, iframe , lid, reqSize ){
 	var sourceDoc = httpRes.responseText;
 	iframe.srcdoc = sourceDoc;
 //	layerSpecificUIbody.appendChild(iframe);
-	lsUIbdy.appendChild(iframe);
+	//lsUIbdy.appendChild(iframe);
 	if ( !iframe.getAttribute("srcdoc") ) { // patch for IE&Edge
 		console.log("patch for IE&Edge");
 		sourceDoc = sourceDoc.replace(/&quot;/g,'"');
@@ -1188,7 +1376,7 @@ function layerSpecificUIhide(){
 	var lsuiDoc = layerSpecificUI.ownerDocument;
 	var visibleIframeId = getVisibleLayerSpecificUIid();
 	
-	dispatchCutomIframeEvent("hideFrame",visibleIframeId);
+	dispatchCutomIframeEvent(hideFrame,visibleIframeId);
 	lsuiDoc.getElementById(visibleIframeId).style.display = "none";
 	
 	if ( !preDefinedTargetUi.element || preDefinedTargetUi.isInline ){
@@ -1209,6 +1397,7 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 		console.log("close layer specific UI for:",layerId);
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);
+		document.removeEventListener("zoomPanMapCompleted", transferCustomEvent2iframe[layerId], false);
 		delete transferCustomEvent2iframe[layerId];
 		dispatchCutomIframeEvent(closeFrame,targetIframeId );
 		clearGlobalMessage(layerId);
@@ -1292,6 +1481,17 @@ return { // svgMapLayerUI. で公開する関数のリスト
 	setLayerListmessage : setLayerListmessage,
 	assignLayerSpecificUiElement : assignLayerSpecificUiElement,
 //	putGlobalMessage: putGlobalMessage,
+	customEvents:function(){
+		return{
+			"zoomPanMap":true,
+			"zoomPanMapCompleted":true,
+			"screenRefreshed":true,
+			openFrame:true,
+			closeFrame:true,
+			appearFrame:true,
+			hideFrame:true
+		}
+	}
 }
 
 })();
