@@ -1114,7 +1114,7 @@ function iFrameReady(iFrame, fn, backupLoadEventEnable) {
 		var doc = iFrame.contentDocument || iFrame.contentWindow.document;
 		// We can tell if there is a dummy document installed because the dummy document
 		// will have an URL that starts with "about:".  The real document will not have that URL
-		if (doc.URL.indexOf("about:") !== 0) {
+		if (doc.URL.indexOf("about:blank") !== 0) { // 2021/06/24 about: => about:blank (patch for about:srcdoc issue)
 			if (doc.readyState === "complete") {
 				ready.call(doc);
 			} else {
