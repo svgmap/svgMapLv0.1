@@ -1602,7 +1602,7 @@ var svgMapGIStool = ( function(){
 			
 			var canvasCrds=[]; // ここからピクセル座標
 			for ( var i = 0 ; i < geomCrd.length ; i++ ){
-				var canXY = latLng2coverageImageXY(pixWidth , pixHeight, geomCrd[i][0], geomCrd[i][1], targetCoverage,cExt);
+				var canXY = latLng2coverageImageRawXY(pixWidth , pixHeight, geomCrd[i][0], geomCrd[i][1], targetCoverage,cExt);
 				canvasCrds.push([canXY.x,canXY.y]);
 			}
 			// console.log("canvasCrds:",canvasCrds);
@@ -1792,28 +1792,34 @@ var svgMapGIStool = ( function(){
 	// 地理座標からビットイメージカバレッジのピクセル座標を算出する
 	// cExtは冗長～不要
 	function latLng2coverageImageXY(pixWidth , pixHeight, lng,lat,targetCoverage,cExt){
-		var px,py;
-		if ( !targetCoverage.geo2svg){
-			if ( !cExt){
+		let pixel = latLng2coverageImageRawXY(pixWidth , pixHeight, lng,lat,targetCoverage,cExt);
+		return { x: Math.floor(pixel.x), y: Math.floor(pixel.y) };
+	}
+
+	// 地理座標からビットイメージカバレッジのピクセル座標(小数点)を算出する
+	function latLng2coverageImageRawXY(pixWidth, pixHeight, lng, lat, targetCoverage, cExt) {
+		var px, py;
+		if (!targetCoverage.geo2svg) {
+			if (!cExt) {
 				cExt = getCoverageExtent(targetCoverage);
 			}
-			px = Math.floor(pixWidth  * (lng - cExt.lngMin)/(cExt.lngMax - cExt.lngMin));
-			py = pixHeight - Math.floor(pixHeight * (lat - cExt.latMin)/(cExt.latMax - cExt.latMin)) - 1;
-//			console.log("lat:",lat," lng:",lng,"  cExt:",cExt,"    px:",px,"  py:",py);
+			px = pixWidth * (lng - cExt.lngMin) / (cExt.lngMax - cExt.lngMin);
+			py = pixHeight - pixHeight * (lat - cExt.latMin) / (cExt.latMax - cExt.latMin);
+			//			console.log("lat:",lat," lng:",lng,"  cExt:",cExt,"    px:",px,"  py:",py);
 		} else {
 			var g2s = targetCoverage.geo2svg;
 			var cov_sp0 = targetCoverage.coordinates[0]; //カバレッジのsvg原点座標(transformかける前)
 			var cov_sp1 = targetCoverage.coordinates[1]; //同対角座標
-			var poi_svgPos = svgMap.transform(lng , lat , g2s); // カバレッジのsvgコンテンツの座標系上でのポイントの座標
+			var poi_svgPos = svgMap.transform(lng, lat, g2s); // カバレッジのsvgコンテンツの座標系上でのポイントの座標
 			var cov_sw = cov_sp1.x - cov_sp0.x;
 			var cov_sh = cov_sp1.y - cov_sp0.y;
-			px = Math.floor(pixWidth * ( poi_svgPos.x -cov_sp0.x )/cov_sw);
-			py = Math.floor(pixHeight * ( poi_svgPos.y -cov_sp0.y )/cov_sh);
-	//					console.log(g2s,cov_sp0,cov_sp1,poi_svgPos,cov_sw,cov_sh,pixWidth,pixHeight);
-	//					console.log("非対角transform PX,PY算出:px,py:",px,py);
+			px = pixWidth * (poi_svgPos.x - cov_sp0.x) / cov_sw;
+			py = pixHeight * (poi_svgPos.y - cov_sp0.y) / cov_sh;
+			//					console.log(g2s,cov_sp0,cov_sp1,poi_svgPos,cov_sw,cov_sh,pixWidth,pixHeight);
+			//					console.log("非対角transform PX,PY算出:px,py:",px,py);
 		}
-		var ans =  {x:px, y:py};
-		if ( px <0 || py <0 || px >= pixWidth || py>= pixHeight ){
+		var ans = { x: px, y: py };
+		if (px < 0 || py < 0 || px >= pixWidth || py >= pixHeight) {
 			ans.outOfRange = true;
 		}
 		return (ans);
@@ -1966,207 +1972,170 @@ var svgMapGIStool = ( function(){
 		return coordinatesArray;
 	}
 	
+
 	// スキャンラインアルゴリズムによるポリゴンフィルライブラリ
 	// https://gist.github.com/arcollector/a7a1492689dee2e947ec
-	var polygonFilling = function( vertices , pixWidth, pixHeight) {
-		// vertices:[[x1,y1],[x2,y2],...]
-		// pixWidth/Height この範囲でクリップされてビットイメージが作られる
-		// この領域でビットイメージ構築される
-		// 座標列はマイナスも許容されるが、ビットイメージ出力は、x,yとも原点0まででクリップ (x,hは与えればその値-1まででクリップ)
-		
-		// "global" variables
-		var verticesCount = vertices.length,
-			edgesEntered,
-			// table cols
-			yMax, yMin, xInt, invNegSlope;
-		var bbox={xmin:1e30,ymin:1e30,xmax:-1e30,ymax:-1e30};
-		var outputBitImage=false;
-	// *************************
+	var polygonFilling = function (points, pixWidth, pixHeight) {
+		/**
+		 * スキャンラインアルゴリズムによるポリゴンフィルライブラリ
+		 *
+		 *　@Parameters
+		 * -------------------------
+		 * 	points		: Array
+		 * 					[[x,y],[x,y],...]
+		 *  pixWidth	: int
+		 * 	pixHeight	: int
+		 * 
+		 * @Returns
+		 * -------------------------
+		 *	scanLine : Array
+		 *		[[[x1,x2],y], [[x1,x2],y],...]　Yは降順
+		 * 
+		*/
+		let minY = Math.floor(points[0][1]);
+		let maxY = Math.floor(points[0][1]);
+		let samePixelFlag = true;
+		let diffValueFlag = false;
+		let lines = [];
+		let scanLine = [];
+		//generate line
+		for (let i = 1; i < points.length; i++) {
+			lines.push(new Line(points[i - 1], points[i]));
 
-		if( verticesCount <= 2 ) {
-			console.error( 'polygon has insuffient number of vertices' );
-			return;
+			// 極小ポリゴン検出
+			// 同一ピクセルの確認
+			if (samePixelFlag && (Math.floor(points[0][0]) != Math.floor(points[i][0]) || Math.floor(points[0][1]) != Math.floor(points[i][1]))) { //画像に変換した際は同一ピクセル
+				samePixelFlag = false;
+			}
+			// 全頂点が1点でないことの確認
+			if (!diffValueFlag && (points[0][0] != points[i][0]) && (points[0][1] != points[i][1])) {//座標が異なる＝点（ポイント）でない
+				diffValueFlag = true;
+			}
+		}
+		if (diffValueFlag && samePixelFlag) {
+			//極小ポリゴンの場合はスキャンライン使用せず処理抜けます
+			return [[[Math.floor(points[0][0]), Math.floor(points[0][0])], Math.floor(points[0][1])]];
 		}
 
-		// find out table length
-		var y1 = Math.round( vertices[verticesCount-1[1]] ), y2,i; // roundではなくfloor？
-		edgesEntered = 0;
-		for( i = 0; i < verticesCount; i ++ ) {
-			y2 = Math.round( vertices[i][1] ); // これも同様
-			if( y1 !== y2 ) {
-				y1 = y2;
-				edgesEntered++;
-			}
-			var x2= Math.round( vertices[i][0]); // これも同様
-			if ( x2 > bbox.xmax ){
-				bbox.xmax = x2;
-			}
-			if ( x2 < bbox.xmin ){
-				bbox.xmin = x2;
-			}
-			if ( y2 > bbox.ymax ){
-				bbox.ymax = y2;
-			}
-			if ( y2 < bbox.ymin ){
-				bbox.ymin = y2;
-			}
-			
+		// find min and max
+		for (let i = 0; i < points.length; i++) {
+			let temp = Math.floor(points[i][1]);
+			if (temp < minY)
+				minY = temp;
+			else if (temp > maxY)
+				maxY = temp;
 		}
-		if( edgesEntered < 2 ) {
-			console.error( 'malformed polygon' );
-			return;
-		}
-		
-		// setup table length
-		xInt = new Float64Array( edgesEntered );
-		yMin = new Int32Array( edgesEntered );
-		yMax = new Int32Array( edgesEntered );
-		invNegSlope = new Float64Array( edgesEntered );
-		
-		var pixData = [];
-		
-		if ( pixWidth && pixHeight ){
-			bbox={xmin:0,xmax:pixWidth-1, ymin:0,ymax:pixHeight-1};
-			outputBitImage = true;
-			pixData = new Array(bbox.ymax+1);
-			for ( var i = 0 ; i < bbox.ymax+1 ; i++ ){
-				pixData[i]=new Array(bbox.xmax+1).fill(0);
-			}
-		}
-		
-		
-		
-	// *************************
-		
-		var insertTableEntry = function( x1,y1, x2,y2, edgesEntered ) {
-			var biggerY = Math.max( y1, y2 ),
-				i = edgesEntered;
-			for( ; i !== 0 && yMax[i-1] < biggerY; i-- ) { // insertion sort mechanism
-				// shift elements to right
-				yMax[i] = yMax[i-1];
-				yMin[i] = yMin[i-1];
-				xInt[i] = xInt[i-1];
-				invNegSlope[i] = invNegSlope[i-1];
-			}
-			yMax[i] = biggerY;
-			invNegSlope[i] = -(x2-x1)/(y2-y1);
-			if( biggerY === y1 ) {
-				yMin[i] = y2;
-				xInt[i] = x1;
-			} else {
-				yMin[i] = y1;
-				xInt[i] = x2;
-			}
-		};
-		
-		var x1 = Math.round( vertices[verticesCount-1][0] ),
-			y1 = Math.round( vertices[verticesCount-1][1] ),
-			x2, y2,
-			i;
+		if (minY < 0) minY = 0; //Y軸方向のクリッピング
+		// end find
 
-		edgesEntered = 0;
-		for( i = 0; i < verticesCount; i ++ ) {
-			x2 = Math.round( vertices[i][0] );
-			y2 = Math.round( vertices[i][1] );
-			if( y1 !== y2 ) { // avoid horizontal edges
-				insertTableEntry( x1,y1, x2,y2, edgesEntered );
-				edgesEntered++;
-			}
-			x1 = x2;
-			y1 = y2;
-		}
-		//console.log(xInt,yMin,yMax,invNegSlope,bbox);
-	// *************************
-		
-		// helpers functions	
-		var exclude = function( leftMostEdge, rightMostEdge, scan ) {
-			var i, j;
-			for( i = leftMostEdge; i <= rightMostEdge; i++ ) {
-				if( yMin[i] > scan ) {
-					leftMostEdge++;
-					for( j = i; j >= leftMostEdge; j-- ) {
-						// shift elements to right
-						yMin[j] = yMin[j-1];
-						xInt[j] = xInt[j-1];
-						invNegSlope[j] = invNegSlope[j-1];
+		//draw fill line
+		for (let y = minY; y <= maxY + 1; y++) {
+			let meetPointAtOrigLine = getMeetPoint(y);
+			let meetPointAtCenterLine = getMeetPoint(y + 0.5);  //Half pixel shift scan lineのためyに+0.5する
+
+			//TODO:ここ汚いのでリファクタリングの余地あり
+			//本当はビット演算で処理しようと思ったが64ビット=64pxを超過する可能性があったのでそっちのほうは断念
+			//本来は結合すべき
+			for (let i = 1; i < meetPointAtOrigLine.length; i += 2) {
+				if (Math.abs(meetPointAtOrigLine[i - 1] - meetPointAtOrigLine[i]) > 0.0001) { // 2点間の距離が極小の場合は面積なしとして扱う
+					//console.log("OrigPixel : ", meetPointAtOrigLine[i - 1], y, meetPointAtOrigLine[i]);
+					if (meetPointAtOrigLine[i] > 0) {   //終点がマイナスのエリアは除外=クロッピング
+						if (meetPointAtOrigLine[i - 1] < 0) {   //始点がマイナスの場合は0で置き換え=クロッピング
+							if (y > 0) scanLine.unshift([[0, Math.floor(meetPointAtOrigLine[i])], y - 1]); //yがマイナスをとる場合は除外
+							scanLine.unshift([[0, Math.floor(meetPointAtOrigLine[i])], y]);
+						} else {
+							if (y > 0) scanLine.unshift([[Math.floor(meetPointAtOrigLine[i - 1]), Math.floor(meetPointAtOrigLine[i])], y - 1]);//yがマイナスをとる場合は除外
+							scanLine.unshift([[Math.floor(meetPointAtOrigLine[i - 1]), Math.floor(meetPointAtOrigLine[i])], y]);
+						}
 					}
 				}
 			}
-			return leftMostEdge;
-		};
-		
-		var updateXInt = function( leftMostEdge, rightMostEdge ) {
-			for( var i = leftMostEdge; i <= rightMostEdge; i++ ) {
-				xInt[i] += invNegSlope[i];
-			}
-		};
-		
-		var include = function( rightMostEdge, scan, edgesEntered ) {
-			for( ; rightMostEdge + 1 < edgesEntered && yMax[rightMostEdge + 1] > scan; rightMostEdge++ );
-			return rightMostEdge;
-		};
-		
-		var sortXInt = function( leftMostEdge, rightMostEdge ) { // bubble sort mechanism
-			var i, j, tmp;
-			for( i = leftMostEdge; i <= rightMostEdge - 1; i++ ) {
-				for( j = i + 1; j <= rightMostEdge; j++ ) {
-					if( xInt[i] > xInt[j] ) {
-						tmp = yMin[i];
-						yMin[i] = yMin[j];
-						yMin[j] = tmp;
-						tmp = xInt[i];
-						xInt[i] = xInt[j];
-						xInt[j] = tmp;
-						tmp = invNegSlope[i];
-						invNegSlope[i] = invNegSlope[j];
-						invNegSlope[j] = tmp;
+			for (let i = 1; i < meetPointAtCenterLine.length; i += 2) {
+				if (Math.abs(meetPointAtCenterLine[i - 1] - meetPointAtCenterLine[i]) > 0.0001) { // 2点間の距離が極小の場合は面積なしとして扱う
+					if (meetPointAtCenterLine[i] > 0) {   //終点がマイナスのエリアは除外=クロッピング
+						if (meetPointAtCenterLine[i - 1] < 0) {   //始点がマイナスの場合は0で置き換え=クロッピング
+							scanLine.unshift([[0, Math.floor(meetPointAtCenterLine[i])], y]);
+						} else {
+							scanLine.unshift([[Math.floor(meetPointAtCenterLine[i - 1]), Math.floor(meetPointAtCenterLine[i])], y]);
+						}
 					}
 				}
-			}
-		};
-		
-		var fillScan = function( leftMostEdge, rightMostEdge, scan ) {
-			var x1, x2, i;
-			for( i = leftMostEdge; i <= rightMostEdge; i += 2 ) {
-				x1 = Math.round( xInt[i] );
-				x2 = Math.round( xInt[i+1] );
-	//			console.log( 'drawing line from', x1, 'to', x2, 'at y =', scan );
-				if ( outputBitImage ){
-					x1 = Math.max(x1,bbox.xmin);
-					x2 = Math.min(x2,bbox.xmax);
-		//			console.log("clip:",x1,"to",x2);
-					for( ; x1 <= x2; x1++ ) {
-						pixData[scan][x1]=1;
-						// plot pixel (x1,scan)
-					}
-				} else {
-					pixData.push([[x1,x2],scan]);
-				}
-			}
-		};
-		
-	// *************************
-
-		// start filling
-		var scan = yMax[0],
-			leftMostEdge = 0,
-			rightMostEdge = -1;
-
-		while( leftMostEdge < edgesEntered ) {
-			scan--;
-			if ( scan < bbox.ymin ){
-				break;
-			}
-			leftMostEdge = exclude( leftMostEdge, rightMostEdge, scan );
-			updateXInt( leftMostEdge, rightMostEdge );
-			rightMostEdge = include( rightMostEdge, scan, edgesEntered );
-			sortXInt( leftMostEdge, rightMostEdge );
-			if ( scan <= bbox.ymax ){
-				fillScan( leftMostEdge, rightMostEdge, scan );
 			}
 		}
-		return ( pixData );
-	};
+		//end fill line
+		return scanLine;
+
+		function getMeetPoint(y) {
+			/**
+			 * 交差ポイントの取得
+			 * 
+			 * @param
+			 *  y: float  スキャンラインのy軸値
+			 * 
+			 * @returns
+			 *  meet: array Y軸と交差しているXの値
+			 * 
+			 */
+			let meet = [];
+			for (let i = 0; i < lines.length; i++) {
+				let l = lines[i];
+				if (l.isValidY(y)) {
+					meet.push(l.getX(y));
+				}
+			}
+			//sort
+			for (let i = 0; i < meet.length; i++) {
+				for (let j = i + 1; j < meet.length; j++) {
+					if (meet[i] > meet[j]) {
+						let temp = meet[i];
+						meet[i] = meet[j];
+						meet[j] = temp;
+					}
+				}
+			}
+			return meet;
+		}
+
+		function Line(start, end) {
+			/**
+			* 辺を管理するクラス
+			* 
+			* @Parameters
+			* ------------------------------------
+			* start : array
+			*  [x, y]
+			* 
+			* end : array
+			*  [x, y]
+			* 
+			* 
+			*/
+			this.x0 = start[0];
+			this.x1 = end[0];
+			this.y0 = start[1];
+			this.y1 = end[1];
+			this.m = (this.y1 - this.y0) / (this.x1 - this.x0);
+
+			this.getX = function (y) {
+				if (!this.isValidY(y))
+					throw new RangeError();
+
+				return 1 / this.m * (y - this.y0) + this.x0;
+			}
+
+			this.isValidY = function (y) {
+				if (y >= this.y0 && y < this.y1) {  //辺と交差
+					return true;
+				}
+				if (y >= this.y1 && y < this.y0) {  //辺と交差
+					return true;
+				}
+
+				return false;
+			}
+		};
+	}
+	
 	
 	
 	// ポリゴンxビットイメージで出力された結果のOR演算機能 2020/7/10
