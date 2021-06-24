@@ -80,6 +80,10 @@ onload=function(){
 	contSearchBtn = document.getElementById("contSearchBtn");
 }
 
+function setProxy(url){
+	proxyPath = url;
+}
+
 function closeFrameProcess(){
 	console.log("closeFrameProcess");
 	stopContSearch();
@@ -777,6 +781,7 @@ return { // rasterPoiGis. で公開する関数のリスト
 	searchAll: searchAll,
 	searchAllInRangePois: searchAllInRangePois,
 	searchInRangePointsSingle: searchInRangePointsSingle,
+	setProxy:setProxy,
 	toggleContSearch: toggleContSearch,
 }
 
