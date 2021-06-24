@@ -5,8 +5,11 @@
 // 
 //  Programmed by Satoru Takagi
 //  
-//  Copyright (C) 2016-2016 by Satoru Takagi @ KDDI CORPORATION
+//  Copyright (C) 2016-2021 by Satoru Takagi @ KDDI CORPORATION
 //  
+// Contributors:
+//  jakkyfc
+//
 // License: (GPL v3)
 //  This program is free software: you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License version 3 as
@@ -1978,6 +1981,7 @@ var svgMapGIStool = ( function(){
 	var polygonFilling = function (points, pixWidth, pixHeight) {
 		/**
 		 * スキャンラインアルゴリズムによるポリゴンフィルライブラリ
+		 * by jakkyfc 2021/06
 		 *
 		 *　@Parameters
 		 * -------------------------
