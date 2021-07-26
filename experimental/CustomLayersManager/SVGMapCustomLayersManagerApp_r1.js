@@ -24,6 +24,7 @@
 // History:
 //  2021/04/01 Rev1完成かな
 //  2021/04/06 カスタムビューポート設定パネルを構築
+//  2021/07/26 レイヤーテーブルをマウスでD&Dできるよう追加
 
 // ISSUE:
 //  同じオリジンに複数のコンテナがある場合、localStorageはオリジンで共通なので、コンテナのURLを相対パスで扱っているため矛盾が起きる・・
@@ -46,6 +47,7 @@ onload=async function(){
 	await loadOriginal();
 	buildFromCurrentMap();
 	buildSettingList(true);
+	applySortableJs();
 }
 
 async function reset(){
@@ -114,6 +116,7 @@ function buildLayerTable(){
 	layerTable.insertAdjacentHTML('afterbegin', "<tr><td></td><td>Title</td><td>xlink:href</td><td>Visibility</td><td>Opacity</td><td>Group</td><td><input type='button' id='topLayerAdd' value='add Layer' onclick='insertLayer(event)'></input></td></tr>");
 	
 	var lps = lpEdit.layersProperty;
+	var body = document.createElement('tbody');
 	for ( var i = lps.length-1 ; i >= 0 ; i-- ){
 		if ( lps[i].toBeRemoved ){
 			continue;
@@ -182,9 +185,10 @@ function buildLayerTable(){
 		insTd.appendChild(getButton("insert↓",insertLayer,"insert_"+i));
 		tr.appendChild(insTd);
 		
-		layerTable.appendChild(tr);
+		body.appendChild(tr);
 		
 	}
+	layerTable.appendChild(body);
 }
 
 function generateStructFromUI(){
@@ -896,3 +900,17 @@ function renameCustomViewPort(event){
 	
 }
 
+// 事前にSortableJSをロードする必要あり
+function applySortableJs(){
+  console.log("set up SortableJS");
+  const layers = document.getElementById("layerTable").lastChild;
+  Sortable.create(layers, {
+    animation: 100,
+    onEnd: function(e){
+      let layer_children = document.getElementById("layerTable").lastChild.children;
+      for(let i = 0; i < layer_children.length; i++){
+        layer_children[i].setAttribute("data-index",i);
+      }
+    }
+  });
+}
