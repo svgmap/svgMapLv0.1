@@ -24,9 +24,11 @@
 // History:
 //  2021/04/01 Rev1完成かな
 //  2021/04/06 カスタムビューポート設定パネルを構築
+//  2021/07/14 同じオリジンに複数のコンテナがある場合に対応
+//  2021/07/19 カスタム設定保存機能
 
 // ISSUE:
-//  同じオリジンに複数のコンテナがある場合、localStorageはオリジンで共通なので、コンテナのURLを相対パスで扱っているため矛盾が起きる・・
+//  FIXED: 同じオリジンに複数のコンテナがある場合、localStorageはオリジンで共通なので、コンテナのURLを相対パスで扱っているため矛盾が起きる・・
 
 // =================================================================================================
 // =================================================================================================
@@ -40,13 +42,13 @@
 // 重要なグローバル変数（一個だけのはずです）
 var lpEdit; // 編集したlayersProperty (最初にdeepCopyしているので上のオリジナルは保持)
 
-
-onload=async function(){
-	// await buildFromOriginal();
-	await loadOriginal();
-	buildFromCurrentMap();
-	buildSettingList(true);
-}
+addEventListener("load",
+	async function(){
+		// await buildFromOriginal();
+		await loadOriginal();
+		buildFromCurrentMap();
+		buildSettingList(true);
+	});
 
 async function reset(){
 	await buildFromOriginal();
@@ -59,6 +61,7 @@ async function reset(){
 }
 
 async function loadOriginal(svgMapObj){
+	// オリジナルの(表示中の)コンテンツのレイヤー構成を構築する
 	var originalPath;
 	if ( !svgMapObj && window.opener && typeof(window.opener.svgMap)=="object"){
 		svgMapObj = window.opener.svgMap;
@@ -101,8 +104,10 @@ async function buildFromOriginal(orgPath_or_svgMapObj){
 }
 
 function buildFromCurrentMap(){
+	// 表示中のレイヤー構造をもとに、編集用のレイヤー構成データを生成し、それをUIに反映させる
 	if (window.opener && typeof(window.opener.svgMap)=="object" ){
-		lpEdit = svgMapCustomLayersManager.getDetailedLayersPropertySet(window.opener.svgMap.getSvgImages()["root"],true);
+//		lpEdit = svgMapCustomLayersManager.getDetailedLayersPropertySet(window.opener.svgMap.getSvgImages()["root"],true);
+		lpEdit = svgMapCustomLayersManager.getDetailedLayersPropertySet(window,null,true); // 2021/7/12
 		buildLayerTable();
 	} else {
 		console.warn("No  window.opener.svgMap");
@@ -365,9 +370,9 @@ function removeChildren(element){
 
 function buildCustomLayersSettingFromUI(){
 	generateStructFromUI();
-	var df = svgMapCustomLayersManager.getDif(lpEdit.layersProperty);
-	var cls = svgMapCustomLayersManager.buildCustomLayersSetting(df,lpEdit.layersProperty);
-	console.log("buildCustomLayersSettingFromUI:",df,cls);
+	//var df = svgMapCustomLayersManager.getDif(lpEdit.layersProperty); // 2021/7/20 下の関数がdif自体取るように
+	var cls = svgMapCustomLayersManager.buildCustomLayersSetting(lpEdit.layersProperty);
+	console.log("buildCustomLayersSettingFromUI:",cls);
 	svgMapCustomLayersManager.registCustomLayer(cls);
 	if ( window.opener && window.opener.svgMapCustomLayersManager){
 		svgMapCustomLayersManager.applyCustomLayersSettingsToCurrentMapView(lpEdit, window.opener);
@@ -421,7 +426,7 @@ async function generateLayerTableFromCustomSetting(setting,customLayersObject){
 	var baseLayersPropertySet = await svgMapCustomLayersManager.getDetailedLayersPropertySetFromPath( originalHref, true);
 	var appliedLPset;
 	console.log("baseLayersPropertySet:",baseLayersPropertySet);
-	if ( setting ){
+	if ( setting ){ // API ISSUE settingは実際に使われてない　実際はcustomLayersObject.currentSettingKeyを直に引用してる
 		if ( !customLayersObject ){
 			customLayersObject = svgMapCustomLayersManager.loadCustomLayerSettings();
 		}
@@ -458,7 +463,7 @@ function changeCustomLayersSetting(customSettingKey, lpEdit){
 
 
 var deleteAllSettingButton,cancelDeleteAllSettingButton; // 全消去処理UIのための些細なグローバル変数
-function deleteAllSetting(event){
+function deleteAllSetting(event){ // obsoluted 2021/7/27 -> removeAllSettings
 	var pb = event.target;
 	deleteAllSettingButton = pb;
 	if ( pb.getAttribute("data-confirm")=="true" ){
@@ -558,7 +563,22 @@ function renameSetting(){
 	
 }
 
-
+function removeAllSettings(){
+	var div = document.createElement("div");
+	div.insertAdjacentHTML('beforeend','CLEAR ALL Settings OK?');
+	function cbf(resp){
+		// console.log(resp);
+		if (resp!=null){
+			console.log("to clear");
+			svgMapCustomLayersManager.deleteAllCustomLayerSettings();
+			svgMapCustomLayersManager.deleteAllCustomViewBoxSettings();
+			buildSettingList(true);
+			buildVbTable();
+			document.getElementById("startup_content").querySelector('li [value="0"]').checked=true;
+		}
+	}
+	showModal( div , 600, 70 , cbf);
+}
 
 
 function showModal( dom_or_htm , maxW, maxH , cbf){
@@ -727,6 +747,8 @@ function buildMapViewSettingsFromUI(){
 
 function buildVbTable(){
 //local storageからカスタムビューボックス設定を読み取りUIに反映
+	var vt = document.getElementById("viewboxTable");
+	removeChildren(vt);
 	var cvbs = svgMapCustomLayersManager.loadCustomGeoViewboxes();
 	for ( var key in cvbs.settings ){
 		var setting = cvbs.settings[key];
@@ -744,6 +766,7 @@ function buildVbTable(){
 			selectedSetting
 		);
 	}
+	customVBoptionAvailable(false);
 	return ( cvbs );
 }
 
@@ -894,5 +917,44 @@ function renameCustomViewPort(event){
 	
 	showModal( div , 600, 70 , cbf)
 	
+}
+
+function saveSetting(){
+	console.log("saveSetting");
+	var layerSet = svgMapCustomLayersManager.loadCustomLayerSettings();
+	var vbSet = svgMapCustomLayersManager.loadCustomGeoViewboxes();
+	layerSet.host=location.host;
+	layerSet.customGeoViewboxSettings=vbSet.settings;
+	delete layerSet.currentSettingKey;
+	
+	// https://qiita.com/Toyoharu-Nishikawa/items/dfb187cf6eb4ba743995 だがまぁ今回はサイズが小さい想定なので
+	var blob = new Blob([JSON.stringify(layerSet)],{type:"text/plain"});
+	document.getElementById("downloadAnchor").href = window.URL.createObjectURL(blob);
+	document.getElementById("downloadAnchor").setAttribute("download","customLayerSet_"+(location.host).replaceAll(".","_") + layerSet.rootContainerHref.replaceAll(".","_").replaceAll("/","_") + ".json");
+	
+	document.getElementById("downloadAnchor").click();
+}
+
+async function loadSetting(){
+	console.log("loadSetting:",event.target.files[0]);
+	
+	
+	var file = event.target.files[0];
+	console.log("file:",file);
+	const fr = new FileReader();
+	fr.onload = async function(e){
+		var loadJson = JSON.parse(e.target.result);
+		console.log(loadJson);
+		var result = svgMapCustomLayersManager.mergeSettings(loadJson);
+		if ( result != true ){
+			showModal( result , 400, 100 );
+		} else {
+			buildSettingList(true);
+			buildVbTable();
+			document.getElementById("startup_content").querySelector('li [value="0"]').checked=true;
+		}
+	}
+	fr.readAsText(file);
+	event.target.value="";
 }
 

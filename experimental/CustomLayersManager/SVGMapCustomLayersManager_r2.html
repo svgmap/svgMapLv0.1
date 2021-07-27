@@ -77,9 +77,9 @@ input[name="tab_item"] {
 </style>
 
 
-<script type="text/javascript" src="SVGMapLv0.1_CustomLayersManager_r1.js"></script> <!-- Rev17:CustomLayersManager -->
+<script type="text/javascript" src="SVGMapLv0.1_CustomLayersManager_r2.js"></script> <!-- Rev17:CustomLayersManager -->
 
-<script type="text/javascript" src="SVGMapCustomLayersManagerApp_r1.js"></script> <!-- 上記ライブラリを用いてレイヤー管理アプリを作るコード 将来的に上記ライブラリと統合するかも？-->
+<script type="text/javascript" src="SVGMapCustomLayersManagerApp_r2.js"></script> <!-- 上記ライブラリを用いてレイヤー管理アプリを作るコード 将来的に上記ライブラリと統合するかも？-->
 
 <body>
 <h3>SVGMap Setting Panel</h3>
@@ -133,18 +133,32 @@ input[name="tab_item"] {
 
 		<table style="font-size:10px" border="1" id="layerTable">
 		</table>
-
-		<input style="background-color:red" type="button" value="Delete All Custom Layers Settings" onclick="deleteAllSetting(event)"></input>
-		<div id="modalDiv" ></div>
+		<!--
+		<input style="background-color:red" type="button" value="Delete All Custom Layers Settings" onclick="deleteAllSetting(event)"></input>-->
     </div>
   </div>
 
 
   <div class="tab_content" id="others_content">
     <div class="tab_content_description">
-		For now, there are no other setting options.
+    <table>
+    	<tr ><td rowspan="2">Setting File</td>
+    		<td>Backup settings</td>
+			<td><input type="button" value="Save File" onclick="saveSetting()">
+			<a id="downloadAnchor" href="" download="customSetting.json" style="display:none" >hiddenDL</a></td>
+		</tr>
+		<tr>
+			<td>Restore settings</td>
+			<td><input id="fileUpl" type="file" id="loadFile" onchange="loadSetting(event)" /></td>
+		</tr>
+		<tr>
+			<td colspan="1" >RESET</td>
+			<td colspan="2" ><input type="button" value="Clear ALL Custom Settings" onclick="removeAllSettings()" style="background-color:#ff7070"></td>
+		</tr>
+	</table>
     </div>
   </div>
 </div>
+<div id="modalDiv" ></div>
 </body>
 </html>
