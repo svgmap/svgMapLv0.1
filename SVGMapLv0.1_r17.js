@@ -7634,10 +7634,14 @@ function checkResume(documentElement, symbols){
 		// 2021/2/4 レイヤーのカスタムOFF＆追加＆変更を設定できるsvgMapCustomLayersManagerの情報を導入する
 		// cook.customLayers の中のJSONデータからレイヤーの削除、追加などを実施する
 		if ( cook.customLayers && window.svgMapCustomLayersManager ){
-			var customLayers = JSON.parse(cook.customLayers);
-			svgMapCustomLayersManager.applyCustomLayers(customLayers);
-			parseSVG( documentElement , "root" , mapCanvas , false , symbols , null , null , true); // 2021/3/8 iidを設定する(上と同じ)
-			lp = getRootLayersProps();
+			try{
+				var customLayers = JSON.parse(cook.customLayers);
+				svgMapCustomLayersManager.applyCustomLayers(customLayers);
+				parseSVG( documentElement , "root" , mapCanvas , false , symbols , null , null , true); // 2021/3/8 iidを設定する(上と同じ)
+				lp = getRootLayersProps();
+			} catch ( e ){
+				console.error("svgMapCustomLayersManager.applyCustomLayers step error:",e);
+			}
 		}
 		if ( cook.customGeoViewboxes ){ // 2021/4/2 add customViewbox function
 			var customGeoViewboxes = JSON.parse(cook.customGeoViewboxes);
