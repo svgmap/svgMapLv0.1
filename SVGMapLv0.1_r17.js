@@ -1038,6 +1038,13 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			}
 		}
 		
+		if ( svgImages[docId].getElementsByTagName("svg").length<1){
+			// エラー文書・・ added 2021/08/04
+			console.warn("DOCUMENT ERROR.. skip");
+			delete ( svgImages[docId] );
+			handleErrorResult(docId , docPath, httpRes);
+			return;
+		}
 		svgImages[docId].getElementById = getElementByIdUsingQuerySelector; // added 2017.2.3
 //		console.log( svgImages[docId].getElementById );
 		
