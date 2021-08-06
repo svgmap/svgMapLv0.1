@@ -2443,6 +2443,9 @@ var svgMapGIStool = ( function(){
 				metadata[mkey]=geojson.properties[mkey];
 			}
 		}
+		if (!metadata){
+			metadata={};
+		}
 		
 		if ( !geojson.type && geojson.length >0 ){ // これはおそらく本来はエラーだが
 			for ( var i = 0 ; i < geojson.length ; i++ ){
