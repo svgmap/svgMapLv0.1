@@ -174,6 +174,8 @@
 // 2021/01/26 : Rev16本流に載せる　効率化＆いくつか検証もできたため ～　16.xはこれにて終了　16とする
 // 2021/04/02 : Rev17 cookie->localStorage, now loading の抑制, root documentをlocalStorageの設定をベースにした編集後のものを投入可能に　など, レイヤ構成編集用のツールを別フレームワークで用意(こちらはレイヤ編集用ページ別建てか？)
 // 2021/06/14 : getLoadErrorStatistics() timeout等のロードエラーの統計
+// 2021/08/10 : image要素 data-mercator-tile="true"サポート
+// 2021/09/06 : image要素 style:filterサポート (なお、このスタイルの継承はしない・・)
 //
 // Issues:
 // 2020/09/11 ビットイメージとベクターの混合レイヤーで、上下関係がDOM編集によっておかしくなることがある～digitalTyphoonレイヤーに風向を追加したとき、風速イメージのimage要素を消去して再追加する処理をすると（モデルを変えるときにそういう処理が入る）、最初は下にイメージが表示されるが、差異追加後上に来てしまう。　この辺昔imageはなるべく上にくるようにした記憶もあるので、いろいろ怪しい感じがする。
@@ -1609,7 +1611,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , isNoCache, {docId:docId,svgNode:svgNode} );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, {docId:docId,svgNode:svgNode} );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -2364,6 +2366,7 @@ function mercator(){
 			}
 		},
 		scale: (1/360),
+		mercator:true // 2021/8/10 メルカトルタイルのための特殊処理を起動するキーパラメータ
 	}
 }
 
@@ -2394,7 +2397,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , nocache , svgimageInfo){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , svgimageInfo){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2420,7 +2423,7 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 			// img.crossOrigin="anonymous";
 			crossOriginFlag = true;
 		}
-	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			// img.crossOrigin="anonymous";
@@ -2434,6 +2437,10 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	if ( opacity ){
 //		console.log("set opacity: ","Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
 		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+	}
+	if ( imageFilter){
+//		console.log("imageFilter:",imageFilter);
+		img.style.filter+=imageFilter;
 	}
 	img.style.left = x + "px";
 	img.style.top = y + "px";
@@ -2581,7 +2588,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 			crossOriginFlag=true;
 			//img.crossOrigin="anonymous"; // これを無造作に設定すると強制ロードされロード完了検知できない問題が起きたため 2021.6.9
 		}
-	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			crossOriginFlag=true;
@@ -3311,6 +3318,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	cdx = 0;
 	cdy = 0;
 	var pixelated = false;
+	var imageFilter = null;
 	if ( !subCategory && category == POI){ // subCategory無しで呼び出しているものに対するバックワードコンパチビリティ・・・ 2018.3.2
 //		console.log("called no subCategory  imgE:",imgE);
 		subCategory = USEDPOI;
@@ -3427,6 +3435,20 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			pixelated = true;
 		}
 		
+		if ( category == BITIMAGE ){
+			if ( imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("filter")>=0  ){ // bitimageのfilterは継承させてない
+//			console.log("filter");
+				var fls = imgE.getAttribute("style")+";";
+				fls = fls.substring(fls.indexOf("filter:"));
+				fls = fls.substring(7,fls.indexOf(";"));
+				imageFilter = fls;
+			/** これと styleCatalog[]を編集すれば多分継承するけれど　やめておく
+			} else if ( parentProps && parentProps["filter"] ){
+				imageFilter = parentProps["filter"];
+			**/
+			}
+		}
+		
 	} else if ( subCategory == USEDPOI ){ // USEDによるPOI
 		var tf = getNonScalingOffset(imgE);
 		if ( tf.nonScaling ){ // non scaling POI
@@ -3538,7 +3560,8 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		cdy : cdy ,
 		nonScaling : nonScaling , 
 		href_fragment : href_fragment,
-		pixelated : pixelated
+		pixelated : pixelated,
+		imageFilter : imageFilter,
 	}
 }
 
@@ -5101,9 +5124,7 @@ function imageTransform(imgElem, svgimageInfo){
 	}
 	var crs = svgImagesProps[svgimageInfo.docId].CRS; // 長い過程を経て、直接取れるようにした・・
 //	var rootCrs = svgImagesProps["root"].CRS; // これはグローバルなので不要
-	if( !crs.transform && !rootCrs.transform ){
-		// 非線形変換関数がないのでピクセル変換は不要
-		// console.log("NO Non-Linear Transformation skip");
+	if ( needsNonLinearImageTransformation(crs,imageElem) == false ){ // 2021/08/10
 		return;
 	}
 	// console.log("imagesLayerId:",imagesLayerId,"  crs:",crs,"  imageElem:",imageElem);
@@ -5222,6 +5243,19 @@ function imageTransform(imgElem, svgimageInfo){
 	//console.log("imgElem:",imgElem,"  iuri:",iuri);
 	imgElem.setAttribute("data-preTransformedHref",imgElem.getAttribute("src"));
 	imgElem.setAttribute("src",iuri);
+}
+
+function needsNonLinearImageTransformation(crs,imageElem){
+	// その画像が非線形変換が必要なものかどうかを判別する 2021/08/10関数化
+	if( !crs.transform && !rootCrs.transform ){
+		return ( false );
+	} else {
+		if ( imageElem.getAttribute("data-mercator-tile") =="true" && !crs.transform && rootCrs.mercator ){
+			// ビットイメージの各image要素にdata-mercatorTileがtrueで設定され、しかもrootのCRSにmercator属性があったら不要とする特殊処理 2021/08/10
+			return ( false );
+		}
+		return ( true );
+	}
 }
 
 function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,403)した画像(bitImage)を強制的に読み込み完了とみなしてしまう処理
