@@ -2655,6 +2655,9 @@ var svgMapGIStool = ( function(){
 		
 		var poie = svgImage.createElement("use");
 		var svgc = getSVGcoord(coordinates,crs);
+		if ( ! svgc ){
+			return ( null );
+		}
 		poie.setAttribute( "x" , "0" );
 		poie.setAttribute( "y" , "0" );
 		poie.setAttribute( "transform" , "ref(svg," + svgc.x + "," + svgc.y + ")" );
@@ -2820,19 +2823,29 @@ var svgMapGIStool = ( function(){
 		}
 		var ans ="M";
 		var svgc = getSVGcoord(geoCoords[0],crs);
-		ans += svgc.x + "," + svgc.y + " L";
-		for ( var i = 1 ; i < geoCoords.length ; i++ ){
-			svgc = getSVGcoord(geoCoords[i],crs);
-			ans += svgc.x + "," + svgc.y + " ";
+		if ( svgc ){
+			ans += svgc.x + "," + svgc.y + " L";
+			for ( var i = 1 ; i < geoCoords.length ; i++ ){
+				svgc = getSVGcoord(geoCoords[i],crs);
+				if ( svgc ){
+					ans += svgc.x + "," + svgc.y + " ";
+				}
+			}
+		} else {
+			ans = " ";
 		}
 		return ( ans );
 	}
 	
 	function getSVGcoord( geoCoord , crs ){
 		// DEBUG 2017.6.12 geojsonの座標並びが逆だった 正しくは経度,緯度並び
-		return{ 
-			x: geoCoord[0] * crs.a + geoCoord[1] * crs.c + crs.e ,
-			y: geoCoord[0] * crs.b + geoCoord[1] * crs.d + crs.f
+		if ( geoCoord.length >1 ){
+			return{ 
+				x: geoCoord[0] * crs.a + geoCoord[1] * crs.c + crs.e ,
+				y: geoCoord[0] * crs.b + geoCoord[1] * crs.d + crs.f
+			}
+		} else {
+			return (null);
 		}
 	}
 	
