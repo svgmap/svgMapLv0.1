@@ -33,9 +33,12 @@
 // Rev4 2020/02/13 連続・一括取得のケースで、そもそもSVGMap.jsが表示するコンテンツ自身もProxy経由にすることでさらに高性能化させる
 // Rev5 2021/05/11 フレームワーク化、このアプリの機能をAPIで操作可能にする
 // Rev6 2021/06/22 "zoomPanMapCompleted" eventに対応し、XHRでコンテンツを生成するタイプのレイヤーでも動作可能に
+//      2021/06/30 対象レイヤーのUIの設定状況をモニタするAPI
 // 
 // ISSUE:
-//  最初の検索が止まる問題on searchAll　解決されてない？？？ 2020/09/30 -> 2020/11/18 解消したかも -> 2021/6/9 今度こそ解消したはず
+//  DONE 最初の検索が止まる問題on searchAll　解決されてない？？？ 2020/09/30 -> 2020/11/18 解消したかも -> 2021/6/9 今度こそ解消したはず
+//  境界線上にあるPOIが検索されない　たしか1～2ピクセルのバッファ設けていたはずだと思うがそれも効いていないのか？(bbox判定で弾かれてるかも)
+//  オートパイロットロジックがmeshPOIに対応していない
 //
 // ToDo
 // ALREADY 検索したHue値を追加記載する(SV値は？)
@@ -255,8 +258,14 @@ function prepareResultAndPrintcsv(ans){
 		var lng = ans[i].coordinates[0];
 		var lat = ans[i].coordinates[1];
 		var hue = ans[i].hsv.h;
-		var title = ans[i].src.getAttribute("xlink:title");
-		var meta = ans[i].src.getAttribute("content");
+		var srcElem;
+		if ( ans[i].usedParent){
+			srcElem = ans[i].usedParent;
+		} else {
+			srcElem = ans[i].src;
+		}
+		var title = srcElem.getAttribute("xlink:title");
+		var meta = srcElem.getAttribute("content");
 		
 		var hashKey = title+lat+","+lng;
 		if ( ! csvSource[hashKey] ){
@@ -774,9 +783,56 @@ function revertLayerSetup(){
 
 }
 
+function getTargetLayerUIstatus(layerId){
+	inputTypes={"text":"value","number":"value","tel":"value","email":"value","url":"value","password":"value","search":"value","reset":false,"submit":false,"image":false,"date":"value","datetime-local":"value","month":"value","week":"value","time":"value","radio":"checked","checkbox":"checked","hidden":"value","button":false,"file":"value","color":"value","range":"value"}; // keyはtype, valは保持する値の属性名 設定する系はfalse
+	
+	var targetDoc = svgMap.getSvgImagesProps()[layerId].controllerWindow.document;
+	// https://webliker.info/39533/
+	// http://write-remember.com/program/html/formparts/
+	// https://step-learn.com/article/html-css/074-form-sum.html
+	var formTagElems = targetDoc.querySelectorAll("input,select,textarea");
+	
+	var formTags =[];
+	for ( var i = 0 ; i < formTagElems.length ; i++ ){
+		switch (formTagElems[i].nodeName){
+		case "INPUT":
+			
+			var itype = formTagElems[i].getAttribute("type");
+			var inputProps={elementName:"input",type:itype};
+			var valAttr = inputTypes[itype]
+			if ( valAttr ){
+				var val = formTagElems[i][valAttr];
+				inputProps.valAttrName=valAttr;
+				inputProps.valAttr=val;
+			} else {
+				
+			}
+			formTags.push(inputProps);
+			break;
+		case "TEXTAREA":
+			var inputProps={
+				elementName:"textarea",
+				valAttrName:"value",
+				valAttr:formTagElems[i].value
+			};
+			formTags.push(inputProps);
+			break;
+		case "SELECT":
+			var inputProps={
+				elementName:"select",
+				valAttrName:"selectedIndex",
+				valAttr:formTagElems[i].selectedIndex
+			};
+			formTags.push(inputProps);
+			break;
+		}
+	}
+	return ( formTags );
+}
 
 return { // rasterPoiGis. で公開する関数のリスト
 	clearPickColors: clearPickColors,
+	getTargetLayerUIstatus: getTargetLayerUIstatus,
 	halt: halt,
 	searchAll: searchAll,
 	searchAllInRangePois: searchAllInRangePois,
@@ -813,6 +869,8 @@ function testSearchAPI(cbf){
 		}
 	)
 }
+
+
 
 </script>
 <body>
