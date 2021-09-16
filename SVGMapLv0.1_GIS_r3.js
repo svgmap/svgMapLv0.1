@@ -1245,7 +1245,7 @@ var svgMapGIStool = ( function(){
 		console.log("getImagePixData B:",targetCoverage,"   superParam.coverageIndex:",superParam.coverageIndex);
 		if ( targetCoverage && targetCoverage.href ){
 			var targetCoverageURL = targetCoverage.href;
-			console.log("getImagePixData:",getImagePixData);
+			//console.log("getImagePixData:",getImagePixData);
 			getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
 		} else {
 			halt = false;
@@ -1457,6 +1457,7 @@ var svgMapGIStool = ( function(){
 	var imageCacheMaxSize=100; // FIFOキャッシュの数
 	var imageCache = [];
 	var imageCacheQueue=[];
+	var imageCacheEnabled=false;
 	function addImageCache(hashKey,img){
 		imageCache[hashKey] = img;
 		imageCacheQueue.push(hashKey);
@@ -1465,12 +1466,21 @@ var svgMapGIStool = ( function(){
 			delete imageCache[delImageHash];
 		}
 	}
-	
+	function enableImageCache(){
+		imageCacheEnabled=true;
+		imageCache = [];
+		imageCacheQueue=[];
+	}
+	function disableImageCache(){
+		imageCacheEnabled=false;
+		imageCache = [];
+		imageCacheQueue=[];
+	}
 	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
 		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
 //		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
 		var imageURL_int = getImageURL(imageUrl);
-		if ( imageCache[imageURL_int]){
+		if ( imageCacheEnabled && imageCache[imageURL_int]){
 //			console.log("Hit imageCache");
 			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
 		} else {
@@ -1479,7 +1489,9 @@ var svgMapGIStool = ( function(){
 			if ( imgSrcURL.indexOf("http")!=0 || isDirectURL(imgSrcURL)){
 				console.log("use image element's image :", documentImage); 
 				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
-				addImageCache(imageURL_int, documentImage);
+				if ( imageCacheEnabled ){
+					addImageCache(imageURL_int, documentImage);
+				}
 			} else {
 				
 				var img = new Image();
@@ -1490,7 +1502,9 @@ var svgMapGIStool = ( function(){
 				img.src = imageURL_int;
 				img.onload = function() {
 					returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
-					addImageCache(imageURL_int, img);
+					if ( imageCacheEnabled ){
+						addImageCache(imageURL_int, img);
+					}
 				}
 			}
 		}
@@ -1502,6 +1516,7 @@ var svgMapGIStool = ( function(){
 		canvas.width  = img.naturalWidth;
 //		canvas.height = img.height;
 		canvas.height = img.naturalHeight;
+		//console.log(img);
 		var cContext = canvas.getContext('2d');
 		cContext.mozImageSmoothingEnabled = false;
 		cContext.webkitImageSmoothingEnabled = false;
@@ -3068,6 +3083,8 @@ return { // svgMapGIStool. で公開する関数のリスト
 	coverageImageXY2LatLng : coverageImageXY2LatLng,
 	drawGeoJson : drawGeoJson,
 	drawKml : drawKml,
+	disableImageCache: disableImageCache,
+	enableImageCache: enableImageCache,
 	getExcludedPoints : getExcludedPoints,
 	getImage: getImage,
 	getIncludedPoints : getIncludedPoints,

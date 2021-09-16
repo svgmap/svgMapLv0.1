@@ -34,6 +34,7 @@
 // Rev5 2021/05/11 フレームワーク化、このアプリの機能をAPIで操作可能にする
 // Rev6 2021/06/22 "zoomPanMapCompleted" eventに対応し、XHRでコンテンツを生成するタイプのレイヤーでも動作可能に
 //      2021/06/30 対象レイヤーのUIの設定状況をモニタするAPI
+// Rev7 2021/09-　まずISSUEをつぶす。　その上で大容量処理を可能にする（演算結果をタイリングするとか？IndexedDBに入れるとか？１００ｍメッシュ日本全国ぐらいのデータを処理できるようにしたい）
 // 
 // ISSUE:
 //  DONE 最初の検索が止まる問題on searchAll　解決されてない？？？ 2020/09/30 -> 2020/11/18 解消したかも -> 2021/6/9 今度こそ解消したはず
@@ -259,6 +260,7 @@ function prepareResultAndPrintcsv(ans){
 		var lng = ans[i].coordinates[0];
 		var lat = ans[i].coordinates[1];
 		var hue = ans[i].hsv.h;
+		//console.log("sec svgElem:", ans[i]);
 		var srcElem;
 		if ( ans[i].usedParent){
 			srcElem = ans[i].usedParent;
@@ -584,7 +586,7 @@ function searchAllS1(){
 	document.removeEventListener("screenRefreshed",searchAllS1,false);
 	svgMapGIStool.enableImageCache();
 	svgMap.captureGISgeometriesOption(true); 
-	svgMap.captureGISgeometries(searchAllS2 );	
+	svgMap.captureGISgeometries(searchAllS2 );
 }
 
 function searchAllS2(geom , superParam ){
@@ -680,6 +682,10 @@ function prepareNextArea(currentLevelPos){
 		APIresultCallback = null;
 		APIprogressCallback = null;
 	}
+}
+	
+function setInitVB(){
+	svgMap.setGeoViewPort(initialViewBox.y,initialViewBox.x,initialViewBox.height,initialViewBox.width);
 }
 
 var APzoomPanListener = function (event){ // オートパイロット駆動用のイベントリスナ
@@ -844,6 +850,7 @@ return { // rasterPoiGis. で公開する関数のリスト
 	searchAllInRangePois: searchAllInRangePois,
 	searchInRangePointsSingle: searchInRangePointsSingle,
 	setProxy:setProxy,
+	//setInitVB:setInitVB,
 	toggleContSearch: toggleContSearch,
 }
 
@@ -914,5 +921,8 @@ Note:
 ・連続検索を押すと、伸縮スクロールするたびに検索が実行され結果が地図上及びCSVに追加されていきます、広い領域の検索に便利です。
 ・一括検索を押すと、選択したPOIレイヤーのPOIがアイコン化していない場合、自動的に拡大＆スクロールを繰り返し検索を実行します。こちらも広い領域の検索に便利です。</textarea>
 </div>
+<!--
+<input type="button" value="setinitvb" onclick="rasterPoiGis.setInitVB()"></input>
+-->
 </body>
 </html>

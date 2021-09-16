@@ -178,6 +178,7 @@
 // 2021/09/06 : image要素 style:filterサポート (なお、このスタイルの継承はしない・・)
 //
 // Issues:
+// 2021/09/13 captureGISgeo. "ロードできてないイメージは外す"ロジックが雑、動的レイヤー取りこぼす可能性がある。読み込み完了(zoomPanMap ev)時点で確認する形が好ましいと思う。
 // 2020/09/11 ビットイメージとベクターの混合レイヤーで、上下関係がDOM編集によっておかしくなることがある～digitalTyphoonレイヤーに風向を追加したとき、風速イメージのimage要素を消去して再追加する処理をすると（モデルを変えるときにそういう処理が入る）、最初は下にイメージが表示されるが、差異追加後上に来てしまう。　この辺昔imageはなるべく上にくるようにした記憶もあるので、いろいろ怪しい感じがする。
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
 // 2018/6/21 SvgImagesProps　もしくは　rootLayersProps?にそのレイヤのデータの特性(POI,Coverage,Line etc)があると便利かも
@@ -2491,11 +2492,15 @@ function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, 
 		img.src = href;
 		if (crossOriginFlag){ // crossOrigin属性はsrc書き換えと同タイミングとする。2021.6.9 crossOrigin特性だけ変更するケースはない(Imageのproxy設定と一体)という想定でいる・・
 			img.crossOrigin="anonymous";
+		} else {
+			img.crossOrigin=null; // 2021/09/16 debug
 		}
 	} else { // for IE  to be obsoluted..
 		img.attachEvent('onload', handleLoadSuccess);
 		if (crossOriginFlag){ // これは意味あるのか？
 			img.crossOrigin="anonymous";
+		} else {
+			img.crossOrigin=null; // 2021/09/16 debug
 		}
 		if ( forceSrcIE ){
 			img.src = href;
