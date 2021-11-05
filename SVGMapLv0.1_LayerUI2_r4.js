@@ -49,6 +49,21 @@
 // 2021/03/09 : Rev.4: 2020/11-2020/12のSVGMapFrame用の改修を導入し、SVGMapCustomLayersManagerの起動機能を実装 (#layerList data-customizerで、カスタマイザを指定するとそれを起動するボタンが出現)
 // 2021/06/17 : レイヤ固有UIでloadイベント時にSVGMapフレームワークがセットされるように
 // 2021/06/22 : zoomPanMapCompletedイベントを実装。レイヤ固有UIでzoomPanMapイベント後 独自のXHRによりデータの取得＆描画更新が行われるようなケースでも、その読み込み完了を検知後に発行するイベント。
+// 2021/09/22 : lauerUIwindowsに.setLoadingFlag(): 非同期処理中を知らせるフラグを明示的にセット・解除可能に
+// 2021/10/29 : setRootLayersPropsで設定する限り(rootSvgのDOM直編集をしない限り)svgMap.updateLayerTableを呼ばなくても問題が起きないように(initLayerList(initOptions) > rev17 core svgMap)
+
+// ISSUES, ToDo: 
+// 2021/10/14 rootsvgのDOM直編集ではupdateLayerTableが反映されるタイミングが直にない～updateLayerTableを多数呼びたくない理由は、LayerListTableの後進にオーバヘッドがかかるから　なので、それをせずにならば(例えばrefreshScreen毎に)いくら呼んでも気にならないはず
+// 
+// (PARTIALLY FIXED) 2021/10/13 updateLayerTableを呼ばないとlayerUIframeがレイヤON/OFF状態とシンクロしない
+// (FIXED?) IE,Edgeでdata-controller-src動作しない
+//  レイヤ固有UIを別ウィンドウ化できる機能があったほうが良いかも
+//   ただしこの機能は新たなcontextを生成する形でないと実装できないようです。
+//   See also: http://stackoverflow.com/questions/8318264/how-to-move-an-iframe-in-the-dom-without-losing-its-state
+//  (FIXED? 2017.9.8) レイヤUI表示ボタンが時々表示されない時がある (少なくとも一か所課題を発見し修正。本体も改修(getRootLayersProps))
+//  zoomPanMapCompletedは、fetchとXHRだけを見ているが、IndexedDBやworkerも見るようにすべき
+
+
 
 // global vars
 /**
@@ -62,16 +77,6 @@
  var maxGlobalMessages = 5;
  var globalMessageID="globalMessage";
 **/
-
-
-//
-// ISSUES, ToDo:
-//	(FIXED?) IE,Edgeでdata-controller-src動作しない
-//  レイヤ固有UIを別ウィンドウ化できる機能があったほうが良いかも
-//   ただしこの機能は新たなcontextを生成する形でないと実装できないようです。
-//   See also: http://stackoverflow.com/questions/8318264/how-to-move-an-iframe-in-the-dom-without-losing-its-state
-//  (FIXED? 2017.9.8) レイヤUI表示ボタンが時々表示されない時がある (少なくとも一か所課題を発見し修正。本体も改修(getRootLayersProps))
-//
 
 
 ( function ( window , undefined ) { 
@@ -124,26 +129,34 @@ function getGroupFoldingStatus( groupName ){ // グループ折り畳み状況�
 }
 
 function updateLayerTable(){
-	console.log("CALLED updateLayerTable");
+//	console.log("CALLED updateLayerTable : caller:",updateLayerTable.caller);
 	var tb = document.getElementById("layerTable");
+	var lps = svgMap.getRootLayersProps();
+	for ( var i = lps.length -1 ; i >=0  ; i-- ){
+		syncLayerSpecificUiExistence( lps[i].id, lps[i].visible ); // 基幹処理(レイヤ固有UI)をレイヤリストUI更新(setLayerTable)から分けた
+	}
 	if ( tb ){
 		removeAllLayerItems(tb);
-		setLayerTable(tb);
+		setLayerTable(tb, lps);
 	}
 	checkLayerListAndRegistLayerUI();
 }
 
-function setLayerTable(tb){
+function setLayerTable(tb, layerProps){
 //	console.log("call setLayerTable:",tb);
 	var groups = new Object(); // ハッシュ名のグループの最後のtr項目を収めている
-	var lps = svgMap.getRootLayersProps();
+	var lps;
+	if ( !lps ) {
+		lps = svgMap.getRootLayersProps();
+	} else {
+		lps = layerProps;
+	}
 //	console.log(lps);
 	var visibleLayers=0;
 	var visibleLayersNameArray=[];
 	const visibleNum=5;  // 表示レイヤ名称数
 	for ( var i = lps.length -1 ; i >=0  ; i-- ){
 		var tr = getLayerTR(lps[i].title, lps[i].id, lps[i].visible , false , lps[i].groupName);
-		syncLayerSpecificUiExistence( lps[i].id, lps[i].visible );
 		if (lps[i].groupName ){ 
 			// グループがある場合の処理
 			
@@ -500,8 +513,10 @@ function toggleLayer(e){
 //	console.log("call toggle Layer",e.target.id,e.target.checked,lid);
 	svgMap.setRootLayersProps(lid, e.target.checked , false );
 	
-	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
-	updateLayerTable();
+	// 後でアイテム消さないように効率化したい・・ (refreshLayerTable..)
+	if ( updateLayerListUITiming == "legacy" ){
+		updateLayerTable(); // これはrefreshScreenから自動で呼ばれる 2021/10/14 (ただしrev17の改修以降なので・・)
+	}
 	svgMap.refreshScreen();
 }
 
@@ -526,7 +541,7 @@ function toggleBatch(e){
 	}
 	
 	// 後でアイテム消さないように効率化する・・ (refreshLayerTable..)
-	updateLayerTable();
+	updateLayerTable(); // こちらはDOM直接操作しているので必要
 	svgMap.refreshScreen();
 }
 
@@ -537,8 +552,12 @@ function MouseWheelListenerFunc(e){
 }
 
 var layerListMaxHeightStyle, layerListMaxHeight, layerListFoldedHeight , layerSpecificUiDefaultStyle = {} , layerSpecificUiMaxHeight = 0;
-	
-function initLayerList(){
+var updateLayerListUITiming="legacy";// 2021/10/29 core FWがupdateLayerListUIを呼び出すタイミング (<rev17 10月以前版は"legacy", 10月以降は"setRootLayersProps", 将来はrootDOMchangedかな・・・
+
+function initLayerList(initOptions){
+	if ( initOptions && initOptions.updateLayerListUITiming){
+		updateLayerListUITiming = initOptions.updateLayerListUITiming;
+	}
 //	console.log("CALLED initLayerList");
 	layerGroupStatus = new Object();
 	layerList = document.getElementById("layerList");
@@ -1067,6 +1086,15 @@ function iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf){
 		(svgMap.getSvgImagesProps())[lid].preRenderControllerFunction = iframe.contentWindow.preRenderFunction;
 	}
 	setXHRhooks(iframe.contentWindow); // 2021/06/17 
+	iframe.contentWindow.setLoadingFlag=function(stat){ // 2021/09/22 XHR以外でもこれをセットすると同じように動かせる
+		var sip = svgMap.getSvgImagesProps();
+		console.log("registLoadingFlag:",sip[lid]);
+		if ( stat == true ){
+			registLoadingFlag(lid,sip);
+		} else if ( stat == false ){
+			releaseLoadingFlag(lid,sip);
+		}
+	}
 	document.addEventListener("zoomPanMap", transferCustomEvent2iframe[lid] , false);
 	document.addEventListener("screenRefreshed", transferCustomEvent2iframe[lid] , false);
 	document.addEventListener("zoomPanMapCompleted", transferCustomEvent2iframe[lid] , false);
@@ -1189,6 +1217,7 @@ function setXHRhooks(ifWin){
 }
 
 function registLoadingFlag(layerId,sip){
+	//console.log("registLoadingFlag:caller:",registLoadingFlag.caller,"  id:",layerId,"  sip:",sip);
 	if ( sip[layerId].xhrLoading ){
 		++sip[layerId].xhrLoading;
 	} else {
@@ -1386,6 +1415,7 @@ function layerSpecificUIhide(){
 }
 
 function syncLayerSpecificUiExistence( layerId, visivility ){
+	if ( !layerSpecificUI){return}
 	var lsuiDoc = layerSpecificUI.ownerDocument;
 	var visibleIframeId = getVisibleLayerSpecificUIid();
 	var targetIframeId = getIframeId(layerId);
@@ -1393,7 +1423,7 @@ function syncLayerSpecificUiExistence( layerId, visivility ){
 		if ( visibleIframeId == targetIframeId){
 			layerSpecificUIhide();
 		}
-		targetIframe= lsuiDoc.getElementById(targetIframeId)
+		var targetIframe= lsuiDoc.getElementById(targetIframeId);
 		console.log("close layer specific UI for:",layerId);
 		document.removeEventListener("zoomPanMap", transferCustomEvent2iframe[layerId], false);
 		document.removeEventListener("screenRefreshed", transferCustomEvent2iframe[layerId], false);

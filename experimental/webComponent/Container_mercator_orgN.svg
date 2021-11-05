@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:go="http://purl.org/svgmap/profile" viewBox="global 135 35 1 1" >
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="mercator" />
+
+<!-- BaseMaps -->
+
+<animation x="-30000" y="-30000" width="60000" height="60000" xlink:href="../../rev12/baseMap/dynamicOSM_r10.svg" title="OpenStreetMap(Global)" class="basemap switch" visibility="visible"/>
+
+<animation x="-30000" y="-30000" width="60000" height="60000" xlink:href="../../rev12/baseMap/dynamicDenshiKokudo_r10.svg" title="DenshiKokudo" class="basemap switch" visibility="hidden"/>
+
+  <animation class="DEV clickable" title="prefLayer" xlink:href="jpn_pref_a.svg" x="-30000" y="-30000" width="60000" height="60000" visibility="hidden" opacity="0.6" />
+  <animation class="DEV clickable" title="poiLayer" xlink:href="extPoiLayer.svg" data-controller="extPoiLayer.html#exec=hiddenOnLayerLoad" x="-30000" y="-30000" width="60000" height="60000" visibility="visible" opacity="0.6" />
+
+</svg>

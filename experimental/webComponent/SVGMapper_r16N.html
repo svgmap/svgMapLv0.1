@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<!-- http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/airPort_r4b.html#svgView(viewBox(global,135,35,0.02,0.02)) -->
+<title>SVGMapLevel0.1-Rev16 : Mobile UI Optimization tester</title>
+<meta name="viewport" content="width=device-width,user-scalable=no,initial-scale=1.0,maximum-scale=1.0" />
+<meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<style>
+ body {
+ 	font-family: Meiryo;
+ }
+ #layerTable{
+ 	background:#ffE0E0;
+ 	border: 2px solid #bbb;
+ }
+ .layerItem{
+ 	background-color: white;
+ }
+ .noGroup{
+ 	background-color: #fff0f0;
+ }
+ #layerList{
+ 	background-color: #ffff80;opacity:0.8;
+ }
+ iframe { border: 0px; } 
+ </style>
+
+<script type="text/javascript" src="../SVGMapLv0.1_r16.js"></script>
+<script type="text/javascript" src="../../rev12/SVGMapLv0.1_LayerUI2_r3_dev_202011.js"></script> <!-- layerlistがなくてもレイヤ固有UIを動作可能にする改良を -->
+<!--<script type="text/javascript" src="../rev13/jsts.min.js"></script> --><!-- JTSのJSポート版：重いかもしれないが、下記GISで、ほぼGISフルセットを実装するときに使用する -->
+<script type="text/javascript" src="../../rev13/jsts.js"></script> <!-- JTSのJSポート版：重いかもしれないが、下記GISで、ほぼGISフルセットを実装するときに使用する -->
+<script type="text/javascript" src="../../rev13/SVGMapLv0.1_GIS_r2.js"></script> <!-- Rev13で拡張されたGIS -->
+<script type="text/javascript" src="../../rev14/SVGMapLv0.1_Authoring_r7.js"></script> <!-- Rev14:オーサリングシステム -->
+<script type="text/javascript" src="./SVGMapLv0.1_LayerUtil.js"></script> <!-- 2020/12/22 レイヤーの制御を簡単にするUtility -->
+<script>
+var proxyPath = "../../cesiumSvgMap/cesiumSvgMapProxy.php?file=";
+svgMapGIStool.setImageProxy(proxyPath, null, true);
+function getImageProxy(path){
+		var ans = svgMapGIStool.imageUrlEncoder(path);
+//		console.log("getImageProxy inp:",path,"  ans:",ans);
+		return ans;
+};
+
+svgMap.setProxyURLFactory(null,null,null, getImageProxy,true); // ビットイメージ非線形図法変換の時のみプロキシを使う
+
+
+</script>
+
+
+<script>
+function writeBBS(){
+	var bbi = document.getElementById("bbsIframe");
+	bbi.style.display="";
+	var geoViewBox = svgMap.getGeoViewBox();
+	var tickeredObjects = svgMap.getTickerMetadata();
+	bbi.contentWindow.setCenterParams(geoViewBox, tickeredObjects );
+}
+function hideBBSiframe(){
+	document.getElementById("bbsIframe").style.display="none";
+}
+
+
+// test for SVGMapFrame  setAttribute("customjson",...)
+var rootMessage={
+	set customJson(json){
+		console.log("receive json from root:",json);
+	}
+}
+onload=function(){
+	svgMapLayerUI.setLayerListmessage("Number of visible Layers is ",".");
+	svgMapLayerUI.assignLayerSpecificUiElement(document.getElementById("myUIdiv"), true, true);
+}
+
+// 2021/01/07 test func for SVGMapLv0.1_LayerUtil.js
+// コンソールで関数直呼びして・・
+var cl;
+function testSVGMapLayerUtil(){
+	cl =svgMapLayerUtil.getLayersController()
+	console.log(cl.length);
+	for ( var i = 0 ; i < cl.length ; i++ ){
+		console.log(i,cl[i]);
+	}
+}
+
+function testSVGMapLayerUtil_st2(){
+	cl.add("../../etcLayers/marineTraffic.svg");
+}
+
+/** 1_LayerUtilのテスト命令文のコメントね
+proxyオブジェクトは、target内に、オリジナルを入れておくのが吉なのね
+cl
+cl.length
+cl[0]
+cl[0],visible=true
+
+**/
+
+
+</script>
+
+<body bgcolor="#ffffff" style="overflow:hidden;" >
+  <div id="mapcanvas" data-src="Container_mercator_orgN.svg"></div>
+
+ <div id="gui">
+  <img id="zoomupButton" style="z-index:100;left: 5px; top: 5px; position: absolute;" src="../../zoomup.png" onclick="svgMap.zoomup()" width="20" height="20" />
+  <img id="zoomdownButton" style="z-index:100;left: 5px; top: 25px; position: absolute;" src="../../zoomdown.png" onclick="svgMap.zoomdown()" width="20" height="20" />
+  <img id="gpsButton" style="z-index:100;left: 5px; top: 45px; position: absolute;" src="../../gps.png" onclick="svgMap.gps()" width="20" height="20" />
+  <!--
+  <font color="blue" style="right: 5px; top: 5px; position: absolute;" >SVGMapLevel0.1 Rev14 : Mobile Ui Optimization tester/prototyper</font>-->
+  <font color="blue" style="right: 5px; bottom: 5px; position: absolute;" size="-2" >by SVGMapNNN tech.</font>
+  <img id="centerSight" style="opacity:0.5" src="../../Xcursor.png" width="15" height="15"/>
+  <!--
+  <font id="posCmt" size="-2" color="brown" style="left: 5px; bottom: 5px; position: absolute;">Lat,Lng:</font>
+  <font id="centerPos" size="-2" color="brown" style="left: 50px; bottom: 5px; position: absolute;" >lat , lng</font>
+  -->
+  <span id="globalMessage" style="font-size:10px;left:5px;bottom:16px;position:absolute;"></span> <!-- 2019/12/05 svgmaplayerui setGlobalMessage -->
+  <!--<img id="writeBBSbutton" class="customButton"  style="z-index:100;left: 5px; top:65px; position: absolute;" src="../rev14/crayonColoredPencil60.png" width="20" height="20" onclick="writeBBS()"/>-->
+
+  <div id="layerList" style="display:normal;left :30px; top: 10px; width:300px;height:90%; position: absolute; ">
+  </div>
+
+<!-- さらに！これが無くてもちゃんと動くか？
+  <div id="layerSpecificUI" style="right :10px; top: 40px; width:400px;height:400px; position: absolute; background-color: white;opacity:0.8;display:none;">
+  </div>
+-->
+  <!--
+  <form style="right:10px;top:20px;position:absolute;opacity:0.8" ><input type="checkBox" id="resumeBox" onChange="svgMap.resumeToggle(event)" autocomplete="off"></input><label for="resumeBox"/>Keep and Resume view</label></form>
+  -->
+  <!--
+  <input id="reloadNoCacheLayer" type="button" value="ReLoad" onClick="svgMap.reLoadLayer('DEVTST2 nochache layer')" style="right :10px; top: 0px; position: absolute; "/>
+  -->
+  
+ </div>
+ 
+ 
+ <div id="myUIdiv" style="position: absolute;right:10px;top:40px;background-color: #99cc00;width:200px;height:200px"></div>
+ 
+</body>
+</html>

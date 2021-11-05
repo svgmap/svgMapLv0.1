@@ -43,6 +43,7 @@
 // 2020/07/15 ラスターGIS(Polygon)結果のビットイメージ可視化用関数　＆　コード整理
 // 2020/07/27 Rev3 : ラスターGIS: 非対角成分あるラスターカバレッジでもPolyline,Polygonサポート
 // 2021/04/13 drawGeoJson: geoJsonのスタイリング仕様(mapbox)をサポート
+// 2021/10/27 ラスターGISの画像キャッシュの明示的なOn/Offを可能に
 //
 // ISSUES:
 //
@@ -1068,10 +1069,11 @@ var svgMapGIStool = ( function(){
 		}
 		if ( Array.isArray(poiID_or_points)){
 			superParam.points= poiID_or_points;
+			console.log( "called getInRangePoints: poi.len,cover:", poiID_or_points.length, coverID,"  range:", superParam.range);
 		} else {
 			superParam.pointsDocTreeID= poiID_or_points;
+			console.log( "called getInRangePoints: poi,cover:", poiID_or_points, coverID,"  range:", superParam.range);
 		}
-		console.log( "called getInRangePoints: poi,cover:", poiID_or_points, coverID,"  range:", superParam.range);
 		
 		svgMap.captureGISgeometriesOption(true); // カバレッジが必要
 		if ( ! preCapturedGeometry ){
@@ -1134,7 +1136,7 @@ var svgMapGIStool = ( function(){
 		var ymax=-1e30;
 		var poiGeoms;
 		for ( var i = 0 ; i < poiGeoms.length ; i++ ){
-			if ( poiGeoms[i].type=="Point"  ){ // Point
+			if ( (poiGeoms[i].type).toLowerCase()=="point"  ){ // Point
 				if ( poiGeoms[i].coordinates[0] > xmax ){
 					xmax = poiGeoms[i].coordinates[0];
 				}
@@ -1225,7 +1227,7 @@ var svgMapGIStool = ( function(){
 		}
 		
 		// viewportにある対象オブジェクトが取れているはず
-		console.log("targetCoverages:",targetCoverages,"  targetGeoms:",targetGeoms);
+		console.log("targetCoverages:",targetCoverages,"  targetGeoms.length:",targetGeoms.length);
 		superParam.targetGeomsBbox = getTargetGeomsBbox(targetGeoms);
 		console.log("targetGeomsBbox:",superParam.targetGeomsBbox);
 		superParam.targetGeoms = targetGeoms;
@@ -2436,6 +2438,14 @@ var svgMapGIStool = ( function(){
 		return rgb; 
 	} 	
 	
+	function getColorString(r,g,b){
+		var color ="#"+zeroPadding(r.toString(16),2)+zeroPadding(g.toString(16),2)+zeroPadding(b.toString(16),2);
+		return ( color );
+	}
+	function zeroPadding(num,length){
+	    return ('0000000000' + num).slice(-length);
+	}
+	
 	// geoJsonレンダラ系
 	function drawGeoJson( geojson , targetSvgDocId, strokeColor, strokeWidth, fillColor, POIiconId, poiTitle, metadata, parentElm,metaDictionary){
 //		console.log("called svgMapGisTool drawGeoJson");
@@ -3086,6 +3096,7 @@ return { // svgMapGIStool. で公開する関数のリスト
 	disableImageCache: disableImageCache,
 	enableImageCache: enableImageCache,
 	getExcludedPoints : getExcludedPoints,
+	getColorString: getColorString,
 	getImage: getImage,
 	getIncludedPoints : getIncludedPoints,
 	getInRangeGeometriesOnCoverage : getInRangeGeometriesOnCoverage,
@@ -3099,6 +3110,8 @@ return { // svgMapGIStool. で公開する関数のリスト
 	renderImages: renderImages,
 	setImageProxy: setImageProxy,
 	testCapGISgeom : testCapGISgeom,
+	hsv2rgb: hsv2rgb,
+	rgb2hsv: rgb2hsv,
 }
 
 })();
