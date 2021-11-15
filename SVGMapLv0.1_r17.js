@@ -1646,7 +1646,8 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 //							console.log( "opacity: isIE,verIE", isIE,verIE);
 //							console.log("set div opacity: ","Filter: Alpha(Opacity=" + ip.opacity * 100 + ");");
 							if ( !uaProp.MS){ // if ( !isIE)からチェンジ (Edge対策)
-								img.setAttribute("style" , "Filter: Alpha(Opacity=" + ip.opacity * 100 + ");opacity:" + ip.opacity + ";"); // IEではこれでは設定できない
+								img.style.opacity=ip.opacity;
+//								img.setAttribute("style" , "Filter: Alpha(Opacity=" + ip.opacity * 100 + ");opacity:" + ip.opacity + ";"); // IEではこれでは設定できない
 							} else {
 //								console.log("verIE:" + verIE);
 								if ( verIE > 8 ){
@@ -2461,7 +2462,9 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
 //		console.log("set opacity: ","Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
-		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+//		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";"); // 2021/11/15
+//		img.style.filter="Alpha(Opacity=" + opacity * 100 + ")";
+		img.style.opacity=opacity;
 	}
 	if ( imageFilter){
 //		console.log("imageFilter:",imageFilter);
@@ -2544,7 +2547,8 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	var img = document.createElement("span"); // spanで良い？ divだと挙動がおかしくなるので・・
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
-		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+//		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+		img.style.opacity=opacity;
 	}
 	if ( style.fill ){
 		img.style.color=style.fill;
