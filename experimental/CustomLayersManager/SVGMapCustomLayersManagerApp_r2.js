@@ -48,6 +48,7 @@ addEventListener("load",
 		await loadOriginal();
 		buildFromCurrentMap();
 		buildSettingList(true);
+		applySortableJs();
 	});
 
 async function reset(){
@@ -960,3 +961,18 @@ async function loadSetting(){
 	event.target.value="";
 }
 
+// 事前にSortableJSをロードする必要あり
+function applySortableJs(){
+	console.log("set up SortableJS");
+	const layers = document.getElementById("layerTable").lastChild;
+	Sortable.create(layers, {
+	  animation: 100,
+	  onEnd: function(e){
+		let layer_children = document.getElementById("layerTable").lastChild.children;
+		for(let i = 0; i < layer_children.length; i++){
+		  layer_children[i].setAttribute("data-index",i);
+		}
+	  }
+	});
+  } 
+  
