@@ -2570,6 +2570,7 @@ var svgMapGIStool = ( function(){
 			var placemarkAll = kml.querySelectorAll('Placemark');
 			//console.log(placemarkAll);
 			var plm = Array.prototype.slice.call(placemarkAll,0);
+			let arr_metadata = [];
 			plm.forEach(function(placemark,index){
 				var kmlName = getNameFromKML(placemark);
 				var kmlDescription = getDescriptionFromKML(placemark);
@@ -2583,9 +2584,13 @@ var svgMapGIStool = ( function(){
 				if( kmlGeometory == "point" ){
 					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, kmlDescription, parentElm);
 				}else if(kmlGeometory == "linestring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "linearring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "polygon"){
 				}else if( kmlGeometory == "multigeometry"){
 				
