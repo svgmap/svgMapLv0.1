@@ -1,0 +1,186 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>SVGMap.jsをsvg-mapカスタム要素として使うためのフレームワークのテスト</title>
+</head>
+<script type="text/javascript" src="SVGMapLv0.1_Frame_r4.js"></script>
+
+<script>
+
+
+/// ここからユーザコード
+
+function changeView(){
+	console.log("changeView");
+	var smap = document.getElementById("svgMapTag");
+	smap.setCenter(135,35,4);
+}
+
+function changeViewByDOM(){
+	console.log("changeViewByDOM");
+	svgMapTag.setAttribute("zoom","6");
+}
+
+
+function addElem(){
+	smt.appendChild(document.createElement("HELLO"));
+}
+function addTxt(){
+	smt.insertAdjacentHTML('beforeend', "astro");
+}
+
+function testAddLayer(){
+	smt.addLayer("../etcLayers/marineTraffic.svg");
+}
+
+function testAddLayerByDomEdit(){
+	smt.insertAdjacentHTML('beforeend', '<layer src="../etcLayers/marineTraffic.svg">Hello</layer>');
+}
+
+function addPOI(){
+	poiLayer.insertAdjacentHTML('beforeend', "\nIさん,ID8,38,135,ooo,おおお");
+}
+
+function replacePOI(){
+	poiLayer.innerHTML=`
+名前,ID,緯度,経度,くだもの２,お菓子２
+Jちゃん,ID1,35,135,apple2,まかろん２
+Kさん,ID2,34,136,orange2,ショートケーキ２
+Lくん,ID3,33,137,banana2,ばばろあ２
+`;
+}
+
+function addSVGlayer(){
+	var svgContent=`
+	<svg id="svgTag">
+	<circle id="cr1" transform="ref(svg,135,-35)" cx="0" cy="0" r="10" fill="red" />
+	<circle id="cr2" transform="ref(svg,138,-35)" cx="0" cy="0" r="10" fill="red" />
+	<circle id="cr3" transform="ref(svg,135,-34)" cx="0" cy="0" r="10" fill="red" />
+	<circle id="cr4" transform="ref(svg,138,-34)" cx="0" cy="0" r="10" fill="red" />
+	</svg>
+`
+	smt.insertAdjacentHTML('beforeend', '<layer id="planeSVG" src="tests/planeSVG.svg">'+svgContent+'</layer>');
+}
+
+
+function replaceSVG(){
+	var planeSVG = document.getElementById("planeSVG");
+	if (planeSVG){
+		planeSVG.innerHTML=`
+	<svg id="svgTag">
+	<circle id="crr1" transform="ref(svg,137,-42)" cx="0" cy="0" r="10" fill="orange" />
+	<circle id="crr2" transform="ref(svg,138,-38)" cx="0" cy="0" r="10" fill="lime" />
+	<circle id="crr3" transform="ref(svg,137,-35)" cx="0" cy="0" r="10" fill="yellow" />
+	<circle id="crr4" transform="ref(svg,138,-34)" cx="0" cy="0" r="10" fill="cyan" />
+	</svg>
+`;
+	} else {
+		alert("planeSVGレイヤーは登録されていません");
+	}
+}
+
+
+function appenfSVGFig(){
+	svgTag.insertAdjacentHTML('beforeend', '<circle id="cr5" transform="ref(svg,138,-33)" cx="0" cy="0" r="20" fill="purple" />');
+}
+
+function changeSvgMapAppPage(){
+	svgMapTag2.setAttribute("svgMapAppPage","../SVGMapper_r16.html");
+}
+
+function sendJsonMessage(){
+	svgMapTag2.setAttribute("customjson",'{"name":"bob","nation":"Portugal"}');
+}
+
+onload=function(){
+	smt = document.getElementById("svgMapTag");
+}
+
+function getPoiLayersUIwindow(){
+	var svgMapElem = document.getElementById("svgMapTag");
+	var poiLayerElem = document.getElementById("poiLayer");
+	var svgMapJsObj = svgMapElem.svgMapObject;
+	var poiLayerId = poiLayerElem.layerId;
+	var poiLayerProps = svgMapJsObj.getSvgImagesProps()[poiLayerId];
+	
+	var poiLayerSvgMapDocument = svgMapJsObj.getSvgImages()[poiLayerId];
+	var poiLayerUIwindow = poiLayerProps.controllerWindow;
+	console.log("poiLayerProps:",poiLayerProps,"  poiLayerSvgMapDocument:",poiLayerSvgMapDocument,"  poiLayerUIwindow:",poiLayerUIwindow);
+}
+</script>
+
+<body>
+
+<h1>testframe</h1>
+<table>
+<tr><th>1</th><th>2</th><th width="400">3</th></tr>
+<tr><td>
+<ol>
+<li>	<input type="button" value="changeView" onclick="changeView()" />
+<li>	<input type="button" value="changeView by DOM" onclick="changeViewByDOM()" />
+<!--<li>	<input type="button" value="elm" onclick="addElem()" />
+<li>	<input type="button" value="txt" onclick="addTxt()" />-->
+<li>	<input type="button" value="addLayer" onclick="testAddLayer()" />
+<li>	<input type="button" value="addLayer_byDOM" onclick="testAddLayerByDomEdit()" />
+<li>	<input type="button" value="addPOI_byDOM" onclick="addPOI()" />
+<li>	<input type="button" value="replacePOI_byDOM" onclick="replacePOI()" />
+<li>	<input type="button" value="setInlineSVG_byDOM" onclick="addSVGlayer()" />
+<li>	<input type="button" value="replaceInlineSVG_byDOM" onclick="replaceSVG()" />
+</ol>
+</td><td>
+
+<svg-map svgMapAppPage="SVGMapper_r16_layerUICustom.html" id="svgMapTag" latitude="37" longitude="135" zoom="4" layerui="#layerUIarea">
+<layer title="poiLayer" id="poiLayer">
+名前,ID,緯度,経度,くだもの,お菓子
+Aちゃん,ID1,35,134,apple,まかろん
+Bさん,ID2,34,134,orange,ショートケーキ
+Cくん,ID3,33,134,banana,ばばろあ
+Dさん,ID4,32,134,peach,しゅーくりーむ
+Eさん,ID5,35,135,grape,どらやき
+Fさん,ID5,34,135,maron,せんべい
+Gさん,ID6,33,135,watermeron,ずんだもち
+Hさん,ID7,32,135,remon,ういろう
+</layer>
+<!--<layer src="../etcLayers/marineTraffic.svg">Hello</layer>-->
+<!--
+<layer title="prefLayer" colorMap="direct">
+key,color
+兵庫,red
+大阪,blue
+</layer>
+<layer title="prefLayer" colormap="hue">
+兵庫,10
+大阪,20
+奈良,30
+愛知,50
+静岡,5
+</layer>
+-->
+<layer id="prefLayer" title="prefLayer" colormap="1">
+兵庫,10
+大阪,20
+奈良,30
+愛知,50
+静岡,5
+</layer>
+</svg-map>
+
+
+</td><td >こんにちは<div id="layerUIarea"></div></td></tr>
+<tr><td>
+一枚の画面に2つの地図を入れる
+<ol>
+<li><input type="button" value="changeSvgMapAppPage" onclick="changeSvgMapAppPage()" />
+<li><input type="button" value="send json message to svgMapIframe" onclick="sendJsonMessage()" />
+</td><td>
+<svg-map id="svgMapTag2" svgMapAppPage="SVGMapper_r16N.html" latitude="32" longitude="136" zoom="3" width="600" height="300" customJson='{ "name": "Tanaka", "age": 26 }'>
+</td><td></td></tr>
+</table>
+
+<!--
+<div style="width:500px;height:500px;background-color:yellow" id="layerUIarea">aaa</div>
+-->
+
+</body>
+</html>

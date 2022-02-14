@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>PlaneSVG LAYERテスト</title>
+</head>
+<script>
+var rootMessage={ // svgMapFrameを使っている。rootMessageにはルートのhtmlから送られてくる情報が入る
+	update(){
+		console.log("updated PlaneSVGLayer", this);
+		setTimeout(checkUpdate,30);
+	}
+}
+
+onload=function(){
+	console.log("Hello this is planeSVG.svg  this:", this);
+}
+
+var currentXmlContent;
+function checkUpdate(){
+	if ( currentXmlContent != rootMessage.xmlContent ){
+		currentXmlContent = rootMessage.xmlContent;
+		var xmlDOM = new DOMParser().parseFromString(currentXmlContent,"application/xml");
+		if (xmlDOM.getElementsByTagName("globalCoordinateSystem").length == 0 ){
+			console.log("globalCoordinateSystem どうしようかな・・・TBD");
+		}
+		removeChildren(svgImage.documentElement,"globalCoordinateSystem");
+		
+		if (xmlDOM.documentElement.childElementCount>0){
+			for ( var i = 0 ; i < xmlDOM.documentElement.childNodes.length ; i++ ){
+				if ( xmlDOM.documentElement.childNodes[i].nodeType==1 ){
+					svgImage.documentElement.appendChild(xmlDOM.documentElement.childNodes[i]);
+				}
+			}
+		}
+	}
+	svgMap.refreshScreen();
+}
+
+function removeChildren(element,excnodename){
+	var lastChildIndex= svgImage.documentElement.childNodes.length-1;
+	console.log("removeChildren:",lastChildIndex,excnodename);
+	for ( var i = lastChildIndex ; i >= 0 ; i-- ){
+		console.log(svgImage.documentElement.childNodes[i].nodeType,svgImage.documentElement.childNodes[i].nodeName);
+		if ( svgImage.documentElement.childNodes[i].nodeType==1 && svgImage.documentElement.childNodes[i].nodeName==excnodename){
+			console.log("skip");
+		} else {
+			console.log("remove");
+			element.removeChild(svgImage.documentElement.childNodes[i]);
+		}
+	}
+	/**
+	while (element.firstChild) {
+		element.removeChild(element.firstChild);
+	}
+	**/
+}
+
+</script>
+<body>
+
+<h3>ext poi test</h3>
+
+</body>
+</html>

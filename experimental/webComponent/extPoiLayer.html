@@ -1,0 +1,137 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>EXTPOILAYERテスト</title>
+</head>
+<script>
+var _textContent_int;
+var rootMessage={ // svgMapFrameを使っている。rootMessageにはルートのhtmlから送られてくる情報が入る
+	update(){
+		console.log("updated extPoiLayer", this);
+		checkUpdate();
+	},
+	
+	set textContent(tc){ // こういう感じで仕込めば変数更新がセンスできるのでupdate()は不要だね
+		_textContent_int = tc;
+		// console.log("textContet set:",_textContent_int);
+	},
+	get textContent(){
+		return ( _textContent_int );
+	}
+	
+}
+
+var textContent;
+var that;
+onload=function(){
+	console.log("Hello this is extPoiLayer.svg  this:", this);
+	document.addEventListener("zoomPanMap",zpmFunc);
+}
+
+function zpmFunc(){
+	console.log("zpmFunc: catch zoomPanMap event");
+}
+
+var currentContent="";
+function checkUpdate(){
+	if ( !document ){
+		console.log("NO svgImage");
+		return;
+	}
+//	console.log(rootMessage.textContent);
+	if (currentContent != rootMessage.textContent){
+		currentContent = rootMessage.textContent
+		drawData();
+	}
+}
+
+var currentData =[];
+var schema=[];
+var latCol, lngCol;
+function drawData(){
+	latCol = -1;
+	lngCol = -1;
+	schema =[];
+	currentData =[];
+	console.log("currentContent:",currentContent);
+	if ( !currentContent ){
+		return;
+	}
+	var lines = currentContent.split("\n");
+	var ii = 0;
+	for ( var i = 0 ; i < lines.length ; i++ ){
+		var line = lines[i].trim();
+		if ( line ==""){
+			continue;
+		}
+		var cols = line.split(",");
+		var rd = [];
+		for ( var j = 0 ; j < cols.length ; j++ ){
+			var col = cols[j].trim();
+			if ( ii == 0 ){
+				if ( col == "latitude" || col == "lat" || col =="緯度" ){
+					latCol = j;
+				} else if ( col == "longitude" || col == "lng" || col == "lon" || col =="経度" ){
+					lngCol = j;
+				}
+				schema.push(col);
+			} else {
+				rd.push(col);
+			}
+		}
+		currentData.push(rd);
+		++ii;
+	}
+	console.log("schema:",schema);
+	console.log("data:",currentData);
+	console.log("latCol,lngCol:",latCol,lngCol);
+	if ( latCol >=0 && lngCol >=0 && currentData.length >0){
+		drawDataPh2();
+	} else {
+		console.log("Illigal data...");
+	}
+}
+
+function drawDataPh2(){
+	schemaStr = getCsv(schema);
+	svgImage.documentElement.setAttribute("property",schemaStr);
+	var gr = svgImage.getElementById("pois");
+	removeChildren(gr);
+	for ( var i = 0 ; i < currentData.length ; i++ ){
+		var poi = svgImage.createElement("use");
+		poi.setAttribute("x",0);
+		poi.setAttribute("y",0);
+		poi.setAttribute("xlink:href","#syl1");
+		var lat = currentData[i][latCol];
+		var lng = currentData[i][lngCol];
+		poi.setAttribute("transform","ref(svg,"+lng+","+(-lat)+")");
+		poi.setAttribute("xlink:title",currentData[i][0]);
+		meta = getCsv(currentData[i]);
+		gr.appendChild(poi);
+		poi.setAttribute("content",meta); // エスケープしろ～
+	}
+	svgMap.refreshScreen();
+}
+
+function getCsv(dataList){
+	var meta ="";
+	for ( var j = 0 ; j < dataList.length ; j++ ){
+		if ( j != latCol && j != lngCol ){
+			meta += dataList[j] + ",";
+		}
+	}
+	meta = meta.substring(0,meta.length-1);
+	return ( meta );
+}
+
+function removeChildren(element){
+	while (element.firstChild) element.removeChild(element.firstChild);
+}
+</script>
+<body>
+
+<h3>ext poi test</h3>
+
+</body>
+</html>

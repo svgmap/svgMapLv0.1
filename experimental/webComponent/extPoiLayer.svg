@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg  xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"  XXX_data-controller="extPoiLayer.html#exec=hiddenOnLayerLoad"><!-- controllerはちょっと試しにルートコンテナの方で設置してみる-->
+
+
+<globalCoordinateSystem srsName="http://purl.org/crs/84" transform="matrix(1,0,0,-1,0,0)" />
+ <defs>
+  <g id="syl1" > 
+   <image xlink:href="mappin1.png" preserveAspectRatio="none" x="-8" y="-25" width="19" height="27"/>
+  </g>
+ </defs>
+ 
+<!-- <use transform="ref(svg,135.15,-35.15)" x="0" y="0" xlink:href="#syl1" content="HND/RJTT,拠　点（国）,35.5507211,139.7832156,東京国際空港,東京都大田区,(A)3000×60(16R/34L)" xlink:title="東京国際空港"/>-->
+ 
+<!-- <circle cx="0" cy="0" r="20" fill="red" transform="ref(svg,135.05,-35.05)"/>-->
+<g id="pois"></g>
+</svg>

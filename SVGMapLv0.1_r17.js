@@ -6,7 +6,7 @@
 //  
 // Programmed by Satoru Takagi
 //  
-// Copyright (C) 2012-2019 by Satoru Takagi @ KDDI CORPORATION
+// Copyright (C) 2012-2021 by Satoru Takagi @ KDDI CORPORATION
 //  
 // Contributors:
 //  jakkyfc
@@ -174,8 +174,16 @@
 // 2021/01/26 : Rev16本流に載せる　効率化＆いくつか検証もできたため ～　16.xはこれにて終了　16とする
 // 2021/04/02 : Rev17 cookie->localStorage, now loading の抑制, root documentをlocalStorageの設定をベースにした編集後のものを投入可能に　など, レイヤ構成編集用のツールを別フレームワークで用意(こちらはレイヤ編集用ページ別建てか？)
 // 2021/06/14 : getLoadErrorStatistics() timeout等のロードエラーの統計
+// 2021/08/10 : image要素 data-mercator-tile="true"サポート
+// 2021/09/06 : image要素 style:filterサポート (なお、このスタイルの継承はしない・・)
+// 2021/09/16 : ラスターGISを高速化するときなどに使う、ベクタデータの描画をスキップする機構(captureGISgeometriesOption(,, SkipVectorRenderingFlg ))
+// 2021/10/29 : Angularや他FWのCSSが与えるimg要素のwidth,maxWidth等のstyleをオーバーライドし表示崩れを防止
+// 2021/11/04 : ビットイメージの任意図法対応機能() imageTransformを改良：transformがあるimage要素に対応
 //
 // Issues:
+// 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
+// 2021/10/13 FIXED setRootLayersPropsを単体で呼んだだけだと、LayerUIが起動/終了しない。(updateLayerListUI～updateLayerListUIint～updateLayerTable必要)これは本質的にまずい。
+// 2021/09/13 captureGISgeo. "ロードできてないイメージは外す"(これで検索して出る場所)のロジックが雑、動的レイヤー取りこぼす可能性がある。読み込み完了(zoomPanMap ev)時点で確認する形が好ましいと思う。
 // 2020/09/11 ビットイメージとベクターの混合レイヤーで、上下関係がDOM編集によっておかしくなることがある～digitalTyphoonレイヤーに風向を追加したとき、風速イメージのimage要素を消去して再追加する処理をすると（モデルを変えるときにそういう処理が入る）、最初は下にイメージが表示されるが、差異追加後上に来てしまう。　この辺昔imageはなるべく上にくるようにした記憶もあるので、いろいろ怪しい感じがする。
 // 2018/09/07 .scriptが　そのレイヤーが消えても残ったまま　setintervalとかしていると動き続けるなど、メモリリークしていると思う　やはりevalはもうやめた方が良いと思う・・
 // 2018/6/21 SvgImagesProps　もしくは　rootLayersProps?にそのレイヤのデータの特性(POI,Coverage,Line etc)があると便利かも
@@ -776,6 +784,8 @@ function tempolaryZoomPanImages( zoomFactor , sftX , sftY ){
 			
 			mapImgs.item(i).width = xd.span;
 			mapImgs.item(i).height = yd.span;
+			mapImgs.item(i).style.width = xd.span+"px";
+			mapImgs.item(i).style.height = yd.span+"px";
 			
 		}
 	}
@@ -1038,6 +1048,13 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			}
 		}
 		
+		if ( svgImages[docId].getElementsByTagName("svg").length<1){
+			// エラー文書・・ added 2021/08/04
+			console.warn("DOCUMENT ERROR.. skip");
+			delete ( svgImages[docId] );
+			handleErrorResult(docId , docPath, httpRes);
+			return;
+		}
 		svgImages[docId].getElementById = getElementByIdUsingQuerySelector; // added 2017.2.3
 //		console.log( svgImages[docId].getElementById );
 		
@@ -1139,7 +1156,12 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 	if ( docId == "root" ){
 		usedImages=[];
 		setCentralVectorObjectsGetter(); // 2018.1.18 checkTicker()の二重パースの非効率を抑制する処理を投入
-		
+		if ( !setRootLayersPropsPostprocessed ){ // 2021/10/14 updateLayerListUIint()必須し忘れ対策
+			if ( typeof updateLayerListUIint == "function" ){
+				updateLayerListUIint();
+			}
+			setRootLayersPropsPostprocessed = true;
+		}
 //		console.log("called root dynamicLoad");
 		
 		if ( summarizeCanvas ){
@@ -1177,7 +1199,7 @@ function dynamicLoad( docId , parentElem ){ // アップデートループのル
 		
 		if ( typeof setLayerUI == "function" ){
 //			console.log("call setLayerUI");
-			setLayerUI(); // add 2013/1 moved from  handleResult 2014/08
+			setLayerUI({updateLayerListUITiming:"setRootLayersProps"}); // add 2013/1 moved from  handleResult 2014/08
 			setLayerUI = null; // added 2016/10/13 最初にロードされた直後のみ呼び出すようにした（たぶんこれでＯＫ？）
 		}
 //		console.log("checkDeletedNodes", existNodes);
@@ -1602,7 +1624,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , isNoCache, {docId:docId,svgNode:svgNode} );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, {docId:docId,svgNode:svgNode} );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -1624,7 +1646,8 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 //							console.log( "opacity: isIE,verIE", isIE,verIE);
 //							console.log("set div opacity: ","Filter: Alpha(Opacity=" + ip.opacity * 100 + ");");
 							if ( !uaProp.MS){ // if ( !isIE)からチェンジ (Edge対策)
-								img.setAttribute("style" , "Filter: Alpha(Opacity=" + ip.opacity * 100 + ");opacity:" + ip.opacity + ";"); // IEではこれでは設定できない
+								img.style.opacity=ip.opacity;
+//								img.setAttribute("style" , "Filter: Alpha(Opacity=" + ip.opacity * 100 + ");opacity:" + ip.opacity + ";"); // IEではこれでは設定できない
 							} else {
 //								console.log("verIE:" + verIE);
 								if ( verIE > 8 ){
@@ -1661,30 +1684,35 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 //						console.log(svgImagesProps[imageId]);
 					}
 					
-//					console.log(beforeElem);
-					// 作成した要素を実際に追加する
-//					console.log("append elem",img);
-					if ( beforeElem ){
-//						console.log("insertAfter:" + beforeElem.id + " : id: " + imageId);
-						// SVGのデータ順序の通りにhtmlのimg要素を設置する処理
-						// 一つ前のもののあとに入れる
-						parentElem.insertBefore(img, beforeElem.nextSibling);
+					if ( childCategory == POI && GISgeometriesCaptureOptions.SkipVectorRendering ){
+						// POIもベクタとして描画しない
 					} else {
-//						console.log("AppendTop:"+imageId + " TO " + parentElem);
-						if ( parentElem.hasChildNodes()){
-							// 子要素がある場合は最初のspan要素の直前に挿入する？
-							var childSpans = parentElem.getElementsByTagName("div");
-							if ( childSpans ){
-								parentElem.insertBefore( img , childSpans.item(0) );
-							} else {
-								parentElem.insertBefore(img , parentElem.lastChild);
-							}
-//							parentElem.insertBefore(img , parentElem.lastChild); // これではバグ
+						
+	//					console.log(beforeElem);
+						// 作成した要素を実際に追加する
+	//					console.log("append elem",img);
+						if ( beforeElem ){
+	//						console.log("insertAfter:" + beforeElem.id + " : id: " + imageId);
+							// SVGのデータ順序の通りにhtmlのimg要素を設置する処理
+							// 一つ前のもののあとに入れる
+							parentElem.insertBefore(img, beforeElem.nextSibling);
 						} else {
-							parentElem.appendChild(img);
+	//						console.log("AppendTop:"+imageId + " TO " + parentElem);
+							if ( parentElem.hasChildNodes()){
+								// 子要素がある場合は最初のspan要素の直前に挿入する？
+								var childSpans = parentElem.getElementsByTagName("div");
+								if ( childSpans ){
+									parentElem.insertBefore( img , childSpans.item(0) );
+								} else {
+									parentElem.insertBefore(img , parentElem.lastChild);
+								}
+	//							parentElem.insertBefore(img , parentElem.lastChild); // これではバグ
+							} else {
+								parentElem.appendChild(img);
+							}
 						}
+						beforeElem = img;
 					}
-					
 					if ( childCategory != POI && childCategory != BITIMAGE && childCategory != TEXT ){ // animation|iframe要素の場合、子svg文書を読み込む( htmlへの親要素埋め込み後に移動した 2014.6.5)
 //						console.log("call loadSVG:",imageId, ip.href);
 						var childSVGPath = getImageURL(ip.href , docDir ); // 2016.10.14 関数化＆統合化
@@ -1699,8 +1727,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 						}
 						img.width = xd.span;
 						img.height = yd.span;
+						img.style.width = xd.span+"px";
+						img.style.height = yd.span+"px";
 					}
-					beforeElem = img;
 	//			console.log("load:"+ip.href);
 				} else { // ロードされているとき
 					
@@ -1892,7 +1921,13 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 //			console.log(cStyle);
 //			console.log( "vect: fill:" , cStyle["fill"] , " stroke:" , cStyle["stroke"] , svgNode);
 
-			var canContext = inCanvas.getContext('2d'); // canvas2dコンテキスト取得
+			var canContext;
+			if ( GISgeometriesCaptureOptions.SkipVectorRendering ){ // 2021.9.16
+				canContext = GISgeometriesCaptureOptions.dummy2DContext
+				//canContext = dummy2DContextBuilder(); // ベクタ描画をスキップするためのダミーの2d context
+			} else {
+				canContext = inCanvas.getContext('2d'); // canvas2dコンテキスト取得
+			}
 			
 			// 必要に応じてスタイルを設定する(ここまでやらなくても性能出るかも？)
 			if ( cStyle.hasUpdate ){ // 親のスタイルを継承しているだけでない
@@ -2357,6 +2392,7 @@ function mercator(){
 			}
 		},
 		scale: (1/360),
+		mercator:true // 2021/8/10 メルカトルタイルのための特殊処理を起動するキーパラメータ
 	}
 }
 
@@ -2387,7 +2423,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , nocache , svgimageInfo){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , svgimageInfo){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2413,7 +2449,7 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 			// img.crossOrigin="anonymous";
 			crossOriginFlag = true;
 		}
-	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			// img.crossOrigin="anonymous";
@@ -2426,13 +2462,21 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
 //		console.log("set opacity: ","Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
-		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+//		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";"); // 2021/11/15
+//		img.style.filter="Alpha(Opacity=" + opacity * 100 + ")";
+		img.style.opacity=opacity;
+	}
+	if ( imageFilter){
+//		console.log("imageFilter:",imageFilter);
+		img.style.filter+=imageFilter;
 	}
 	img.style.left = x + "px";
 	img.style.top = y + "px";
 	img.style.display = "none"; // for Safari
 	img.style.position = "absolute";
-	img.style.maxWidth = "initial";
+	img.style.maxWidth = "initial"; // patch for Angular default CSS 2021/6
+	img.style.height = height+"px"; // patch for other CSS fw 2021/10/28
+	img.style.width = width+"px";
 	img.width = width;
 	img.height = height;
 	img.id = id;
@@ -2477,11 +2521,15 @@ function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, 
 		img.src = href;
 		if (crossOriginFlag){ // crossOrigin属性はsrc書き換えと同タイミングとする。2021.6.9 crossOrigin特性だけ変更するケースはない(Imageのproxy設定と一体)という想定でいる・・
 			img.crossOrigin="anonymous";
+		} else {
+			img.crossOrigin=null; // 2021/09/16 debug
 		}
 	} else { // for IE  to be obsoluted..
 		img.attachEvent('onload', handleLoadSuccess);
 		if (crossOriginFlag){ // これは意味あるのか？
 			img.crossOrigin="anonymous";
+		} else {
+			img.crossOrigin=null; // 2021/09/16 debug
 		}
 		if ( forceSrcIE ){
 			img.src = href;
@@ -2499,7 +2547,8 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	var img = document.createElement("span"); // spanで良い？ divだと挙動がおかしくなるので・・
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
-		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+//		img.setAttribute("style" , "Filter: Alpha(Opacity=" + opacity * 100 + ");opacity:" + opacity + ";");
+		img.style.opacity=opacity;
 	}
 	if ( style.fill ){
 		img.style.color=style.fill;
@@ -2566,6 +2615,8 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 	if ( !txtFlg ){
 		img.width = width;
 		img.height = height;
+		img.style.width = width+"px";
+		img.style.height = height+"px";
 	}
 	var crossOriginFlag=false;
 	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
@@ -2574,7 +2625,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 			crossOriginFlag=true;
 			//img.crossOrigin="anonymous"; // これを無造作に設定すると強制ロードされロード完了検知できない問題が起きたため 2021.6.9
 		}
-	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && (svgImagesProps[svgimageInfo.docId].CRS.transform || rootCrs.transform)){
+	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			crossOriginFlag=true;
@@ -2633,7 +2684,7 @@ function hideAllTileImgs(){ // 2014.6.10 setGeoCenter,setGeoViewPortのちらつ
 	}
 }
 
-function setImgAttr( img , x, y, width, height, href ){
+function setImgAttr( img , x, y, width, height, href ){ // 使われていない関数・・
 	if ( x ){
 		img.style.left = x + "px";
 	}
@@ -2642,9 +2693,11 @@ function setImgAttr( img , x, y, width, height, href ){
 	}
 	if ( width ){
 		img.width = width;
+		img.style.width = width+"px";
 	}
 	if ( height ){
 		img.height = height;
+		img.style.height = height+"px";
 	}
 	if ( href ){
 		img.href = href;
@@ -2705,6 +2758,11 @@ function getCrs( svgDoc ,docId){
 				if ( tf ){
 					//		console.log("getcrs: svgDoc:",svgDoc);
 					if (tf.indexOf("matrix")>=0){
+						genericCRS = parseTransformMatrix( tf );
+						if ( genericCRS ){
+							genericCRS.isSVG2 = isSVG2;
+						}
+						/**
 						crs = gcsElem.getAttribute("transform").replace("matrix(","").replace(")","").split(",");
 						if ( crs.length == 6){
 							genericCRS ={
@@ -2717,6 +2775,7 @@ function getCrs( svgDoc ,docId){
 								isSVG2 : isSVG2
 							}
 						}
+						**/
 					} else if ( tf.toLowerCase()=="mercator"){ // 2020/3/24 add mercator support
 						console.log("isMercator");
 						genericCRS =  mercator();
@@ -3304,6 +3363,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	cdx = 0;
 	cdy = 0;
 	var pixelated = false;
+	var imageFilter = null;
 	if ( !subCategory && category == POI){ // subCategory無しで呼び出しているものに対するバックワードコンパチビリティ・・・ 2018.3.2
 //		console.log("called no subCategory  imgE:",imgE);
 		subCategory = USEDPOI;
@@ -3359,6 +3419,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 			} else {
 				x = Number(imgE.getAttribute("x"));
 				y = Number(imgE.getAttribute("y"));
+				/**
 				if( imgE.getAttribute("transform")){ // add 2014.6.18
 					var trv = imgE.getAttribute("transform").replace("matrix(","").replace(")","").split(",");
 					transform = {
@@ -3370,8 +3431,8 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 						f : Number(trv[5])
 					}
 				}
-				
-				
+				**/
+				transform = parseTransformMatrix( imgE.getAttribute("transform") );
 			}
 			width = Number(imgE.getAttribute("width")); // nonScalingではwidth,heightの値はisIntersectでは0とみなして計算するようにします
 			height = Number(imgE.getAttribute("height"));
@@ -3418,6 +3479,20 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		if ( category == BITIMAGE  && ( (imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("image-rendering:pixelated")>=0) || (parentProps && parentProps["image-rendering"]  && parentProps["image-rendering"]  == "pixelated") ) ){
 //			console.log("pixelated");
 			pixelated = true;
+		}
+		
+		if ( category == BITIMAGE ){
+			if ( imgE.getAttribute("style") && imgE.getAttribute("style").indexOf("filter")>=0  ){ // bitimageのfilterは継承させてない
+//			console.log("filter");
+				var fls = imgE.getAttribute("style")+";";
+				fls = fls.substring(fls.indexOf("filter:"));
+				fls = fls.substring(7,fls.indexOf(";"));
+				imageFilter = fls;
+			/** これと styleCatalog[]を編集すれば多分継承するけれど　やめておく
+			} else if ( parentProps && parentProps["filter"] ){
+				imageFilter = parentProps["filter"];
+			**/
+			}
 		}
 		
 	} else if ( subCategory == USEDPOI ){ // USEDによるPOI
@@ -3531,8 +3606,27 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		cdy : cdy ,
 		nonScaling : nonScaling , 
 		href_fragment : href_fragment,
-		pixelated : pixelated
+		pixelated : pixelated,
+		imageFilter : imageFilter,
 	}
+}
+
+function parseTransformMatrix(transformAttr){
+	var matrix=null;
+	if ( transformAttr ){
+		var tmat = transformAttr.replace("matrix(","").replace(")","").split(",");
+		if ( tmat.length == 6){
+			matrix ={
+				a : Number(tmat[0]) ,
+				b : Number(tmat[1]) ,
+				c : Number(tmat[2]) ,
+				d : Number(tmat[3]) ,
+				e : Number(tmat[4]) ,
+				f : Number(tmat[5]) ,
+			}
+		}
+	}
+	return ( matrix );
 }
 
 
@@ -4664,7 +4758,9 @@ function getRootLayersProps(){
 // レイヤー番号(root svg container内での順番)、レイヤーID(svg文書のiid = htmlのid = selectのvalue)、タイトル名(不確実-同じ名前があるかもしれない。最初に当たったものを選択)
 // 変化があるとtrueが返却される。ない・もしくは不合理の場合はfalseが返却される
 // この時classで設定されているレイヤーグループの特性(switch)に基づいた制御がかかる
+var setRootLayersPropsPostprocessed=false; // add 2021/10/14 updateLayerListUIint();必須し忘れ問題への対策フラグ
 function setRootLayersProps(layerID_Numb_Title, visible , editing , hashOption , removeLayer){
+	setRootLayersPropsPostprocessed=false; 
 	var layer = getLayer(layerID_Numb_Title);
 	if ( ! layer ){
 		return ( false );
@@ -4770,9 +4866,11 @@ function setRootLayersProps(layerID_Numb_Title, visible , editing , hashOption ,
 // setRootLayersPropsの簡単版　ただし、layerListUIのアップデートも行ってくれる
 function setLayerVisibility( layerID_Numb_Title, visible ){
 	setRootLayersProps(layerID_Numb_Title, visible , false );
+	/** refreshScreen側で実行するように改修 2021/10/14
 	if ( typeof updateLayerListUIint == "function" ){
 		updateLayerListUIint();
 	}
+	**/
 	refreshScreen();
 }
 
@@ -5036,6 +5134,8 @@ function setImgViewport(target, href_fragment){
 	target.style.top  = clipY +"px";
 	target.width  = clipWidth;
 	target.height = clipHeight;
+	target.style.width  = clipWidth+"px";
+	target.style.height = clipHeight+"px";
 	target.style.clip = "rect(" + Number(imgBox[1])*iScaleY + "px," + (Number(imgBox[0]) + Number(imgBox[2]))*iScaleX + "px," + (Number(imgBox[1]) + Number(imgBox[3]))*iScaleY + "px," + Number(imgBox[0])*iScaleX + "px)";
 	
 }
@@ -5082,7 +5182,7 @@ function imageTransform(imgElem, svgimageInfo){
 	}
 	**/
 	if ( !svgimageInfo ){
-		console.log("NO image Element...");
+		//console.log("NO image Element...");
 		return;
 	}
 	var imageElem= svgimageInfo.svgNode;
@@ -5092,11 +5192,11 @@ function imageTransform(imgElem, svgimageInfo){
 	if ( tf && tf.indexOf("ref")==0 ){ // transform ref属性が付いている場合はスキップする(TBD)
 		return;
 	}
+	var tfm = parseTransformMatrix(tf);
+	
 	var crs = svgImagesProps[svgimageInfo.docId].CRS; // 長い過程を経て、直接取れるようにした・・
 //	var rootCrs = svgImagesProps["root"].CRS; // これはグローバルなので不要
-	if( !crs.transform && !rootCrs.transform ){
-		// 非線形変換関数がないのでピクセル変換は不要
-		// console.log("NO Non-Linear Transformation skip");
+	if ( needsNonLinearImageTransformation(crs,imageElem) == false ){ // 2021/08/10
 		return;
 	}
 	// console.log("imagesLayerId:",imagesLayerId,"  crs:",crs,"  imageElem:",imageElem);
@@ -5119,23 +5219,33 @@ function imageTransform(imgElem, svgimageInfo){
 	var srcData = sctx.getImageData(0,0,ciw,cih);
 	var dstData = sctx.createImageData(ciw,cih);
 	
-	// ソースsvgコンテンツにおけるソース画像の座標
+	// ソースのイメージローカルsvg座標系におけるソース画像の座標(transform前)
 	var csix = Number(imageElem.getAttribute("x"));
 	var csiy = Number(imageElem.getAttribute("y"));
 	var csiw = Number(imageElem.getAttribute("width"));
 	var csih = Number(imageElem.getAttribute("height"));
 	
-	var cs2ci = {// ソースSVG系->ソース画像系変換行列(ひとまずtransform属性は無視)
-		a: ciw / csiw,
-		b: 0,
-		c: 0,
-		d: cih / csih,
-		e: -csix * ciw / csiw,
-		f: -csiy * cih / csih
-	};
+	var ci2cs = { // ソース画像系->ソースSVG系変換行列
+		a:csiw/ciw,
+		b:0,
+		c:0,
+		d:csih/cih,
+		e:csix,
+		f:csiy
+	}
+	if ( tfm ){
+		// x',y' = m2(m1(x,y)) : matMul( m1 , m2 )
+		ci2cs = matMul(ci2cs,tfm);
+	}
+	
+	var cs2ci = getInverseMatrix(ci2cs); // ソースSVG系->ソース画像系変換行列
+	
 	
 	var rs2cs = getConversionMatrixViaGCS(rootCrs,crs);// ルートSVG->ソース(個々のコンテンツ)SVG変換
 	var cs2rs = getConversionMatrixViaGCS(crs,rootCrs);// ソース(個々のコンテンツ)SVG->ルートSVG変換
+	
+	var cib = transformRect({x:0,y:0,width:ciw,height:cih},ci2cs); // ソースSVGにおける画像領域
+	
 	
 	/**
 	if ( !rs2cs.transform ){
@@ -5148,8 +5258,10 @@ function imageTransform(imgElem, svgimageInfo){
 		return;
 	}
 	
-	var rib=transformRect({x:csix,y:csiy,width:csiw,height:csih},cs2rs); //ルートSVG座標系における該当イメージの領域 "image bounds on root"
-	var cib=transformRect(rib,rs2cs); // 今のところ使ってない・・
+	var rib=transformRect(cib,cs2rs); // ルートSVG座標系における該当イメージの領域
+	
+	//var rib=transformRect({x:csix,y:csiy,width:csiw,height:csih},cs2rs); //ルートSVG座標系における該当イメージの領域 "image bounds on root"
+	// var cib=transformRect(rib,rs2cs); // 今のところ使ってない・・
 	// console.log("ImageBounds: cont:",{x:csix,y:csiy,width:csiw,height:csih},"  root:",rib, "  reConvConte:",cib);
 	
 	
@@ -5215,6 +5327,19 @@ function imageTransform(imgElem, svgimageInfo){
 	//console.log("imgElem:",imgElem,"  iuri:",iuri);
 	imgElem.setAttribute("data-preTransformedHref",imgElem.getAttribute("src"));
 	imgElem.setAttribute("src",iuri);
+}
+
+function needsNonLinearImageTransformation(crs,imageElem){
+	// その画像が非線形変換が必要なものかどうかを判別する 2021/08/10関数化
+	if( !crs.transform && !rootCrs.transform ){
+		return ( false );
+	} else {
+		if ( imageElem.getAttribute("data-mercator-tile") =="true" && !crs.transform && rootCrs.mercator ){
+			// ビットイメージの各image要素にdata-mercatorTileがtrueで設定され、しかもrootのCRSにmercator属性があったら不要とする特殊処理 2021/08/10
+			return ( false );
+		}
+		return ( true );
+	}
 }
 
 function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,403)した画像(bitImage)を強制的に読み込み完了とみなしてしまう処理
@@ -5701,7 +5826,7 @@ function POIviewSelection(poi){
 function getPropsOfPoi( poiId ){
 	var screenPOIimg = document.getElementById(poiId);
 	var layerName;
-	if ( screenPOIimg.parentNode.getAttribute("class") ){ //  2015.11.14 debug rootのPOIでは所属レイヤーなし
+	if ( screenPOIimg && screenPOIimg.parentNode && screenPOIimg.parentNode.getAttribute("class") ){ //  2015.11.14 debug rootのPOIでは所属レイヤーなし
 		var layerId = (screenPOIimg.parentNode.getAttribute("class")).substring(10);
 		var layer = getLayer(layerId); // htmlのdiv(レイヤ相当)のclassには、ルートのレイヤーIDが10文字目から入っている 2014.12.15
 		layerName = getLayerName( layer );
@@ -5949,7 +6074,7 @@ function setSVGrectPoints( pathNode ,  context , child2canvas , clickable , vect
 	var rw = Number(pathNode.getAttribute("width"));
 	var rh = Number(pathNode.getAttribute("height"));
 	
-	if ( GISgeometry && !TreatRectAsPolygonFlag ){
+	if ( GISgeometry && !GISgeometriesCaptureOptions.TreatRectAsPolygonFlag ){
 		GISgeometry.svgXY = [ (rx + rw / 2.0) , (ry + rh / 2.0) ];
 	}
 	
@@ -5995,6 +6120,21 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 //	if ( vectorEffectOffset ){
 //		console.log( "setSVGpathPoints:" , pathNode , vectorEffectOffset );
 //	}
+	
+	if ( GISgeometry ){
+		if ( vectorEffectOffset ){ // vectorEffectOffsetがあったら、それは全体で一個のPoint化
+			var svgP = [vectorEffectOffset.x,vectorEffectOffset.y];
+			GISgeometry.svgXY = svgP; // bug fix 2018.3.5
+//			var svgPs = [svgP];
+//			GISgeometry.svgXY.push( svgPs );
+			if ( GISgeometriesCaptureOptions.SkipVectorRendering ){
+				return({});
+			}
+		} else if ( !GISgeometry.svgXY ){
+			GISgeometry.svgXY = new Array();// PolygonもMultiLineStringもsvgXYに[[x,y],[x,y],[x,y]],[[x,y],[x,y],[x,y]]というのが入る ただし、vectorEffectOffsetがあったら、それは全体で一個のPoint化するので注意
+		}
+	}
+	
 	var canvasNonFillFlag = false;
 	if ( context.fillStyle=="rgba(0, 0, 0, 0)"){
 		canvasNonFillFlag = true;
@@ -6076,16 +6216,6 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 		return ( hp );
 	}
 	
-	if ( GISgeometry && !GISgeometry.svgXY ){
-		GISgeometry.svgXY = new Array();// PolygonもMultiLineStringもsvgXYに[[x,y],[x,y],[x,y]],[[x,y],[x,y],[x,y]]というのが入る ただし、vectorEffectOffsetがあったら、それは全体で一個のPoint化するので注意
-	}
-	
-	if ( GISgeometry && vectorEffectOffset ){ // vectorEffectOffsetがあったら、それは全体で一個のPoint化
-		var svgP = [vectorEffectOffset.x,vectorEffectOffset.y];
-		GISgeometry.svgXY = svgP; // bug fix 2018.3.5
-//		var svgPs = [svgP];
-//		GISgeometry.svgXY.push( svgPs );
-	}
 	
 //	console.log(d);
 	
@@ -6397,7 +6527,7 @@ function initGISgeometry( cat, subCat , svgNode ){
 		// nothing
 		break;
 	case BITIMAGE:
-		if ( BitImageGeometriesCaptureFlag ){
+		if ( GISgeometriesCaptureOptions.BitImageGeometriesCaptureFlag ){
 			GISgeometry = new Object();
 			GISgeometry.type = "Coverage"; 
 		}
@@ -6419,7 +6549,7 @@ function initGISgeometry( cat, subCat , svgNode ){
 			GISgeometry.type = "Polygon";
 			break;
 		case RECT:
-			if ( TreatRectAsPolygonFlag ){
+			if ( GISgeometriesCaptureOptions.TreatRectAsPolygonFlag ){
 				GISgeometry.type = "Polygon"; 
 			} else {
 				GISgeometry.type = "Point"; 
@@ -7503,32 +7633,37 @@ function contourMarker( layerDoc , layerProps , interval , clear){
 
 
 // setCookie(KVSへの設定 NS競合回避機能付き), getCookies（全データ読み出し）
+// 2021/7/12
 var localStorageSvgMapSuffix = "svgmap_";
 
 function setCookie( key, value , expire ){
 	// 2021/2/3 localStorageに変更し、更に機能を増強していく
 	// ひとまず　expire　は無視（無期限）とする
-	window.localStorage[localStorageSvgMapSuffix+key]=value;
+	var rootPath = (new URL(svgImagesProps["root"].Path,location.href)).pathname;
+	window.localStorage[localStorageSvgMapSuffix+rootPath+"#"+key]=value;
 }
 
 function getCookies(){
 	var result = {};
-	
+	var rootPath = (new URL(svgImagesProps["root"].Path,location.href)).pathname;
+	var lss=localStorageSvgMapSuffix+rootPath+"#";
 	for ( var i = 0 ; i < window.localStorage.length ; i++ ){
-		if ( (window.localStorage.key(i)).indexOf(localStorageSvgMapSuffix) == 0 ){
-			result[window.localStorage.key(i).substring(localStorageSvgMapSuffix.length)]=window.localStorage[window.localStorage.key(i)];
+		if ( (window.localStorage.key(i)).indexOf(lss) == 0 ){
+			result[window.localStorage.key(i).substring(lss.length)]=window.localStorage[window.localStorage.key(i)];
 		}
 	}
 	
 //	console.log("getCookies resume Result:",result);
-	
+		
 	return result;
 }
 
 function removeCookies(propName) {
 //	console.log("removeCookies:",propName)
+	var rootPath = (new URL(svgImagesProps["root"].Path,location.href)).pathname;
+	var lss=localStorageSvgMapSuffix+rootPath+"#";
 	for ( var i = window.localStorage.length-1  ; i >=0  ; i-- ){
-		if ( (window.localStorage.key(i)).indexOf(localStorageSvgMapSuffix) == 0 ){
+		if ( (window.localStorage.key(i)).indexOf(lss) == 0 ){
 			if ( propName ){
 				if ( (window.localStorage.key(i)).indexOf(propName)>0){
 					delete window.localStorage[window.localStorage.key(i)];
@@ -7538,6 +7673,65 @@ function removeCookies(propName) {
 			}
 		}
 	}
+}
+
+// CRC16を一応置いておきます
+// https://github.com/donvercety/node-crc16/
+function crc16(str){
+	const crctab16 = new Uint16Array([
+		0X0000, 0X1189, 0X2312, 0X329B, 0X4624, 0X57AD, 0X6536, 0X74BF,
+		0X8C48, 0X9DC1, 0XAF5A, 0XBED3, 0XCA6C, 0XDBE5, 0XE97E, 0XF8F7,
+		0X1081, 0X0108, 0X3393, 0X221A, 0X56A5, 0X472C, 0X75B7, 0X643E,
+		0X9CC9, 0X8D40, 0XBFDB, 0XAE52, 0XDAED, 0XCB64, 0XF9FF, 0XE876,
+		0X2102, 0X308B, 0X0210, 0X1399, 0X6726, 0X76AF, 0X4434, 0X55BD,
+		0XAD4A, 0XBCC3, 0X8E58, 0X9FD1, 0XEB6E, 0XFAE7, 0XC87C, 0XD9F5,
+		0X3183, 0X200A, 0X1291, 0X0318, 0X77A7, 0X662E, 0X54B5, 0X453C,
+		0XBDCB, 0XAC42, 0X9ED9, 0X8F50, 0XFBEF, 0XEA66, 0XD8FD, 0XC974,
+		0X4204, 0X538D, 0X6116, 0X709F, 0X0420, 0X15A9, 0X2732, 0X36BB,
+		0XCE4C, 0XDFC5, 0XED5E, 0XFCD7, 0X8868, 0X99E1, 0XAB7A, 0XBAF3,
+		0X5285, 0X430C, 0X7197, 0X601E, 0X14A1, 0X0528, 0X37B3, 0X263A,
+		0XDECD, 0XCF44, 0XFDDF, 0XEC56, 0X98E9, 0X8960, 0XBBFB, 0XAA72,
+		0X6306, 0X728F, 0X4014, 0X519D, 0X2522, 0X34AB, 0X0630, 0X17B9,
+		0XEF4E, 0XFEC7, 0XCC5C, 0XDDD5, 0XA96A, 0XB8E3, 0X8A78, 0X9BF1,
+		0X7387, 0X620E, 0X5095, 0X411C, 0X35A3, 0X242A, 0X16B1, 0X0738,
+		0XFFCF, 0XEE46, 0XDCDD, 0XCD54, 0XB9EB, 0XA862, 0X9AF9, 0X8B70,
+		0X8408, 0X9581, 0XA71A, 0XB693, 0XC22C, 0XD3A5, 0XE13E, 0XF0B7,
+		0X0840, 0X19C9, 0X2B52, 0X3ADB, 0X4E64, 0X5FED, 0X6D76, 0X7CFF,
+		0X9489, 0X8500, 0XB79B, 0XA612, 0XD2AD, 0XC324, 0XF1BF, 0XE036,
+		0X18C1, 0X0948, 0X3BD3, 0X2A5A, 0X5EE5, 0X4F6C, 0X7DF7, 0X6C7E,
+		0XA50A, 0XB483, 0X8618, 0X9791, 0XE32E, 0XF2A7, 0XC03C, 0XD1B5,
+		0X2942, 0X38CB, 0X0A50, 0X1BD9, 0X6F66, 0X7EEF, 0X4C74, 0X5DFD,
+		0XB58B, 0XA402, 0X9699, 0X8710, 0XF3AF, 0XE226, 0XD0BD, 0XC134,
+		0X39C3, 0X284A, 0X1AD1, 0X0B58, 0X7FE7, 0X6E6E, 0X5CF5, 0X4D7C,
+		0XC60C, 0XD785, 0XE51E, 0XF497, 0X8028, 0X91A1, 0XA33A, 0XB2B3,
+		0X4A44, 0X5BCD, 0X6956, 0X78DF, 0X0C60, 0X1DE9, 0X2F72, 0X3EFB,
+		0XD68D, 0XC704, 0XF59F, 0XE416, 0X90A9, 0X8120, 0XB3BB, 0XA232,
+		0X5AC5, 0X4B4C, 0X79D7, 0X685E, 0X1CE1, 0X0D68, 0X3FF3, 0X2E7A,
+		0XE70E, 0XF687, 0XC41C, 0XD595, 0XA12A, 0XB0A3, 0X8238, 0X93B1,
+		0X6B46, 0X7ACF, 0X4854, 0X59DD, 0X2D62, 0X3CEB, 0X0E70, 0X1FF9,
+		0XF78F, 0XE606, 0XD49D, 0XC514, 0XB1AB, 0XA022, 0X92B9, 0X8330,
+		0X7BC7, 0X6A4E, 0X58D5, 0X495C, 0X3DE3, 0X2C6A, 0X1EF1, 0X0F78,
+	]);
+
+	// calculate the 16-bit CRC of data with predetermined length.
+	function _crc16(data) {
+		var res = 0x0ffff;
+		for (let b of data) {
+			res = ((res >> 8) & 0x0ff) ^ crctab16[(res ^ b) & 0xff];
+		}
+		return (~res) & 0x0ffff;
+	}
+	return (_crc16(new TextEncoder().encode(str)))
+}
+
+// SHAも置いておきます。
+async function sha256(str) {
+	//https://scrapbox.io/nwtgck/SHA256のハッシュをJavaScriptのWeb標準のライブラリだけで計算する
+	if ( typeof(crypto)!="object"){console.error("crypto is not");return;}
+	const buff = new Uint8Array([].map.call(str, (c) => c.charCodeAt(0))).buffer;
+	const digest = await crypto.subtle.digest('SHA-256', buff);
+	// (from: https://stackoverflow.com/a/40031979)
+	return [].map.call(new Uint8Array(digest), x => ('00' + x.toString(16)).slice(-2)).join('');
 }
 
 
@@ -7570,10 +7764,14 @@ function checkResume(documentElement, symbols){
 		// 2021/2/4 レイヤーのカスタムOFF＆追加＆変更を設定できるsvgMapCustomLayersManagerの情報を導入する
 		// cook.customLayers の中のJSONデータからレイヤーの削除、追加などを実施する
 		if ( cook.customLayers && window.svgMapCustomLayersManager ){
-			var customLayers = JSON.parse(cook.customLayers);
-			svgMapCustomLayersManager.applyCustomLayers(customLayers);
-			parseSVG( documentElement , "root" , mapCanvas , false , symbols , null , null , true); // 2021/3/8 iidを設定する(上と同じ)
-			lp = getRootLayersProps();
+			try{
+				var customLayers = JSON.parse(cook.customLayers);
+				svgMapCustomLayersManager.applyCustomLayers(customLayers);
+				parseSVG( documentElement , "root" , mapCanvas , false , symbols , null , null , true); // 2021/3/8 iidを設定する(上と同じ)
+				lp = getRootLayersProps();
+			} catch ( e ){
+				console.error("svgMapCustomLayersManager.applyCustomLayers step error:",e);
+			}
 		}
 		if ( cook.customGeoViewboxes ){ // 2021/4/2 add customViewbox function
 			var customGeoViewboxes = JSON.parse(cook.customGeoViewboxes);
@@ -7874,11 +8072,21 @@ function getFragmentView( URLfragment ){
 var setLayerUI, updateLayerListUIint;
 
 var GISgeometriesCaptureFlag = false; // for GIS 2016.12.1
-var BitImageGeometriesCaptureFlag = false; // for GIS 2018.2.26
-var TreatRectAsPolygonFlag = false; // for GIS 2018.8.1
+var GISgeometriesCaptureOptions={ // for GIS 2021.9.16
+	BitImageGeometriesCaptureFlag : false,
+	TreatRectAsPolygonFlag : false,
+	SkipVectorRendering: false,  // 2021.9.16 描画しなくてもベクタはgeomが取得できるので高速化を図れる canvasレンダリングだけでなく、POIのimg生成もやめるようにしたい
+	dummy2DContext : dummy2DContextBuilder(),
+	
+}
+//var BitImageGeometriesCaptureFlag = false; // for GIS 2018.2.26
+//var TreatRectAsPolygonFlag = false; // for GIS 2018.8.1
 
 var GISgeometries;
-
+var cgstat;
+function printCGET(){
+	console.log("CGET:",new Date().getTime() - cgstat);
+}
 function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , prop6 , prop7 ){ // 非同期、callbackFuncいるだろうね
 //	console.log(cbFunc);
 	if ( GISgeometriesCaptureFlag ){ // 2019/12/24 排他制御
@@ -7886,6 +8094,7 @@ function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , 
 		cbFunc(false);
 		return ( false );
 	}
+	cgstat = new Date().getTime();
 	GISgeometriesCaptureFlag = true;
 	delete GISgeometries;
 	GISgeometries = new Object;
@@ -7893,8 +8102,11 @@ function captureGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , 
 	document.addEventListener("screenRefreshed",
 		function cgf(){
 			document.removeEventListener("screenRefreshed", cgf, false);
+			console.log("screenRefreshed start prepare Geom" );
+			printCGET();
 			prepareGISgeometries( cbFunc , prop1 , prop2 , prop3 , prop4 , prop5 , prop6 , prop7 );
 		} , false);
+	console.log("Start capture geom");
 	refreshScreen();
 }
 
@@ -8118,6 +8330,19 @@ function getTernarySimultaneousEquationsSolution(a11, a12, a13, a21, a22, a23, a
 	}
 }
 
+
+function dummy2DContextBuilder(){ 
+	// ダミーのCanvas2D contextを作る getterはなにも返ってこないが・・
+	// for SkipVectorRendering
+	var funcs = ["clearRect","fillRect","strokeRect","fillText","strokeText","measureText","getLineDash","setLineDash","createLinearGradient","createRadialGradient","createPattern","beginPath","closePath","moveTo","lineTo","bezierCurveTo","quadraticCurveTo","arc","arcTo","ellipse","rect","fill","stroke","drawFocusIfNeeded","scrollPathIntoView","clip","isPointInPath","isPointInStroke","rotate","scale","translate","transform","setTransform","resetTransform","drawImage","createImageData","getImageData","putImageData","save","restore","addHitRegion","removeHitRegion","clearHitRegions"];
+	var ret ={};
+	for ( var fn of funcs ){
+		ret[fn]=function(){};
+	}
+	return ret;
+}
+
+
 return { // svgMap. で公開する関数のリスト 2014.6.6
 	// まだ足りないかも？
 	// http://d.hatena.ne.jp/pbgreen/20120108/1326038899
@@ -8134,11 +8359,16 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 		return ( ans );
 	},
 	captureGISgeometries: captureGISgeometries,
-	captureGISgeometriesOption: function ( BitImageGeometriesCaptureFlg , TreatRectAsPolygonFlg ){ // 2018.2.26
+	captureGISgeometriesOption: function ( BitImageGeometriesCaptureFlg , TreatRectAsPolygonFlg , SkipVectorRenderingFlg ){ // 2018.2.26
 		// TBD : ロードできてないイメージは外すかどうか, onViewportのもののみにするかどうか のオプションもね
-		BitImageGeometriesCaptureFlag = BitImageGeometriesCaptureFlg; // ビットイメージをキャプチャするかどうか
-		if ( TreatRectAsPolygonFlg ){
-			TreatRectAsPolygonFlag = TreatRectAsPolygonFlg; // rect要素をPoint扱いにするかPolygon扱いにするか
+		if ( BitImageGeometriesCaptureFlg === true || BitImageGeometriesCaptureFlg === false){
+			GISgeometriesCaptureOptions.BitImageGeometriesCaptureFlag = BitImageGeometriesCaptureFlg; // ビットイメージをキャプチャするかどうか
+		}
+		if ( TreatRectAsPolygonFlg === true || TreatRectAsPolygonFlg === false){
+			GISgeometriesCaptureOptions.TreatRectAsPolygonFlag = TreatRectAsPolygonFlg; // rect要素をPoint扱いにするかPolygon扱いにするか
+		}
+		if ( SkipVectorRenderingFlg === true || SkipVectorRenderingFlg === false ){
+			GISgeometriesCaptureOptions.SkipVectorRendering=SkipVectorRenderingFlg;
 		}
 	},
 	checkSmartphone : checkSmartphone, // added on rev15
