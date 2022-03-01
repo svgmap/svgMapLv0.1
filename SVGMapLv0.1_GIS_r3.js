@@ -2012,7 +2012,7 @@ var svgMapGIStool = ( function(){
 		 *	scanLine : Array
 		 *		[[[x1,x2],y], [[x1,x2],y],...]　Yは降順
 		 * 
-		*/
+		**/
 		let minY = Math.floor(points[0][1]);
 		let maxY = Math.floor(points[0][1]);
 		let samePixelFlag = true;
@@ -2096,7 +2096,7 @@ var svgMapGIStool = ( function(){
 			 * @returns
 			 *  meet: array Y軸と交差しているXの値
 			 * 
-			 */
+			 **/
 			let meet = [];
 			for (let i = 0; i < lines.length; i++) {
 				let l = lines[i];
@@ -2130,7 +2130,7 @@ var svgMapGIStool = ( function(){
 			*  [x, y]
 			* 
 			* 
-			*/
+			**/
 			this.x0 = start[0];
 			this.x1 = end[0];
 			this.y0 = start[1];
@@ -2570,6 +2570,7 @@ var svgMapGIStool = ( function(){
 			var placemarkAll = kml.querySelectorAll('Placemark');
 			//console.log(placemarkAll);
 			var plm = Array.prototype.slice.call(placemarkAll,0);
+			let arr_metadata = [];
 			plm.forEach(function(placemark,index){
 				var kmlName = getNameFromKML(placemark);
 				var kmlDescription = getDescriptionFromKML(placemark);
@@ -2581,11 +2582,15 @@ var svgMapGIStool = ( function(){
 				var kmlCoordinate = getCordinamteFromKML(placemark);
 
 				if( kmlGeometory == "point" ){
-					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, kmlDescription, parentElm);
+					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, [kmlDescription], parentElm);
 				}else if(kmlGeometory == "linestring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "linearring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "polygon"){
 				}else if( kmlGeometory == "multigeometry"){
 				
@@ -2642,7 +2647,7 @@ var svgMapGIStool = ( function(){
 	
 	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm,metaDictionary){
 		var metastyle = getSvgMapSimpleMeta(metadata,metaDictionary);
-		//console.log("putPoint: style:",metastyle.styles);
+		// console.log("putPoint: style:",metastyle.styles,"  metadata:",metadata,"  metaDictionary:",metaDictionary);
 		var metaString = array2string(metastyle.normalized);
 		if ( ! metaString && metastyle.styles.description ){
 			metaString = metastyle.styles.description
@@ -2675,8 +2680,11 @@ var svgMapGIStool = ( function(){
 		
 		if ( metastyle.styles.title !=null && metastyle.styles.title !=undefined  ){
 			poiTitle = metastyle.styles.title+"";
+		} else {
+			if ( metadata.title ){
+				poiTitle = metadata.title+"";
+			}
 		}
-		
 		
 		var poie = svgImage.createElement("use");
 		var svgc = getSVGcoord(coordinates,crs);
@@ -2877,7 +2885,7 @@ var svgMapGIStool = ( function(){
 	// geoJsonのpropertyに以下の予約語が入っていたらスタイルと見做す(mapboxのgeojson拡張Simplestyleをベース)
 	// See https://github.com/mapbox/simplestyle-spec
 	// この実装では、opacity追加、"marker-size"の実装をどうしようか考え中です・・
-	var styleDict =["title","description","marker-size","marker-symbol","marker-color","stroke","stroke-width","fill","opacity"];
+	var styleDict ={"title":0,"description":1,"marker-size":2,"marker-symbol":3,"marker-color":4,"stroke":5,"stroke-width":6,"fill":7,"opacity":8};
 	
 	function getSvgMapSimpleMeta(metadata,metaDictionary){
 		var others={};
@@ -2887,19 +2895,21 @@ var svgMapGIStool = ( function(){
 			hitMeta = metadata;
 		} else {
 			if (metaDictionary){
+				if ( !metaDictionary.hashMap){
+					buildMetaDictHash(metaDictionary);
+				}
 				hitMeta = new Array(metaDictionary.length);
 				for ( var key in metadata){
-					var idx = metaDictionary.indexOf(key);
-					if ( idx >= 0 ){
+					var idx = metaDictionary.hashMap[key];
+					if ( idx !=undefined ){
 						// hit
 						hitMeta[idx]=metadata[key];
 					} else {
-						var styleIndex = styleDict.indexOf(key);
-						if ( styleIndex >= 0 ){
-							style[styleDict[styleIndex]]=metadata[key];
+						if ( styleDict[key] != undefined ){
+							style[key] = metadata[key];
 						} else {
 							// ユーザメタデータにもスタイルにもヒットしない
-							others[key]=metadata[key];
+							others[key] = metadata[key];
 						}
 					}
 				}
@@ -2909,7 +2919,7 @@ var svgMapGIStool = ( function(){
 				var keys = Object.keys(metadata);
 				keys.sort();
 				for(var key of keys) {
-					if ( styleDict.indexOf(key) >=0 ){
+					if ( styleDict[key] != undefined ){
 						style[key]=metadata[key];
 					} else {
 						hitMeta.push(metadata[key]);
@@ -2927,6 +2937,13 @@ var svgMapGIStool = ( function(){
 		return ans;
 	}
 	
+	function buildMetaDictHash( metaDictionary ){ // metaDictionary indexOf不使用化 2022/03/01
+		metaDictionary.hashMap={};
+		for (  var i = 0 ; i < metaDictionary.length ; i++){
+			metaDictionary.hashMap[metaDictionary[i]]=i;
+		}
+	}
+	
 	function array2string(arr){
 		var ans;
 		if ( arr.length == 0 ){
@@ -2935,7 +2952,10 @@ var svgMapGIStool = ( function(){
 		for ( var i = 0 ; i < arr.length ; i++ ){
 			var s = "";
 			if ( arr[i]!=null && arr[i]!=undefined  ){
-				s=arr[i];
+				s=arr[i].toString();
+			}
+			if ( s.indexOf(",")>=0){
+				s = s.replaceAll(",","&#x2c;");
 			}
 			if (i==0){
 				ans = s;
