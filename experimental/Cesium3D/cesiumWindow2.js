@@ -32,16 +32,28 @@
 
 // 環境依存のパラメータ ：　環境に応じて上書きしてください
 var reldir2imageUrl = "../../rev15/"; // このSVGMapコンテンツのルートコンテナのあるディレクトリへ相対パス　（なので、本来は呼び元から提供すべきだが・・）
-var directURLlist = ["magicWordsURL0","magicWordsURL1"]; // プロキシへ接続しなくて良いデータのURLのキーワード
-var cesiumProxyURL = "../cesiumSvgMapProxy.php?file="; // プロキシ―サーバの相対パス
 
 //
 
 var viewer;
 var scene;
 
-onload = function(){
-	console.log("onLoad   reldir2imageUrl,directURLlist,cesiumProxyURL:",reldir2imageUrl,directURLlist,cesiumProxyURL);
+var getCORSresolvedURL; // CORSアクセス可能なビットイメージのURL(CORS anywhereなどのPROXY)を得るための関数 下記初期化で必須
+
+function initCesiumWindow(CORSURLgetter, IonAccessToken){
+	// 初期化関数
+	// 引数：resolvedURLstr=CORSURLgetter(URLstr) : CORSアクセス可能なビットイメージのURL(CORS anywhereなどのPROXY)を得るための関数
+	if (!CORSURLgetter || typeof(CORSURLgetter)!="function"){
+		console.warn("No CORSURLgetter exit");
+		return;
+	}
+	getCORSresolvedURL = CORSURLgetter;
+	
+	if ( window.opener!=null && typeof(window.opener.svgMap)=="object"){
+		reldir2imageUrl = new URL(window.opener.svgMap.getSvgImagesProps().root.Path,window.opener.location).pathname;
+		reldir2imageUrl = reldir2imageUrl.substring(0,reldir2imageUrl.lastIndexOf("/")+1);
+	}
+	console.log("initCesiumWindow   reldir2imageUrl:",reldir2imageUrl, "  getCORSresolvedURL:",getCORSresolvedURL);
 	// select imgSrc https://groups.google.com/forum/#!topic/cesium-dev/QniSlJ0IKGg
 	var imagerySources = Cesium.createDefaultImageryProviderViewModels();
 	var terrainSources = Cesium.createDefaultTerrainProviderViewModels();
@@ -80,8 +92,9 @@ onload = function(){
 		}	
 	}));
 	
-	Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIxMzg5NTRjOS1jNDgxLTQ3YTMtYTllNi1iYjYxMzNmNDZjZGUiLCJpZCI6MTYzMTYsInNjb3BlcyI6WyJhc3IiLCJnYyJdLCJpYXQiOjE1NzAxNTk1MDB9.irhIZ_G1qsuWr5q60z8Vpg6fg1E4Tb65jMOu0f-oamI';
-
+	Cesium.Ion.defaultAccessToken = IonAccessToken; // nullだとどうなるのだろう…nullにしたいがw
+	
+	console.log("imagerySources:",imagerySources," terrainSources:",terrainSources);
 	viewer = new Cesium.Viewer('cesiumContainer', {
 		imageryProviderViewModels : imagerySources,
 		terrainProviderViewModels : terrainSources,
@@ -456,6 +469,8 @@ function setCoverage2Imagery(geom){
 //	console.log("Coverage is rendered by special inplemantaion  :", geom.coordinates[0].lng , geom.coordinates[0].lat, geom.coordinates[1].lng , geom.coordinates[1].lat, geom.href);
 	
 	var imageUrl = geom.href;
+	imageUrl = getCORSresolvedURL(imageUrl);
+	/**
 	if ( imageUrl.indexOf("http") == 0){
 		if (isDirefcURL(imageUrl)){
 			// Do nothing (Direct Connection)
@@ -466,8 +481,8 @@ function setCoverage2Imagery(geom){
 	} else {
 		imageUrl = reldir2imageUrl+imageUrl;
 	}
-	
-	console.log("imageUrl:",imageUrl);
+	**/
+	console.log("CORSimageUrl:",imageUrl);
 	
 //	console.log("geom rect:",geom.coordinates[0].lng , geom.coordinates[0].lat, geom.coordinates[1].lng , geom.coordinates[1].lat);
 	var coverageImagery = viewer.imageryLayers.addImageryProvider(new Cesium.SingleTileImageryProvider({
@@ -481,17 +496,6 @@ function setCoverage2Imagery(geom){
 	
 }
 
-function isDirefcURL(url){
-	// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
-	var ans = false;
-	for ( var i = 0 ; i < directURLlist.length ; i++ ){
-		if ( url.indexOf(directURLlist[i])>=0){
-			ans = true;
-			break;
-		}
-	}
-	return ( ans );
-}
 
 function clearCoverageImageries(){
 	for ( var i = 0 ; i < coverageImageries.length ; i++ ){
@@ -499,10 +503,6 @@ function clearCoverageImageries(){
 		viewer.imageryLayers.remove(coverageImageries[i], true);
 	}
 	coverageImageries = [];
-}
-
-function getProxyUrl( url ){
-	return ( cesiumProxyURL + url );
 }
 
 function addCyberJapan(){

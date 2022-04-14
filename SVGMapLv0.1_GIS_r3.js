@@ -44,6 +44,8 @@
 // 2020/07/27 Rev3 : ラスターGIS: 非対角成分あるラスターカバレッジでもPolyline,Polygonサポート
 // 2021/04/13 drawGeoJson: geoJsonのスタイリング仕様(mapbox)をサポート
 // 2021/10/27 ラスターGISの画像キャッシュの明示的なOn/Offを可能に
+// 2022/03/xx geoJsonのレンダラのバグ修正・高速化
+// 2022/04/xx Proxy処理をリファクタリング(メインのFW側および切り出したcorsProxy.js側で処理するように)
 //
 // ISSUES:
 //
@@ -1481,14 +1483,16 @@ var svgMapGIStool = ( function(){
 	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
 		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
 //		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
-		var imageURL_int = getImageURL(imageUrl);
+		var imageURLobj = getImageURL(imageUrl,true);
+//		console.log("getImagePixData imageURLobj:",imageURLobj);
+		var imageURL_int = imageURLobj.url;
 		if ( imageCacheEnabled && imageCache[imageURL_int]){
 //			console.log("Hit imageCache");
 			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
 		} else {
 			var documentImage = document.getElementById(imageIID);
 			var imgSrcURL = documentImage.getAttribute("src");
-			if ( imgSrcURL.indexOf("http")!=0 || isDirectURL(imgSrcURL)){
+			if ( imgSrcURL.indexOf("http")!=0 || getImageURL(imgSrcURL)==imgSrcURL){
 				console.log("use image element's image :", documentImage); 
 				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
 				if ( imageCacheEnabled ){
@@ -1497,7 +1501,7 @@ var svgMapGIStool = ( function(){
 			} else {
 				
 				var img = new Image();
-				if ( anonProxy ){
+				if ( imageURLobj.crossorigin ){
 					img.crossOrigin = "anonymous";
 				}
 				// console.log("Fetch image : ", imageUrl);
@@ -1530,28 +1534,6 @@ var svgMapGIStool = ( function(){
 		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
 	}
 	
-	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
-	var proxyUrl="";
-	var anonProxy = false;
-	var directURLlist = [];
-	function setImageProxy( pxUrl , directURLls , useAnonProxy){
-		proxyUrl = pxUrl;
-		if ( directURLls ){
-			directURLlist = directURLls;
-		} else {
-			directURLlist = [];
-		}
-		if ( pxUrl.indexOf("http")==0){
-			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
-			directURLlist.push(pxDomain);
-		}
-		
-		if ( useAnonProxy ){
-			anonProxy = true;
-		} else {
-			anonProxy = false;
-		}
-	}
 	
 	
 	// 線(ポリライン)とビットイメージ間のGIS 2020/7/3
@@ -2343,29 +2325,63 @@ var svgMapGIStool = ( function(){
 	
 	
 	
+	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
+	var intProxyInfo={};
+	function setImageProxy( pxUrl , directURLls , useAnonProxy){ // to be obsoluted 2022/4/6 ( svgMap.jsのsetProxyURLFactoryとcorsProxy.jsに統合化済み )
+		intProxyInfo={};
+		if ( !pxUrl ){
+			return;
+		}
+		intProxyInfo.proxyUrl = pxUrl;
+		if ( directURLls ){
+			intProxyInfo.directURLlist = directURLls;
+		} else {
+			intProxyInfo.directURLlist = [];
+		}
+		if ( pxUrl.indexOf("http")==0){
+			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
+			intProxyInfo.directURLlist.push(pxDomain);
+		}
+		
+		if ( useAnonProxy ){
+			intProxyInfo.anonProxy = true;
+		} else {
+			intProxyInfo.anonProxy = false;
+		}
+	}
 	
-	
-	function getImageURL(imageUrl){
+	function getImageURL(imageUrl, alsoAnonymousInfo){
 		// ローカル（同一ドメイン）コンテンツもしくはそれと見做せる(directURLlistにあるもの)もの以外をproxy経由のURLに変換する
 		// proxyの仕様は、 encodeURIComponent(imageUrl)でオリジナルのURLをエンコードしたものをURL末尾(もしくはクエリパート)につけたGETリクエストを受け付けるタイプ
-		if ( proxyUrl && imageUrl.indexOf("http") == 0){
-			if (isDirectURL(imageUrl)){
-				// Do nothing (Direct Connection)
+		if ( intProxyInfo.proxyUrl){ // この分岐部は廃止予定(⇒svgMap.getCORSURL)
+			if ( intProxyInfo.proxyUrl && imageUrl.indexOf("http") == 0){
+				if (isDirectURL(imageUrl)){
+					// Do nothing (Direct Connection)
+				} else {
+					imageUrl = intProxyInfo.proxyUrl + encodeURIComponent(imageUrl);
+	//				console.log("via proxy url:",imageUrl);
+				}
 			} else {
-				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
-//				console.log("via proxy url:",imageUrl);
+				// Do nothing..
+			}
+			if ( alsoAnonymousInfo ){
+				return {
+					url:imageUrl,
+					anonymous:intProxyInfo.anonProxy
+				}
+			} else {
+				return (imageUrl);
 			}
 		} else {
-			// Do nothing..
+			return (svgMap.getCORSURL(imageUrl,alsoAnonymousInfo));
 		}
-		return (imageUrl);
 	}
 	
 	function isDirectURL(url){
 		// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
 		var ans = false;
-		for ( var i = 0 ; i < directURLlist.length ; i++ ){
-			if ( url.indexOf(directURLlist[i])>=0){
+		for ( var i = 0 ; i < intProxyInfo.directURLlist.length ; i++ ){
+			if ( url.indexOf(intProxyInfo.directURLlist[i])>=0){
 				ans = true;
 				break;
 			}

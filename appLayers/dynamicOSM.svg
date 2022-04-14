@@ -107,6 +107,7 @@
 		cl.setAttribute("xlink:href" , tileURL.URL);
 //		cl.setAttribute("opacity" , "0.5");
 		cl.setAttribute("metadata" , tileURL.Key);
+		cl.setAttribute("data-mercator-tile" , "true");
 		
 		return ( cl );
 	}
@@ -192,7 +193,7 @@
 	
 	function getURL( tx , ty , lvl ){
 		var tile_ans = getKey( tx , ty , lvl );
-		var mapServerURL = "http://" + sva[svNumb] + ".tile.openstreetmap.org/" + lvl + "/" + tx + "/" + ty + ".png";
+		var mapServerURL = "https://" + sva[svNumb] + ".tile.openstreetmap.org/" + lvl + "/" + tx + "/" + ty + ".png";
 		++ svNumb;
 		if ( svNumb > 2 ){
 			svNumb = 0;
