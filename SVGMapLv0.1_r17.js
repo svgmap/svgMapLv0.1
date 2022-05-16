@@ -181,6 +181,7 @@
 // 2021/11/04 : ビットイメージの任意図法対応機能() imageTransformを改良：transformがあるimage要素に対応
 // 2022/04/06 : image:crossorigin(値は見てない), svgMap.getCORSURL()
 // 2022/04/12 : line Hittesterの改善 (use isPointInStroke) 
+// 2022/05/16 : customHitTester
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -5031,13 +5032,16 @@ function checkTicker(px,py){
 	
 	var hittedObjects; // ベクタでヒットしたモノ
 	var hittedPoiObjects; // ラスタPOIでヒットしたモノ
+	var hittedLayerHitTests; // 2022/05 レイヤWebAppで独自に組んだヒットテスタでヒットしたモノ
 	
 	if ( px && py ){
 		hittedObjects = getVectorObjectsAtPoint( px , py ); // マウスによる指定では中心でないので、この呼び出しが必要　重たいDOMトラバーサが同期で動きます
 		hittedPoiObjects = getPoiObjectsAtPoint( px , py ); 
+		hittedLayerHitTests = getLayerHitTestAtPoint( px, py ); // 2022/05
 	} else {
 		hittedObjects = getHittedObjects( ); // 2018.1.18 setCentralVectorObjectsGetterと組み合わせ、getVectorObjectsAtPointを代替して効率化 : ベクタでヒットしたモノ
 		hittedPoiObjects = getPoiObjectsAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // ラスタPOIでヒットしたモノ
+		hittedLayerHitTests = getLayerHitTestAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // 2022/05
 	}
 	
 	if ( hittedPoiObjects.length == 0 && px && py && checkAndKickEditor( hittedObjects , px, py ) ){ // POIがヒットしていない場合に限り、ベクタを対象にオーサリングツールのキック可能性をチェックし、キックされたならそのまま終了する
@@ -5047,8 +5051,8 @@ function checkTicker(px,py){
 	
 //	console.log ( "hitted Vector:",hittedObjects , "  POI:",hittedPoiObjects, " TickerElem;",ticker);
 	removeChildren(tickerTable);
-	tickerTableMetadata = new Array();
-	if ( (hittedObjects && hittedObjects.elements.length > 0) || hittedPoiObjects.length > 0 ){
+	tickerTableMetadata = new Array(); // tickerTableMetadataはほとんど使われていないように思われます・・ 2022/05
+	if ( (hittedObjects && hittedObjects.elements.length > 0) || hittedPoiObjects.length > 0 || hittedLayerHitTests.length > 0 ){
 		var lastCallback; // 候補１つだったときに自動起動させるコールバック保持用
 			setTimeout( fixTickerSize , 300 );
 		// for raster POI
@@ -5106,6 +5110,21 @@ function checkTicker(px,py){
 				);
 				
 			}
+		}
+		
+		// 2022/05 for LayerUI customized hitTester
+		for ( var i = 0 ; i < hittedLayerHitTests.length ; i ++){
+			var hitObj = hittedLayerHitTests[i];
+			// console.log("hitObj:",hitObj);
+			var cbf = function(targetElem){
+				return function(){
+					showPoiPropertyWrapper(targetElem);
+				}
+			}(hitObj.element);
+			lastCallback = cbf;
+			
+			addTickerItem( hitObj.title , cbf , tickerTable , hitObj.layerName );
+			tickerTableMetadata.push(hitObj);
 		}
 		
 		if ( px && py && tickerTableMetadata.length == 1 ){ // クリックモードで候補が一つだったら直接コールバック呼び出して、ティッカーは出現させない
@@ -6938,6 +6957,45 @@ function getPoiObjectsAtPoint( x, y ){
 		}
 	}
 	return ( hittedPOIs );
+}
+
+// 2020/05 カスタムヒットテスト関数を呼び出す
+function getLayerHitTestAtPoint( x, y ){
+	var geop = screen2Geo(x , y );
+	var pos = {
+		clientX: x,
+		clientY: y,
+		lat:geop.lat, 
+		lng: geop.lng
+	};
+	var anses =[];
+	for (var  layerId in svgImagesProps){
+		var sip = svgImagesProps[layerId];
+		if ( !sip.controllerWindow){continue}
+		var hitTest = sip.controllerWindow.customHitTester;
+		if (typeof(hitTest)=="function" ){
+			var hitted = hitTest( pos );
+			if ( hitted ){ // boolean,string || element
+				var ans ={};
+				var layerName = getLayerName( getLayer(layerId) );
+				ans.layerName = layerName;
+				ans.metaSchema=sip.metaSchema;
+				ans.geoBbox={x:geop.lng,y:geop.lng,width:0,height:0};
+				if ( hitted === true || typeof(hitted)=="string"){
+					ans.element =svgImages[layerId].documentElement;
+					ans.title = layerName;
+					ans.metadata=hitted;
+				} else if ( hitted instanceof Element ){
+					ans.element = hitted;
+					ans.title = hitted.getAttribute("xlink:title");
+					ans.metadata=hitted.getAttribute("content");
+				}
+				
+				anses.push(ans);
+			}
+		}
+	}
+	return ( anses );
 }
 
 // VECTOR2Dの線や面をヒットテストする機能 2013/11/29
