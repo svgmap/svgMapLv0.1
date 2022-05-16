@@ -6981,9 +6981,13 @@ function getLayerHitTestAtPoint( x, y ){
 				ans.layerName = layerName;
 				ans.metaSchema=sip.metaSchema;
 				ans.geoBbox={x:geop.lng,y:geop.lng,width:0,height:0};
-				if ( hitted === true || typeof(hitted)=="string"){
+				if ( hitted === true ){
 					ans.element =svgImages[layerId].documentElement;
 					ans.title = layerName;
+					ans.metadata=hitted;
+				} else if ( typeof(hitted)=="string"){
+					ans.element =svgImages[layerId].documentElement;
+					ans.title = hitted;
 					ans.metadata=hitted;
 				} else if ( hitted instanceof Element ){
 					ans.element = hitted;
