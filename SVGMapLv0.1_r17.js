@@ -5116,11 +5116,13 @@ function checkTicker(px,py){
 		for ( var i = 0 ; i < hittedLayerHitTests.length ; i ++){
 			var hitObj = hittedLayerHitTests[i];
 			// console.log("hitObj:",hitObj);
-			var cbf = function(targetElem){
+			var cbf = function(targetElem, hitTestIndex){
 				return function(){
+					targetElem.setAttribute("data-hitTestIndex",hitTestIndex);
 					showPoiPropertyWrapper(targetElem);
+					targetElem.removeAttribute("data-hitTestIndex");
 				}
-			}(hitObj.element);
+			}(hitObj.element, hitObj.hitTestIndex);
 			lastCallback = cbf;
 			
 			addTickerItem( hitObj.title , cbf , tickerTable , hitObj.layerName );
@@ -6976,26 +6978,34 @@ function getLayerHitTestAtPoint( x, y ){
 		if (typeof(hitTest)=="function" ){
 			var hitted = hitTest( pos );
 			if ( hitted ){ // boolean,string || element
-				var ans ={};
-				var layerName = getLayerName( getLayer(layerId) );
-				ans.layerName = layerName;
-				ans.metaSchema=sip.metaSchema;
-				ans.geoBbox={x:geop.lng,y:geop.lng,width:0,height:0};
-				if ( hitted === true ){
-					ans.element =svgImages[layerId].documentElement;
-					ans.title = layerName;
-					ans.metadata=hitted;
-				} else if ( typeof(hitted)=="string"){
-					ans.element =svgImages[layerId].documentElement;
-					ans.title = hitted;
-					ans.metadata=hitted;
-				} else if ( hitted instanceof Element ){
-					ans.element = hitted;
-					ans.title = hitted.getAttribute("xlink:title");
-					ans.metadata=hitted.getAttribute("content");
+				if ( Array.isArray(hitted)){
+				} else {
+					hitted = [hitted];
 				}
-				
-				anses.push(ans);
+				var layerName = getLayerName( getLayer(layerId) );
+				var hindex=0;
+				for ( var hi of hitted ){
+					var ans ={};
+					ans.layerName = layerName;
+					ans.metaSchema=sip.metaSchema;
+					ans.geoBbox={x:geop.lng,y:geop.lng,width:0,height:0};
+					ans.hitTestIndex=hindex;
+					if ( hi === true ){
+						ans.element = svgImages[layerId].documentElement; // Elementが必要なので文書要素を・・
+						ans.title = layerName;
+						ans.metadata=hindex;
+					} else if ( typeof(hi)=="string"){
+						ans.element =svgImages[layerId].documentElement; // 同上
+						ans.title = hi;
+						ans.metadata=hi;
+					} else if ( hi instanceof Element ){
+						ans.element = hi;
+						ans.title = hi.getAttribute("xlink:title");
+						ans.metadata=hi.getAttribute("content");
+					}
+					anses.push(ans);
+					++hindex;
+				}
 			}
 		}
 	}
@@ -7380,22 +7390,29 @@ function childDocOp( func , docHash , param1, param2 , param3 , param4 , param5 
 var specificShowPoiPropFunctions = {};
 
 function showPoiPropertyWrapper(target){
-	var docId = getDocumentId(target);
-	var layerId = svgImagesProps[docId].rootLayer;
-	
-	var layerName = getLayerName(getLayer(layerId));
-	target.setAttribute("data-layername",layerName); // 2017.8.22 added
-	
+	var targetIsXMLElement = false;
+	if (target instanceof Element){
+		targetIsXMLElement = true;
+		var docId = getDocumentId(target);
+		var layerId = svgImagesProps[docId].rootLayer;
+		
+		var layerName = getLayerName(getLayer(layerId));
+		target.setAttribute("data-layername",layerName); // 2017.8.22 added
+	}
 	var ans = true;
 	if ( specificShowPoiPropFunctions[docId] ){ // targeDoctに対応するshowPoiProperty処理関数が定義されていた場合、それを実行する。
 		ans = specificShowPoiPropFunctions[docId](target);
 	} else if (specificShowPoiPropFunctions[layerId]){ // targetDocが属する"レイヤー"に対応する　同上
 		ans = specificShowPoiPropFunctions[layerId](target);
 	} else { // それ以外は・・
-		if ( typeof showPoiProperty == "function" ){
-			showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+		if ( targetIsXMLElement ){
+			if ( typeof showPoiProperty == "function" ){
+				showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+			} else {
+				defaultShowPoiProperty(target);
+			}
 		} else {
-			defaultShowPoiProperty(target);
+			console.warn ( " Skip. The result of the hit test is not an Element, so it is necessary to setShowPoiProperty. :",target);
 		}
 	}
 	
@@ -7407,7 +7424,9 @@ function showPoiPropertyWrapper(target){
 		}
 	}
 	
-	target.removeAttribute("data-layername");
+	if ( targetIsXMLElement ){
+		target.removeAttribute("data-layername");
+	}
 }
 
 // setShowPoiProperty: 特定のレイヤー・svg文書(いずれもIDで指定)もしくは、全体に対して別のprop.表示関数を指定できる。
