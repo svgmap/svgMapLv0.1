@@ -103,13 +103,21 @@
 		return {
 			baseURL: mapName,
 			maxLevel: maxLevel,
-			minLevel: minLevel
+			minLevel: minLevel,
+			options: {style:tileOptions.style},
 		}
 	}
-	function setServerParams(baseURLp,maxLevelp,minLevelp){
+	var tileOptions={};
+	function setServerParams(baseURLp,maxLevelp,minLevelp,options){
 		mapName = baseURLp;
 		maxLevel = maxLevelp;
 		minLevel = minLevelp;
+		if ( options && options.style){
+			tileOptions.style=options.style;
+		}
+		if ( options && options.crossorigin){
+			tileOptions.crossorigin=true;
+		}
 		var currentTiles =  document.getElementsByTagName("image");
 		for ( var i = currentTiles.length - 1 ; i >= 0 ; i-- ){
 			var oneTile = currentTiles[i];
@@ -200,6 +208,14 @@
 		cl.setAttribute("xlink:href" , tileURL.URL);
 //		cl.setAttribute("opacity" , "0.5");
 		cl.setAttribute("metadata" , tileURL.Key);
+		cl.setAttribute("data-mercator-tile" , "true");
+		if ( tileOptions.style ){
+			var styleOption=tileOptions.style;
+			cl.setAttribute("style" , styleOption);
+		}
+		if (tileOptions.crossorigin){
+			cl.setAttribute("crossorigin" , "");
+		}
 		
 		return ( cl );
 	}

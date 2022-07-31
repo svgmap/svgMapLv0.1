@@ -67,7 +67,6 @@ var svgImages,svgImagesProps;
 var sourceCoverId,sourcePoiId;
 var contSearchBtn;
 
-var proxyPath = "../cesiumSvgMap/cesiumSvgMapProxy.php?file=";
 
 var apTriggerEvent="zoomPanMapCompleted"; // 2021/6/22 layerUIの新設イベントを使用
 //var apTriggerEvent="zoomPanMap"; // 確認用デバッグ
@@ -81,10 +80,6 @@ onload=function(){
 	document.addEventListener("closeFrame", closeFrameProcess , false);
 	document.addEventListener("appearFrame", appearFrameProcess , false);
 	contSearchBtn = document.getElementById("contSearchBtn");
-}
-
-function setProxy(url){
-	proxyPath = url;
 }
 
 function closeFrameProcess(){
@@ -120,9 +115,8 @@ function initSvgMapGIStool(){
 	} else {
 		apTriggerEvent = "zoomPanMap"; // フォールバック XHRで生成するタイプのデータのGISは単発のみ 2021/6/22
 	}
-	svgMapGIStool.setImageProxy(proxyPath, null, true);
 	// ISSUE: 上の3番目のanonymous設定が下記では継承されてないSVGMap.jsの改修が必要
-	getImageProxy = function(path){
+	getImageProxy = function(path){ // 2022/4/6 この処理は実質svgMap.getCORSURLとなっている（後方互換で動くが・・）
 		var ans = svgMapGIStool.imageUrlEncoder(path);
 //		console.log("getImageProxy inp:",path,"  ans:",ans);
 		return ans;
@@ -843,7 +837,6 @@ return { // rasterPoiGis. で公開する関数のリスト
 	searchAll: searchAll,
 	searchAllInRangePois: searchAllInRangePois,
 	searchInRangePointsSingle: searchInRangePointsSingle,
-	setProxy:setProxy,
 	toggleContSearch: toggleContSearch,
 }
 

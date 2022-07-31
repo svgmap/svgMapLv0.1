@@ -44,6 +44,8 @@
 // 2020/07/27 Rev3 : ラスターGIS: 非対角成分あるラスターカバレッジでもPolyline,Polygonサポート
 // 2021/04/13 drawGeoJson: geoJsonのスタイリング仕様(mapbox)をサポート
 // 2021/10/27 ラスターGISの画像キャッシュの明示的なOn/Offを可能に
+// 2022/03/xx geoJsonのレンダラのバグ修正・高速化
+// 2022/04/xx Proxy処理をリファクタリング(メインのFW側および切り出したcorsProxy.js側で処理するように)
 //
 // ISSUES:
 //
@@ -1481,14 +1483,16 @@ var svgMapGIStool = ( function(){
 	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
 		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
 //		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
-		var imageURL_int = getImageURL(imageUrl);
+		var imageURLobj = getImageURL(imageUrl,true);
+//		console.log("getImagePixData imageURLobj:",imageURLobj);
+		var imageURL_int = imageURLobj.url;
 		if ( imageCacheEnabled && imageCache[imageURL_int]){
 //			console.log("Hit imageCache");
 			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
 		} else {
 			var documentImage = document.getElementById(imageIID);
 			var imgSrcURL = documentImage.getAttribute("src");
-			if ( imgSrcURL.indexOf("http")!=0 || isDirectURL(imgSrcURL)){
+			if ( imgSrcURL.indexOf("http")!=0 || getImageURL(imgSrcURL)==imgSrcURL){
 				console.log("use image element's image :", documentImage); 
 				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
 				if ( imageCacheEnabled ){
@@ -1497,7 +1501,7 @@ var svgMapGIStool = ( function(){
 			} else {
 				
 				var img = new Image();
-				if ( anonProxy ){
+				if ( imageURLobj.crossorigin ){
 					img.crossOrigin = "anonymous";
 				}
 				// console.log("Fetch image : ", imageUrl);
@@ -1530,28 +1534,6 @@ var svgMapGIStool = ( function(){
 		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
 	}
 	
-	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
-	var proxyUrl="";
-	var anonProxy = false;
-	var directURLlist = [];
-	function setImageProxy( pxUrl , directURLls , useAnonProxy){
-		proxyUrl = pxUrl;
-		if ( directURLls ){
-			directURLlist = directURLls;
-		} else {
-			directURLlist = [];
-		}
-		if ( pxUrl.indexOf("http")==0){
-			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
-			directURLlist.push(pxDomain);
-		}
-		
-		if ( useAnonProxy ){
-			anonProxy = true;
-		} else {
-			anonProxy = false;
-		}
-	}
 	
 	
 	// 線(ポリライン)とビットイメージ間のGIS 2020/7/3
@@ -2012,7 +1994,7 @@ var svgMapGIStool = ( function(){
 		 *	scanLine : Array
 		 *		[[[x1,x2],y], [[x1,x2],y],...]　Yは降順
 		 * 
-		*/
+		**/
 		let minY = Math.floor(points[0][1]);
 		let maxY = Math.floor(points[0][1]);
 		let samePixelFlag = true;
@@ -2096,7 +2078,7 @@ var svgMapGIStool = ( function(){
 			 * @returns
 			 *  meet: array Y軸と交差しているXの値
 			 * 
-			 */
+			 **/
 			let meet = [];
 			for (let i = 0; i < lines.length; i++) {
 				let l = lines[i];
@@ -2130,7 +2112,7 @@ var svgMapGIStool = ( function(){
 			*  [x, y]
 			* 
 			* 
-			*/
+			**/
 			this.x0 = start[0];
 			this.x1 = end[0];
 			this.y0 = start[1];
@@ -2343,29 +2325,63 @@ var svgMapGIStool = ( function(){
 	
 	
 	
+	// canvasで画像処理などをさせるときはCORSが設定されてないと基本的にはNGなので、それが無理な場合はProxyを経由させる
+	var intProxyInfo={};
+	function setImageProxy( pxUrl , directURLls , useAnonProxy){ // to be obsoluted 2022/4/6 ( svgMap.jsのsetProxyURLFactoryとcorsProxy.jsに統合化済み )
+		intProxyInfo={};
+		if ( !pxUrl ){
+			return;
+		}
+		intProxyInfo.proxyUrl = pxUrl;
+		if ( directURLls ){
+			intProxyInfo.directURLlist = directURLls;
+		} else {
+			intProxyInfo.directURLlist = [];
+		}
+		if ( pxUrl.indexOf("http")==0){
+			var pxDomain = pxUrl.substring(0,pxUrl.indexOf("/",8));
+			intProxyInfo.directURLlist.push(pxDomain);
+		}
+		
+		if ( useAnonProxy ){
+			intProxyInfo.anonProxy = true;
+		} else {
+			intProxyInfo.anonProxy = false;
+		}
+	}
 	
-	
-	function getImageURL(imageUrl){
+	function getImageURL(imageUrl, alsoAnonymousInfo){
 		// ローカル（同一ドメイン）コンテンツもしくはそれと見做せる(directURLlistにあるもの)もの以外をproxy経由のURLに変換する
 		// proxyの仕様は、 encodeURIComponent(imageUrl)でオリジナルのURLをエンコードしたものをURL末尾(もしくはクエリパート)につけたGETリクエストを受け付けるタイプ
-		if ( proxyUrl && imageUrl.indexOf("http") == 0){
-			if (isDirectURL(imageUrl)){
-				// Do nothing (Direct Connection)
+		if ( intProxyInfo.proxyUrl){ // この分岐部は廃止予定(⇒svgMap.getCORSURL)
+			if ( intProxyInfo.proxyUrl && imageUrl.indexOf("http") == 0){
+				if (isDirectURL(imageUrl)){
+					// Do nothing (Direct Connection)
+				} else {
+					imageUrl = intProxyInfo.proxyUrl + encodeURIComponent(imageUrl);
+	//				console.log("via proxy url:",imageUrl);
+				}
 			} else {
-				imageUrl = proxyUrl + encodeURIComponent(imageUrl);
-//				console.log("via proxy url:",imageUrl);
+				// Do nothing..
+			}
+			if ( alsoAnonymousInfo ){
+				return {
+					url:imageUrl,
+					anonymous:intProxyInfo.anonProxy
+				}
+			} else {
+				return (imageUrl);
 			}
 		} else {
-			// Do nothing..
+			return (svgMap.getCORSURL(imageUrl,alsoAnonymousInfo));
 		}
-		return (imageUrl);
 	}
 	
 	function isDirectURL(url){
 		// urlに、directURLlistが含まれていたら、true　含まれていなかったらfalse
 		var ans = false;
-		for ( var i = 0 ; i < directURLlist.length ; i++ ){
-			if ( url.indexOf(directURLlist[i])>=0){
+		for ( var i = 0 ; i < intProxyInfo.directURLlist.length ; i++ ){
+			if ( url.indexOf(intProxyInfo.directURLlist[i])>=0){
 				ans = true;
 				break;
 			}
@@ -2570,6 +2586,7 @@ var svgMapGIStool = ( function(){
 			var placemarkAll = kml.querySelectorAll('Placemark');
 			//console.log(placemarkAll);
 			var plm = Array.prototype.slice.call(placemarkAll,0);
+			let arr_metadata = [];
 			plm.forEach(function(placemark,index){
 				var kmlName = getNameFromKML(placemark);
 				var kmlDescription = getDescriptionFromKML(placemark);
@@ -2581,11 +2598,15 @@ var svgMapGIStool = ( function(){
 				var kmlCoordinate = getCordinamteFromKML(placemark);
 
 				if( kmlGeometory == "point" ){
-					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, kmlDescription, parentElm);
+					putPoint(kmlCoordinate, svgImage, crs, POIiconId, kmlName, [kmlDescription], parentElm);
 				}else if(kmlGeometory == "linestring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "linearring"){
-					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, kmlName + "," + kmlDescription, parentElm);
+					arr_metadata.push(kmlName);
+					arr_metadata.push(kmlDescription);
+					putLineString(kmlCoordinate, svgImage, crs, strokeColor, strokeWidth, arr_metadata, parentElm);
 				}else if( kmlGeometory == "polygon"){
 				}else if( kmlGeometory == "multigeometry"){
 				
@@ -2642,7 +2663,7 @@ var svgMapGIStool = ( function(){
 	
 	function putPoint(coordinates, svgImage, crs, POIiconId, poiTitle, metadata, parentElm,metaDictionary){
 		var metastyle = getSvgMapSimpleMeta(metadata,metaDictionary);
-		//console.log("putPoint: style:",metastyle.styles);
+		// console.log("putPoint: style:",metastyle.styles,"  metadata:",metadata,"  metaDictionary:",metaDictionary);
 		var metaString = array2string(metastyle.normalized);
 		if ( ! metaString && metastyle.styles.description ){
 			metaString = metastyle.styles.description
@@ -2675,8 +2696,11 @@ var svgMapGIStool = ( function(){
 		
 		if ( metastyle.styles.title !=null && metastyle.styles.title !=undefined  ){
 			poiTitle = metastyle.styles.title+"";
+		} else {
+			if ( metadata.title ){
+				poiTitle = metadata.title+"";
+			}
 		}
-		
 		
 		var poie = svgImage.createElement("use");
 		var svgc = getSVGcoord(coordinates,crs);
@@ -2877,7 +2901,7 @@ var svgMapGIStool = ( function(){
 	// geoJsonのpropertyに以下の予約語が入っていたらスタイルと見做す(mapboxのgeojson拡張Simplestyleをベース)
 	// See https://github.com/mapbox/simplestyle-spec
 	// この実装では、opacity追加、"marker-size"の実装をどうしようか考え中です・・
-	var styleDict =["title","description","marker-size","marker-symbol","marker-color","stroke","stroke-width","fill","opacity"];
+	var styleDict ={"title":0,"description":1,"marker-size":2,"marker-symbol":3,"marker-color":4,"stroke":5,"stroke-width":6,"fill":7,"opacity":8};
 	
 	function getSvgMapSimpleMeta(metadata,metaDictionary){
 		var others={};
@@ -2887,19 +2911,21 @@ var svgMapGIStool = ( function(){
 			hitMeta = metadata;
 		} else {
 			if (metaDictionary){
+				if ( !metaDictionary.hashMap){
+					buildMetaDictHash(metaDictionary);
+				}
 				hitMeta = new Array(metaDictionary.length);
 				for ( var key in metadata){
-					var idx = metaDictionary.indexOf(key);
-					if ( idx >= 0 ){
+					var idx = metaDictionary.hashMap[key];
+					if ( idx !=undefined ){
 						// hit
 						hitMeta[idx]=metadata[key];
 					} else {
-						var styleIndex = styleDict.indexOf(key);
-						if ( styleIndex >= 0 ){
-							style[styleDict[styleIndex]]=metadata[key];
+						if ( styleDict[key] != undefined ){
+							style[key] = metadata[key];
 						} else {
 							// ユーザメタデータにもスタイルにもヒットしない
-							others[key]=metadata[key];
+							others[key] = metadata[key];
 						}
 					}
 				}
@@ -2909,7 +2935,7 @@ var svgMapGIStool = ( function(){
 				var keys = Object.keys(metadata);
 				keys.sort();
 				for(var key of keys) {
-					if ( styleDict.indexOf(key) >=0 ){
+					if ( styleDict[key] != undefined ){
 						style[key]=metadata[key];
 					} else {
 						hitMeta.push(metadata[key]);
@@ -2927,6 +2953,13 @@ var svgMapGIStool = ( function(){
 		return ans;
 	}
 	
+	function buildMetaDictHash( metaDictionary ){ // metaDictionary indexOf不使用化 2022/03/01
+		metaDictionary.hashMap={};
+		for (  var i = 0 ; i < metaDictionary.length ; i++){
+			metaDictionary.hashMap[metaDictionary[i]]=i;
+		}
+	}
+	
 	function array2string(arr){
 		var ans;
 		if ( arr.length == 0 ){
@@ -2935,7 +2968,10 @@ var svgMapGIStool = ( function(){
 		for ( var i = 0 ; i < arr.length ; i++ ){
 			var s = "";
 			if ( arr[i]!=null && arr[i]!=undefined  ){
-				s=arr[i];
+				s=arr[i].toString();
+			}
+			if ( s.indexOf(",")>=0){
+				s = s.replaceAll(",","&#x2c;");
 			}
 			if (i==0){
 				ans = s;

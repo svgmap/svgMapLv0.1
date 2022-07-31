@@ -1337,6 +1337,10 @@ function setLsUIbtnOffset( targetElem , isRetry ){ // 2017.2.17 レイヤ固有U
 }
 
 function testIframeSize( iframe ,reqSize){
+	console.log("testIframeSize:",iframe, iframe.style);
+	if ( iframe.style.display == "none" ){ // 2021/12/03 非表示のものはサイジングしない
+		return;
+	}
 //	console.log("iframeDoc, width:",iframe.contentWindow.document,  iframe.contentWindow.document.documentElement.offsetWidth);
 //	console.log("H:",iframe.contentWindow.document.documentElement.scrollHeight );
 //	console.log("H2:",iframe.contentWindow.document.body.offsetHeight , layerSpecificUI.offsetHeight);

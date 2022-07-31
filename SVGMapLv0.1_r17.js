@@ -179,6 +179,9 @@
 // 2021/09/16 : ラスターGISを高速化するときなどに使う、ベクタデータの描画をスキップする機構(captureGISgeometriesOption(,, SkipVectorRenderingFlg ))
 // 2021/10/29 : Angularや他FWのCSSが与えるimg要素のwidth,maxWidth等のstyleをオーバーライドし表示崩れを防止
 // 2021/11/04 : ビットイメージの任意図法対応機能() imageTransformを改良：transformがあるimage要素に対応
+// 2022/04/06 : image:crossorigin(値は見てない), svgMap.getCORSURL()
+// 2022/04/12 : line Hittesterの改善 (use isPointInStroke) 
+// 2022/05/16 : customHitTester
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -1119,6 +1122,7 @@ function handleResult( docId , docPath , parentElem , httpRes , parentSvgDocId )
 			svgImagesProps[docId].script.transform = transform;
 			svgImagesProps[docId].script.getCanvasSize = getCanvasSize;
 			svgImagesProps[docId].script.geoViewBox = geoViewBox;
+			svgImagesProps[docId].script.getCORSURL = getCORSURL;
 			if ( typeof svgMapGIStool == "object" ){
 				svgImagesProps[docId].script.drawGeoJson = svgMapGIStool.drawGeoJson;
 			}
@@ -1624,7 +1628,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, {docId:docId,svgNode:svgNode} );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode} );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -1737,9 +1741,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 //						console.log("AlreadyLoadedBitimage:" + imageId + " dispay:" + imgElem.style.display);
 						// x,y,w,hを書き換える
-						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId , {docId:docId,svgNode:svgNode} ); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
+						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId , ip.crossorigin, {docId:docId,svgNode:svgNode} ); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
 					} else if ( childCategory == TEXT ){ // 2014.7.22
-						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId , {docId:docId,svgNode:svgNode} );
+						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId , null, {docId:docId,svgNode:svgNode} );
 					} else { // animation|iframe要素の場合(svgTile/Layer)
 //						console.log("id:" + imageId );
 //						console.log( " ISsvgImages:" + svgImages[imageId]);
@@ -2164,19 +2168,19 @@ function getScript( svgDoc ){
 		
 		
 		// 問題を改修・・ svgMapのローカルスコープに全部アクセスできてしまう、これはまずい 2017/8/17
-		// 間接evalに変更する　これでグローバルスコープに・・　ただこれでもwindowは見えてしまうが・・
+		// 間接evalに変更する　これでグローバルスコープに・・　ただこれでもwindowは見えてしまうが・・strictじゃないと・・・
 		// http://qiita.com/omatoro/items/fa5edb72a5da4e40fadb
 		// クロージャの生成
 		(0, eval)( // 間接evalでsvgMap内部が露出しなくなる
 			"function outer(document){ " + 
 			"	console.log('outer:this',this); " + 
 			"	var onload, onzoom, onscroll; " + 
-//			"	var transform, getCanvasSize; " +  // あると同じ変数があった場合エラー出る？ グローバルなので不要か？
 			"	var svgMap = null; " +
 			"	var window = null; " +
 			// 以下のように追加してinitObject()すればthisなしで利用できるようになりました
-			"	var transform,docId,CRS,verIE,geoViewBox,scale; " +  // debug 2018/6/15 宣言してなかったのでグローバル変数が露出してた・・
-			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; isIntersect = this.isIntersect; drawGeoJson = this.drawGeoJson; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale; svglocation = this.location;}" +
+			"	var  transform, getCanvasSize, refreshScreen, linkedDocOp, isIntersect, drawGeoJson, childDocOp, CRS, verIE, docId, geoViewBox, scale, svglocation, getCORSURL; " +  // debug 2018/6/15 宣言してなかったのでグローバル変数が露出してた・・ 2022/04/07 追加・・
+			"	function initObject(){ transform = this.transform; getCanvasSize = this.getCanvasSize; refreshScreen = this.refreshScreen; linkedDocOp = this.linkedDocOp; isIntersect = this.isIntersect; drawGeoJson = this.drawGeoJson; childDocOp = this.childDocOp; CRS = this.CRS; verIE = this.verIE; docId = this.docId; geoViewBox = this.geoViewBox;scale = this.scale; svglocation = this.location; getCORSURL = this.getCORSURL;}" +
+//			"	function initObject(){console.log('initObject:this:',this,' onload:',onload)}" +
 			"	function handleScriptCf( clear ){ if ( ! clear){ scale = this.scale; actualViewBox = this.actualViewBox; geoViewBox = this.geoViewBox; viewport = this.viewport; geoViewport = this.geoViewport;}else{document=null;docId=null; }}" +
 				scriptTxt + 
 			"	return{ " + 
@@ -2423,7 +2427,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , svgimageInfo){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2443,6 +2447,10 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 		href = getNoCacheRequest(href);
 	}
 	var crossOriginFlag = false;
+	var hasNonLinearImageTransformation = false;
+	if ( crossoriginProp!=null ){
+		crossOriginFlag = true;
+	}
 	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
 		href = contentProxyParams.getUrlViaImageProxy(href);
 		if ( contentProxyParams.crossOriginAnonymous ){
@@ -2451,13 +2459,14 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 		}
 	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
+		hasNonLinearImageTransformation = true;
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			// img.crossOrigin="anonymous";
 			crossOriginFlag = true;
 		}
 	}
 	
-	setLoadingImagePostProcessing(img, href, id, false, svgimageInfo, crossOriginFlag);
+	setLoadingImagePostProcessing(img, href, id, false, svgimageInfo, crossOriginFlag, hasNonLinearImageTransformation);
 	
 //	console.log("opacity:" +opacity);
 	if ( opacity ){
@@ -2513,7 +2522,12 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	return ( img );
 }
 
-function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, crossOriginFlag ){
+function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, crossOriginFlag, hasNonLinearImageTransformation ){
+	var timeout = loadingTransitionTimeout;
+	if ( hasNonLinearImageTransformation==true ){
+		timeout = loadingTransitionTimeout * 3; // 2022/3/26 NonLinearImageTransformationのあるimgはtimeoutを3倍に延ばす・・(場当たりだね)
+		// console.log("hasNonLinearImageTransformation: set 3x Timeout:",timeout);
+	}
 	if ( verIE > 8 ){
 //		console.log("el",href);
 		img.addEventListener('load', handleLoadSuccess); // for Safari
@@ -2522,7 +2536,7 @@ function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, 
 		if (crossOriginFlag){ // crossOrigin属性はsrc書き換えと同タイミングとする。2021.6.9 crossOrigin特性だけ変更するケースはない(Imageのproxy設定と一体)という想定でいる・・
 			img.crossOrigin="anonymous";
 		} else {
-			img.crossOrigin=null; // 2021/09/16 debug
+			img.crossOrigin=null; // 2021/09/16 debug   Note: crossOrigin anonymousを設定していると、CORSがついていないhttp respがそもそも読み込めなくなるので、普通のimgは設定されるとまずい
 		}
 	} else { // for IE  to be obsoluted..
 		img.attachEvent('onload', handleLoadSuccess);
@@ -2538,7 +2552,7 @@ function setLoadingImagePostProcessing(img, href, id, forceSrcIE, svgimageInfo, 
 		}
 		img.style.filter = "inherit"; // 同上 (http://www.jacklmoore.com/notes/ie-opacity-inheritance/)
 	}
-	setTimeout( timeoutLoadingImg , loadingTransitionTimeout , img);
+	setTimeout( timeoutLoadingImg , timeout , img);
 	loadingImgs[id] = svgimageInfo; // // 2021/1/26 loadingImgsには画像の場合booleanではなくsvgimageInfoを入れ、ビットイメージ非線形変換を容易にした
 }
 
@@ -2588,7 +2602,7 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	return ( img );
 }
 
-function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id , svgimageInfo ){
+function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id , crossoriginProp, svgimageInfo ){
 	if ( ! cdx ){
 		cdx = 0;
 	}
@@ -2619,6 +2633,10 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.style.height = height+"px";
 	}
 	var crossOriginFlag=false;
+	if ( crossoriginProp != null ){
+		crossOriginFlag = true;
+	}
+	var hasNonLinearImageTransformation=false;
 	if ( typeof contentProxyParams.getUrlViaImageProxy == "function" ){ // 2020.1.30 image用のproxyが使えるようにする
 		href = contentProxyParams.getUrlViaImageProxy(href);
 		if ( contentProxyParams.crossOriginAnonymous ){
@@ -2627,6 +2645,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		}
 	} else if ( typeof(contentProxyParams.getNonlinearTransformationProxyUrl)=="function" && needsNonLinearImageTransformation(svgImagesProps[svgimageInfo.docId].CRS, svgimageInfo.svgNode)){
 		href = contentProxyParams.getNonlinearTransformationProxyUrl(href);
+		hasNonLinearImageTransformation = true;
 		if ( contentProxyParams.crossOriginAnonymousNonlinearTF ){
 			crossOriginFlag=true;
 			//img.crossOrigin="anonymous";
@@ -2641,7 +2660,7 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 //		console.log("src set href:",href, "  src:",img.src, "  imgElem:",img, "  getAttrImg", img.getAttribute("src"));
 //		img.src = href; // これは下で行う(2020.2.4)
 		img.removeAttribute("data-preTransformedHref");
-		setLoadingImagePostProcessing(img, href, id, true, svgimageInfo, crossOriginFlag ); 
+		setLoadingImagePostProcessing(img, href, id, true, svgimageInfo, crossOriginFlag, hasNonLinearImageTransformation ); 
 	}
 	if ( transform ){ // ま、とりあえず 2014.6.18
 		img.style.transform = "matrix(" + transform.a + ","  + transform.b + "," + transform.c + "," + transform.d + "," + transform.e + "," + transform.f + ")";
@@ -3364,6 +3383,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	cdy = 0;
 	var pixelated = false;
 	var imageFilter = null;
+	var crossorigin = null;
 	if ( !subCategory && category == POI){ // subCategory無しで呼び出しているものに対するバックワードコンパチビリティ・・・ 2018.3.2
 //		console.log("called no subCategory  imgE:",imgE);
 		subCategory = USEDPOI;
@@ -3447,6 +3467,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 				href_fragment = (href.substring( 5+href.indexOf("xywh=" ,  href.indexOf("#") ) ));
 				href = href.substring(0,href.indexOf("#")); // ブラウザが#以下があるとキャッシュ無視するのを抑止
 			}
+			
+			crossorigin=imgE.getAttribute("crossorigin");
+			if ( crossorigin==""){crossorigin="anonymous"}
 			
 			if ( GISgeometry){
 				if ( category == BITIMAGE && !nonScaling ){ // 2018.2.26
@@ -3608,6 +3631,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		href_fragment : href_fragment,
 		pixelated : pixelated,
 		imageFilter : imageFilter,
+		crossorigin: crossorigin,
 	}
 }
 
@@ -5008,13 +5032,16 @@ function checkTicker(px,py){
 	
 	var hittedObjects; // ベクタでヒットしたモノ
 	var hittedPoiObjects; // ラスタPOIでヒットしたモノ
+	var hittedLayerHitTests; // 2022/05 レイヤWebAppで独自に組んだヒットテスタでヒットしたモノ
 	
 	if ( px && py ){
 		hittedObjects = getVectorObjectsAtPoint( px , py ); // マウスによる指定では中心でないので、この呼び出しが必要　重たいDOMトラバーサが同期で動きます
 		hittedPoiObjects = getPoiObjectsAtPoint( px , py ); 
+		hittedLayerHitTests = getLayerHitTestAtPoint( px, py ); // 2022/05
 	} else {
 		hittedObjects = getHittedObjects( ); // 2018.1.18 setCentralVectorObjectsGetterと組み合わせ、getVectorObjectsAtPointを代替して効率化 : ベクタでヒットしたモノ
 		hittedPoiObjects = getPoiObjectsAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // ラスタPOIでヒットしたモノ
+		hittedLayerHitTests = getLayerHitTestAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // 2022/05
 	}
 	
 	if ( hittedPoiObjects.length == 0 && px && py && checkAndKickEditor( hittedObjects , px, py ) ){ // POIがヒットしていない場合に限り、ベクタを対象にオーサリングツールのキック可能性をチェックし、キックされたならそのまま終了する
@@ -5024,8 +5051,8 @@ function checkTicker(px,py){
 	
 //	console.log ( "hitted Vector:",hittedObjects , "  POI:",hittedPoiObjects, " TickerElem;",ticker);
 	removeChildren(tickerTable);
-	tickerTableMetadata = new Array();
-	if ( (hittedObjects && hittedObjects.elements.length > 0) || hittedPoiObjects.length > 0 ){
+	tickerTableMetadata = new Array(); // tickerTableMetadataはほとんど使われていないように思われます・・ 2022/05
+	if ( (hittedObjects && hittedObjects.elements.length > 0) || hittedPoiObjects.length > 0 || hittedLayerHitTests.length > 0 ){
 		var lastCallback; // 候補１つだったときに自動起動させるコールバック保持用
 			setTimeout( fixTickerSize , 300 );
 		// for raster POI
@@ -5083,6 +5110,23 @@ function checkTicker(px,py){
 				);
 				
 			}
+		}
+		
+		// 2022/05 for LayerUI customized hitTester
+		for ( var i = 0 ; i < hittedLayerHitTests.length ; i ++){
+			var hitObj = hittedLayerHitTests[i];
+			// console.log("hitObj:",hitObj);
+			var cbf = function(targetElem, hitTestIndex){
+				return function(){
+					targetElem.setAttribute("data-hitTestIndex",hitTestIndex);
+					showPoiPropertyWrapper(targetElem);
+					targetElem.removeAttribute("data-hitTestIndex");
+				}
+			}(hitObj.element, hitObj.hitTestIndex);
+			lastCallback = cbf;
+			
+			addTickerItem( hitObj.title , cbf , tickerTable , hitObj.layerName );
+			tickerTableMetadata.push(hitObj);
 		}
 		
 		if ( px && py && tickerTableMetadata.length == 1 ){ // クリックモードで候補が一つだったら直接コールバック呼び出して、ティッカーは出現させない
@@ -5354,7 +5398,7 @@ function timeoutLoadingImg(obj){ // ロード失敗(タイムアウトやERR404,
 //		console.log ("probably err403,404 :",target, " id:",target.id);
 	}
 	if ( loadingImgs[target.id] ){
-//		console.log("LoadImg TimeOut!!!!!");
+		console.warn("LoadImg TimeOut!!!!!");
 		if ( timeout){
 			++ loadErrorStatistics.timeoutBitImagesCount;
 		}
@@ -6441,7 +6485,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 	var hitted=false;
 	
 	if ( clickable && !canvasNonFillFlag && ( pathHitTest.enable || pathHitTest.centralGetter ) ){ // ヒットテスト要求時の面の場合　且つ　面検索
-		if( context.isPointInPath(pathHitTest.x,pathHitTest.y) ){ // テストしヒットしてたら目立たせる
+		if( context.isPointInPath(pathHitTest.x,pathHitTest.y) || context.isPointInStroke(pathHitTest.x,pathHitTest.y) ){ // テストしヒットしてたら目立たせる isPointInStrokeも実施してみる
 //			console.log("HIT:",pathNode,":",svgImagesProps[getDocumentId(pathNode)]);
 			hitted = true;
 			var pathWidth = context.lineWidth;
@@ -6455,33 +6499,34 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 		}
 	}
 	
-	if ( clickable && canvasNonFillFlag && hitPoint.x && !pathHitTest.pointPrevent ){ // 線の場合　ヒットポイントを設置
-//		console.log(hitPoint, context.fillStyle);
-		var pathStyle = context.fillStyle;
-//		hitPoint.title = pathNode.getAttribute("xlink:title");
-//		hitPoint.innerId = pathNode.getAttribute("id");
-		context.beginPath();
-		context.fillStyle = 'rgb(255,00,00)';
-		context.arc(hitPoint.x,hitPoint.y,3,0,2*Math.PI,true);
-		context.fill();
-		
-		if (pathHitTest.enable || pathHitTest.centralGetter ){ // ヒットテスト要求時の線検索
-			if( context.isPointInPath(pathHitTest.x,pathHitTest.y) ){ // テストしヒットしてたら目立たせる
-				context.arc(hitPoint.x,hitPoint.y,6,0,2*Math.PI,true);
-				context.fill();
-//				console.log("HIT:",pathNode,":",svgImagesProps[getDocumentId(pathNode)],":", hitPoint.x);
-				hitted = true;
-				pathHitTest.pointPrevent = true;
-				var pathWidth = context.lineWidth;
-				context.lineWidth = 6;
-				context.fillStyle = pathStyle;
-				setSVGpathPoints( pathNode ,  context , child2canvas , null ,  null ,  vectorEffectOffset);
-				context.lineWidth = pathWidth;
-				pathHitTest.pointPrevent = false;
-			}
+	if ( clickable && canvasNonFillFlag && hitPoint.x && !pathHitTest.pointPrevent ){ 
+		var tmpLineWidth = context.lineWidth;
+		var tmpStrokeStyle = context.strokeStyle;
+		if ( context.lineWidth < 6 ){ // 細すぎる線はヒットテスト用のダミー太線を隠して配置する 6pxは決め打値
+			context.lineWidth = 6;
+			context.strokeStyle = 'rgba(0,0,0,0)'; // hittestにalphaは関係ないので隠せる
+			context.stroke();
 		}
 		
-		context.fillStyle = pathStyle;
+		if (pathHitTest.enable || pathHitTest.centralGetter ){ // ヒットテスト要求時の線検索
+			if(  context.isPointInStroke(pathHitTest.x,pathHitTest.y)  ){ // テストしヒットしてたら目立たせる isPointInStrokeに変更し線上なら」どこでもヒット可能にしてみる
+				hitted = true;
+				pathHitTest.pointPrevent = true;
+				context.lineWidth = tmpLineWidth+6;
+				context.strokeStyle = 'rgba(255,0,0,1)';
+				pathHitTest.pointPrevent = false;
+				context.stroke();
+			}
+		}
+		// 線の場合　疑似ヒットポイントを設置(旧版との互換維持のため) ToDo消せるようにもしようね 2022/4/12
+		context.beginPath();
+		context.strokeStyle = 'rgba(255,00,00,0.8)';
+		context.lineWidth = 3;
+		context.arc(hitPoint.x,hitPoint.y,2,0,2*Math.PI,true);
+		context.stroke();
+		
+		context.lineWidth = tmpLineWidth;
+		context.strokeStyle = tmpStrokeStyle;
 		
 	}
 	
@@ -6916,6 +6961,57 @@ function getPoiObjectsAtPoint( x, y ){
 	return ( hittedPOIs );
 }
 
+// 2020/05 カスタムヒットテスト関数を呼び出す
+function getLayerHitTestAtPoint( x, y ){
+	var geop = screen2Geo(x , y );
+	var pos = {
+		clientX: x,
+		clientY: y,
+		lat:geop.lat, 
+		lng: geop.lng
+	};
+	var anses =[];
+	for (var  layerId in svgImagesProps){
+		var sip = svgImagesProps[layerId];
+		if ( !sip.controllerWindow){continue}
+		var hitTest = sip.controllerWindow.customHitTester;
+		if (typeof(hitTest)=="function" ){
+			var hitted = hitTest( pos );
+			if ( hitted ){ // boolean,string || element
+				if ( Array.isArray(hitted)){
+				} else {
+					hitted = [hitted];
+				}
+				var layerName = getLayerName( getLayer(layerId) );
+				var hindex=0;
+				for ( var hi of hitted ){
+					var ans ={};
+					ans.layerName = layerName;
+					ans.metaSchema=sip.metaSchema;
+					ans.geoBbox={x:geop.lng,y:geop.lng,width:0,height:0};
+					ans.hitTestIndex=hindex;
+					if ( hi === true ){
+						ans.element = svgImages[layerId].documentElement; // Elementが必要なので文書要素を・・
+						ans.title = layerName;
+						ans.metadata=hindex;
+					} else if ( typeof(hi)=="string"){
+						ans.element =svgImages[layerId].documentElement; // 同上
+						ans.title = hi;
+						ans.metadata=hi;
+					} else if ( hi instanceof Element ){
+						ans.element = hi;
+						ans.title = hi.getAttribute("xlink:title");
+						ans.metadata=hi.getAttribute("content");
+					}
+					anses.push(ans);
+					++hindex;
+				}
+			}
+		}
+	}
+	return ( anses );
+}
+
 // VECTOR2Dの線や面をヒットテストする機能 2013/11/29
 var pathHitTest = new Object();
 // .enable:  X,Yを指定してヒットテストするときに設置する
@@ -7294,22 +7390,29 @@ function childDocOp( func , docHash , param1, param2 , param3 , param4 , param5 
 var specificShowPoiPropFunctions = {};
 
 function showPoiPropertyWrapper(target){
-	var docId = getDocumentId(target);
-	var layerId = svgImagesProps[docId].rootLayer;
-	
-	var layerName = getLayerName(getLayer(layerId));
-	target.setAttribute("data-layername",layerName); // 2017.8.22 added
-	
+	var targetIsXMLElement = false;
+	if (target instanceof Element){
+		targetIsXMLElement = true;
+		var docId = getDocumentId(target);
+		var layerId = svgImagesProps[docId].rootLayer;
+		
+		var layerName = getLayerName(getLayer(layerId));
+		target.setAttribute("data-layername",layerName); // 2017.8.22 added
+	}
 	var ans = true;
 	if ( specificShowPoiPropFunctions[docId] ){ // targeDoctに対応するshowPoiProperty処理関数が定義されていた場合、それを実行する。
 		ans = specificShowPoiPropFunctions[docId](target);
 	} else if (specificShowPoiPropFunctions[layerId]){ // targetDocが属する"レイヤー"に対応する　同上
 		ans = specificShowPoiPropFunctions[layerId](target);
 	} else { // それ以外は・・
-		if ( typeof showPoiProperty == "function" ){
-			showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+		if ( targetIsXMLElement ){
+			if ( typeof showPoiProperty == "function" ){
+				showPoiProperty(target); // 古いソフトでshowPoiPropertyを強制定義している場合の対策
+			} else {
+				defaultShowPoiProperty(target);
+			}
 		} else {
-			defaultShowPoiProperty(target);
+			console.warn ( " Skip. The result of the hit test is not an Element, so it is necessary to setShowPoiProperty. :",target);
 		}
 	}
 	
@@ -7321,7 +7424,9 @@ function showPoiPropertyWrapper(target){
 		}
 	}
 	
-	target.removeAttribute("data-layername");
+	if ( targetIsXMLElement ){
+		target.removeAttribute("data-layername");
+	}
 }
 
 // setShowPoiProperty: 特定のレイヤー・svg文書(いずれもIDで指定)もしくは、全体に対して別のprop.表示関数を指定できる。
@@ -8252,6 +8357,7 @@ var contentProxyParams = { // プロキシ経由でコンテンツを取得す�
 function setProxyURLFactory( documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous , imageURLviaProxyFunctionForNonlinearTransformation , imageCrossOriginAnonymousForNonlinearTransformation){
 	// 2020/1/30 proxyURL生成のsetterを設けるとともに、ビットイメージに対するproxyも設定できるように
 	// 2021/1/27 ビットイメージの非線形変換のためだけに用いるプロキシを別設定可能にした。 APIの仕様がイケてない・・
+	// 第一引数(documentURLviaProxyFunction)は使われていないと思われるので廃止したい
 	if ( typeof ( documentURLviaProxyFunction ) == "function" ){
 		contentProxyParams.getUrlViaProxy = documentURLviaProxyFunction;
 	} else if ( documentURLviaProxyFunction === null ){
@@ -8283,6 +8389,30 @@ function setProxyURLFactory( documentURLviaProxyFunction , imageURLviaProxyFunct
 	}
 	
 	console.log("called setProxyURLFactory: contentProxyParams:",contentProxyParams,"    input params:",documentURLviaProxyFunction , imageURLviaProxyFunction , imageCrossOriginAnonymous , imageURLviaProxyFunctionForNonlinearTransformation , imageCrossOriginAnonymousForNonlinearTransformation);
+}
+
+function getCORSURL(originalURL, alsoCrossoriginParam){
+	if ( alsoCrossoriginParam ){ // SVGMap.jsとcrossorigin設定も同期させる場合にはその情報も得る（かわりobjectになる）
+		if ( typeof (contentProxyParams.getNonlinearTransformationProxyUrl )=="function"){
+			return {
+				url: contentProxyParams.getNonlinearTransformationProxyUrl(originalURL),
+				crossorigin: contentProxyParams.crossOriginAnonymousNonlinearTF 
+			}
+		} else {
+			return { 
+				url: originalURL,
+				crossorigin: false
+			}
+		}
+	} else {
+		if ( typeof (contentProxyParams.getNonlinearTransformationProxyUrl )=="function"){
+			return ( contentProxyParams.getNonlinearTransformationProxyUrl(originalURL));
+		//} else if ( typeof (contentProxyParams.getUrlViaImageProxy)=="function"){
+		//	return ( contentProxyParams.getUrlViaImageProxy(originalURL));
+		} else {
+			return ( originalURL );
+		}
+	}
 }
 
 function getLinearTransformMatrix(x1i,y1i,x2i,y2i,x3i,y3i,x1o,y1o,x2o,y2o,x3o,y3o){
@@ -8379,6 +8509,7 @@ return { // svgMap. で公開する関数のリスト 2014.6.6
 	getBBox : getBBox,
 	getCentralGeoCoorinates : getCentralGeoCoorinates,
 	getConversionMatrixViaGCS : getConversionMatrixViaGCS,
+	getCORSURL: getCORSURL,
 	getElementByImageId : getElementByImgIdNoNS,
 	getGeoViewBox : function( ){ 
 		return {

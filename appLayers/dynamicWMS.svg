@@ -25,9 +25,6 @@
 	
 	var tilePix = 256;
 	var baseURL_gsj ="https://gbank.gsj.jp/ows/GSJ_Combined_Bedrock_and_Superficial_Geology_and_Age/wms?LAYERS=JPN_GSJ_1M_Combined_BLT_SLT_BA&TRANSPARENT=TRUE&FORMAT=image/png&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&STYLES=&SRS=EPSG:900913"; // gsj.jp 地質情報
-	var baseURL_nagoya = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=tsunami_area"; // 地理学会　遡上範囲
-	var baseURL_nagoya2 = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=severe_tsunami_area"; // 地理学会　被害範囲
-	var baseURL_nagoya3 = "http://133.6.118.74/geoserver/wms?SERVICE=WMS&SERVICE=WMS&VERSION=1.1.1&REQUEST=GetMap&FORMAT=image/png&TRANSPARENT=TRUE&STYLES=&SRS=EPSG:900913&LAYERS=tsunami_run-up_height_2014"; // 地理学会　遡上高分布
 	
 	var baseURL = baseURL_gsj;
 	
