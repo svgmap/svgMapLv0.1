@@ -883,6 +883,18 @@ function setLayerDivProps( id, parentElem, parentSvgDocId ){ // parseSVGから�
 	}
 }
 
+function addSpecialTokenAtQueryString( originalUrl, spToken ){
+	//	クエリストリングを用いて認可で保護されたリソースを突破できるように設置
+	var rPath = originalUrl;
+	if (rPath.lastIndexOf("?")>0){
+		rPath += "&";
+	} else {
+		rPath += "?";
+	}
+	rPath += "specialToken=" + spToken;
+	return ( rPath );
+}
+
 function getNoCacheRequest( originalUrl ){
 //	強制的にキャッシュを除去するため、unixTimeをQueryに設置する
 //	console.log("NO CACHE GET REQUEST");
@@ -920,6 +932,10 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 			var rPath = path;
 			if ( svgImagesProps[id].rootLayer && svgImagesProps[svgImagesProps[id].rootLayer].noCache ){
 				rPath = getNoCacheRequest(rPath);
+			}			
+
+			if( svgImagesProps[id].rootLayer && svgImagesProps[svgImagesProps[id].rootLayer].specialToken ){// 認可を突破するためにクエリストリングに認証キーを設置
+				rPath = addSpecialTokenAtQueryString(rPath, svgImagesProps[svgImagesProps[id].rootLayer].specialToken);
 			}
 			
 			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
@@ -2446,6 +2462,11 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	if ( nocache ) { // ビットイメージにもnocacheを反映させてみる 2019.3.18
 		href = getNoCacheRequest(href);
 	}
+
+	if( specialToken ){// 認可を突破するためにクエリストリングに認証キーを設置
+		href = addSpecialTokenAtQueryString(href, specialToken);
+	}
+
 	var crossOriginFlag = false;
 	var hasNonLinearImageTransformation = false;
 	if ( crossoriginProp!=null ){
@@ -3377,7 +3398,7 @@ function getDevicePixelRatio(docId){
 
 // POI,タイル(use,image要素)のプロパティを得る DIRECTPOI,USEDPOIの処理に変更2018.3.2
 function getImageProps( imgE , category , parentProps , subCategory , GISgeometry){
-	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment ;
+	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment, specialToken;
 	var nonScaling = false;
 	cdx = 0;
 	cdy = 0;
@@ -3609,6 +3630,11 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	if ( opacity > 1 || opacity < 0){
 		opacity = 1;
 	}
+
+	// クエリパラメータを用いた認可を突破する用途を想定したトークン
+	if( !imgE.getAttribute("specialToken") ){
+		specialToken = imgE.getAttribute("specialToken");
+	}
 	
 	return {
 		x : x ,
@@ -3632,6 +3658,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		pixelated : pixelated,
 		imageFilter : imageFilter,
 		crossorigin: crossorigin,
+		specialToken: specialToken,
 	}
 }
 
