@@ -1644,7 +1644,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode} );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.specialToken );
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -2443,7 +2443,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo, specialToken){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
