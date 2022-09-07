@@ -910,7 +910,7 @@ if ( parentElem.getAttribute("data-nocache") ){ // ルートレイヤに対す�
 	
 	// loadSVG(this)[XHR] -(非同期)-> handleResult[buildDOM] -> dynamicLoad[updateMap] -> parseSVG[parseXML & set/chgImage2Canvas] -> (if Necessary) ( (if Unloaded child) loadSVG(child)-(非同期)->... || (if already loaded child) parseSVG(child)... )
 	// なお、起動時はloadSVGからだが、伸縮,スクロール,レイヤON/OFFなどでの読み込み表示処理の起点はdynamicLoadから(rootの文書は起動時に読み込み済みで変わらないため)
-	function loadSVG( path , id , parentElem , parentSvgDocId, spToken) {
+	function loadSVG( path , id , parentElem , parentSvgDocId) {
 	//	console.log("called loadSVG  id:",id, " path:",path);
 		if ( !svgImages[id] ){ 
 	//		console.log("call loadSVG  create svgImagesProps id:",id);
@@ -934,8 +934,8 @@ if ( parentElem.getAttribute("data-nocache") ){ // ルートレイヤに対す�
 					rPath = getNoCacheRequest(rPath);
 				}
 				
-				// ?. : オプショナルチェーンという書き方でアクセス元がNullでも途中でエラーとならない書き方
-				const tempToken = spToken || svgImagesProps[id].specialToken || svgImagesProps[svgImagesProps[id].rootLayer]?.specialToken;
+				// 今後、ファイルのヘッダーにspecialTokenを埋め込むかもしれないためsvgImagesProps[id].specialTokenは残しておきます
+				const tempToken = svgImagesProps[id].specialToken || svgImagesProps[svgImagesProps[id].rootLayer]?.specialToken;	// ?. : オプショナルチェーンという書き方でアクセス元がNullでも途中でエラーとならない書き方
 				if( tempToken != undefined ){// クエリストリングを用いた認可を突破する用
 					rPath = addSpecialTokenAtQueryString(rPath, tempToken);
 					svgImagesProps[id].specialToken = tempToken;	//Rootのプロパティ
@@ -1552,7 +1552,9 @@ if ( parentElem.getAttribute("data-nocache") ){ // ルートレイヤに対す�
 					console.warn ( "This embedding element don't have width/height property. Never renders... imageId:", imageId ,svgNode);
 				}
 				if ( ip.specialToken ){
-					svgImagesProps[docId].specialToken = ip.specialToken;
+					if(docId != "root"){ // specialTokenを保存するのはroot以外が対象
+						svgImagesProps[svgImagesProps[docId].rootLayer].specialToken = ip.specialToken;
+					}
 				}
 	//			console.log( "c2rs:" + imageRect.c2rScale );
 				/**
@@ -1742,7 +1744,7 @@ if ( parentElem.getAttribute("data-nocache") ){ // ルートレイヤに対す�
 						if ( childCategory != POI && childCategory != BITIMAGE && childCategory != TEXT ){ // animation|iframe要素の場合、子svg文書を読み込む( htmlへの親要素埋め込み後に移動した 2014.6.5)
 	//						console.log("call loadSVG:",imageId, ip.href);
 							var childSVGPath = getImageURL(ip.href , docDir ); // 2016.10.14 関数化＆統合化
-							loadSVG( childSVGPath , imageId , img , docId, ip.specialToken);
+							loadSVG( childSVGPath , imageId , img , docId);
 							
 							//  この部分の処理は、setLayerDivProps 関数に切り出しloadSVG側に移設 2017.9.29 (noCache処理のため)
 						}
