@@ -1654,7 +1654,7 @@
 						if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 							var imageURL = getImageURL(ip.href,docDir);
 							var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-							img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.specialToken );
+							img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.specialToken || svgImagesProps[svgImagesProps[docId].rootLayer]?.specialToken);
 							
 						} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 							var cStyle = getStyle( svgNode , pStyle );
