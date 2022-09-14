@@ -4413,11 +4413,11 @@ function gpsSuccess(position){
 
 function printProperties(obj) {
 //	console.log("PrintProps:");
-	var properties = '';
-	for (var prop in obj){
-		properties += prop + "=" + obj[prop] + "\n";
-	}
-	return(properties);
+    var properties = '';
+    for (var prop in obj){
+        properties += prop + "=" + obj[prop] + "\n";
+    }
+    return(properties);
 }
 
 	// レイヤーのID,title,番号,href(URI)のいずれかで、ルートコンテナSVGDOMにおけるレイヤーの(svg:animation or svg:iframe)要素を取得する
@@ -5730,7 +5730,7 @@ function getSvgTarget( htmlImg ){
 	};
 }
 
-	// 2013.7.30 getElementByIdはSVGNSで無いと引っかからない@Firefox 動的レイヤーでも要注意 createElement"NS"で作ることが重要(IE11でも同じことがおきるので、すべての呼び出しをこれに変更することにした 2014.6.20)
+// 2013.7.30 getElementByIdはSVGNSで無いと引っかからない@Firefox 動的レイヤーでも要注意 createElement"NS"で作ることが重要(IE11でも同じことがおきるので、すべての呼び出しをこれに変更することにした 2014.6.20)
 function getElementByIdNoNS( XMLNode , searchId ){
 //	var ans =XMLNode.getElementById(searchId);
 //	if ( ans ){
