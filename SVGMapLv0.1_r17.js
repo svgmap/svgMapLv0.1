@@ -883,6 +883,18 @@ function setLayerDivProps( id, parentElem, parentSvgDocId ){ // parseSVGから�
 	}
 }
 
+function addSpecialTokenAtQueryString( originalUrl, spToken ){
+	//	クエリストリングを用いて認可で保護されたリソースを突破できるように設置
+	var rPath = originalUrl;
+	if (rPath.lastIndexOf("?")>0){
+		rPath += "&";
+	} else {
+		rPath += "?";
+	}
+	rPath += "specialToken=" + spToken;
+	return ( rPath );
+}
+
 function getNoCacheRequest( originalUrl ){
 //	強制的にキャッシュを除去するため、unixTimeをQueryに設置する
 //	console.log("NO CACHE GET REQUEST");
@@ -921,7 +933,14 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 			if ( svgImagesProps[id].rootLayer && svgImagesProps[svgImagesProps[id].rootLayer].noCache ){
 				rPath = getNoCacheRequest(rPath);
 			}
-			
+
+			// 今後、ファイルのヘッダーにspecialTokenを埋め込むかもしれないためsvgImagesProps[id].specialTokenは残しておきます
+			const tempToken = svgImagesProps[id].specialToken || svgImagesProps[svgImagesProps[id].rootLayer]?.specialToken;	// ?. : オプショナルチェーンという書き方でアクセス元がNullでも途中でエラーとならない書き方
+			if( tempToken != undefined ){// クエリストリングを用いた認可を突破する用
+				rPath = addSpecialTokenAtQueryString(rPath, tempToken);
+				svgImagesProps[id].specialToken = tempToken;	//Rootのプロパティ
+			}
+
 			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
 				var pxPath = contentProxyParams.getUrlViaProxy(rPath);
 				httpObj.open("GET", getSvgReq(pxPath) , true );
@@ -1532,6 +1551,13 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 			if ( imageRect.width==0 && imageRect.height==0 && (childCategory==EMBEDSVG || childCategory == BITIMAGE)){
 				console.warn ( "This embedding element don't have width/height property. Never renders... imageId:", imageId ,svgNode);
 			}
+
+			if ( ip.specialToken ){
+				if(docId != "root"){ // specialTokenを保存するのはroot以外が対象
+					svgImagesProps[svgImagesProps[docId].rootLayer].specialToken = ip.specialToken;
+				}
+			}
+
 //			console.log( "c2rs:" + imageRect.c2rScale );
 			/**
 			console.log("--  " + docId);
@@ -1628,7 +1654,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode} );
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.specialToken || svgImagesProps[svgImagesProps[docId].rootLayer]?.specialToken);
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -2427,7 +2453,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo, specialToken){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2446,6 +2472,11 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 	if ( nocache ) { // ビットイメージにもnocacheを反映させてみる 2019.3.18
 		href = getNoCacheRequest(href);
 	}
+
+	if( specialToken ){// 認可を突破するためにクエリストリングに認証キーを設置
+		href = addSpecialTokenAtQueryString(href, specialToken);
+	}
+
 	var crossOriginFlag = false;
 	var hasNonLinearImageTransformation = false;
 	if ( crossoriginProp!=null ){
@@ -3377,7 +3408,7 @@ function getDevicePixelRatio(docId){
 
 // POI,タイル(use,image要素)のプロパティを得る DIRECTPOI,USEDPOIの処理に変更2018.3.2
 function getImageProps( imgE , category , parentProps , subCategory , GISgeometry){
-	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment ;
+	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment, specialToken;
 	var nonScaling = false;
 	cdx = 0;
 	cdy = 0;
@@ -3609,6 +3640,9 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 	if ( opacity > 1 || opacity < 0){
 		opacity = 1;
 	}
+
+	// クエリパラメータを用いた認可を突破する用途を想定したトークン
+	specialToken = imgE.getAttribute("specialToken");
 	
 	return {
 		x : x ,
@@ -3632,6 +3666,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		pixelated : pixelated,
 		imageFilter : imageFilter,
 		crossorigin: crossorigin,
+		specialToken: specialToken,
 	}
 }
 
@@ -3736,7 +3771,7 @@ function isIntersect( rect1 , rect2 ){
 	
 	var ans = false;
 	if ( sec1.x > sec2.x + sec2.width || sec2.x > sec1.x + sec1.width 
-	 || sec1.y > sec2.y + sec2.height || sec2.y > sec1.y + sec1.height ){
+		|| sec1.y > sec2.y + sec2.height || sec2.y > sec1.y + sec1.height ){
 		return ( false );
 	} else {
 		return ( true );
@@ -4186,8 +4221,8 @@ function setUpdateCenterPos(func){
 
 // 小数点以下の丸め関数です
 function round(num, n) {
-  var tmp = Math.pow(10, n);
-  return Math.round(num * tmp) / tmp;
+	var tmp = Math.pow(10, n);
+	return Math.round(num * tmp) / tmp;
 }
 
 function getVerticalScreenScale( screenLength ){
@@ -5695,7 +5730,7 @@ function getSvgTarget( htmlImg ){
 	};
 }
 
- // 2013.7.30 getElementByIdはSVGNSで無いと引っかからない@Firefox 動的レイヤーでも要注意 createElement"NS"で作ることが重要(IE11でも同じことがおきるので、すべての呼び出しをこれに変更することにした 2014.6.20)
+// 2013.7.30 getElementByIdはSVGNSで無いと引っかからない@Firefox 動的レイヤーでも要注意 createElement"NS"で作ることが重要(IE11でも同じことがおきるので、すべての呼び出しをこれに変更することにした 2014.6.20)
 function getElementByIdNoNS( XMLNode , searchId ){
 //	var ans =XMLNode.getElementById(searchId);
 //	if ( ans ){
@@ -6480,7 +6515,7 @@ function setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repl
 		context.fill();
 	}
 	if ( !canvasNonStrokeFlag ){
-      context.stroke();
+		context.stroke();
 	}
 	var hitted=false;
 	
@@ -6774,7 +6809,7 @@ function setCanvasStyle(style , context){
 				context.lineWidth = 1;
 			}
 		} else {
-		 context.lineWidth = 0;
+			context.lineWidth = 0;
 		}
 		if (style["stroke-dasharray"] ){
 //			var dashList = new Array();
@@ -8644,3 +8679,4 @@ window.svgMap = svgMap;
 
 
 })( window );
+	
