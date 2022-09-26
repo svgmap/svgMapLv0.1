@@ -184,7 +184,7 @@
 // 2022/05/16 : customHitTester
 // 2022/05/30 : pixelated, opacity,filterのDOM操作を反映させる
 // 2022/09/22 : customHitTesterに、isMapCenterHitTestで(伸縮スクロール時自動発生する)中心ヒットテストなのかどうかを送信できるようにした
-// 2022/09/26 : 指定したレイヤーに対して共通クエリパラメータを付与する仕組みを設置(tokenの設定などで使用できる)
+// 2022/09/26 : 指定したレイヤーに対して共通クエリパラメータを付与する仕組み(commonQuery)を設置(コンテンツ取得用tokenの設定などで使用できる)
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -886,15 +886,15 @@ function setLayerDivProps( id, parentElem, parentSvgDocId ){ // parseSVGから�
 	}
 }
 
-function addSpecialTokenAtQueryString( originalUrl, spToken ){
-	//	クエリストリングを用いて認可で保護されたリソースを突破できるように設置
+function addCommonQueryAtQueryString( originalUrl, commonQuery ){
+	//	 認証キーなどに用いるレイヤー(もしくはフレームワーク全体)共通クエリストリング設置
 	var rPath = originalUrl;
 	if (rPath.lastIndexOf("?")>0){
 		rPath += "&";
 	} else {
 		rPath += "?";
 	}
-	rPath += "specialToken=" + spToken;
+	rPath +=  commonQuery; // 2022/09/26 queryKey+"="も含めてcommonQueryで設定することにする
 	return ( rPath );
 }
 
@@ -937,11 +937,11 @@ function loadSVG( path , id , parentElem , parentSvgDocId) {
 				rPath = getNoCacheRequest(rPath);
 			}
 
-			// 今後、ファイルのヘッダーにspecialTokenを埋め込むかもしれないためsvgImagesProps[id].specialTokenは残しておきます
-			const tempToken = svgImagesProps[id].specialToken || svgImagesProps[svgImagesProps[id].rootLayer]?.specialToken;	// ?. : オプショナルチェーンという書き方でアクセス元がNullでも途中でエラーとならない書き方
-			if( tempToken != undefined ){// クエリストリングを用いた認可を突破する用
-				rPath = addSpecialTokenAtQueryString(rPath, tempToken);
-				svgImagesProps[id].specialToken = tempToken;	//Rootのプロパティ
+			// 今後、ファイルのヘッダーにcommonQueryを埋め込むかもしれないためsvgImagesProps[id].commonQueryを設定しておきます
+			const tempComQuery = svgImagesProps[id].commonQuery || svgImagesProps[svgImagesProps[id].rootLayer]?.commonQuery;	// ?. : オプショナルチェーンという書き方でアクセス元がNullでも途中でエラーとならない書き方
+			if( tempComQuery != undefined ){// 認証キーなどに用いるレイヤー(もしくはフレームワーク全体)共通クエリストリング
+				rPath = addCommonQueryAtQueryString(rPath, tempComQuery);
+				svgImagesProps[id].commonQuery = tempComQuery;	//Rootのプロパティ
 			}
 
 			if ( typeof contentProxyParams.getUrlViaProxy == "function" ){ // original 2014.2.25 by konno (たぶん)サイドエフェクトが小さいここに移動 s.takagi 2016.8.10
@@ -1555,9 +1555,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 				console.warn ( "This embedding element don't have width/height property. Never renders... imageId:", imageId ,svgNode);
 			}
 
-			if ( ip.specialToken ){
-				if(docId != "root"){ // specialTokenを保存するのはroot以外が対象
-					svgImagesProps[svgImagesProps[docId].rootLayer].specialToken = ip.specialToken;
+			if ( ip.commonQuery ){
+				if(docId != "root"){ // commonQueryを保存するのはroot以外が対象
+					svgImagesProps[svgImagesProps[docId].rootLayer].commonQuery = ip.commonQuery;
 				}
 			}
 
@@ -1657,7 +1657,7 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 						var imageURL = getImageURL(ip.href,docDir);
 						var isNoCache = (childCategory == BITIMAGE && svgImagesProps[docId].rootLayer && svgImagesProps[svgImagesProps[docId].rootLayer].noCache);
-						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.specialToken || svgImagesProps[svgImagesProps[docId].rootLayer]?.specialToken);
+						img = getImgElement(xd.p0 , yd.p0, xd.span , yd.span , imageURL , imageId , ip.opacity , childCategory , ip.metadata , ip.title , elmTransform , ip.href_fragment , ip.pixelated , ip.imageFilter, isNoCache, ip.crossorigin, {docId:docId,svgNode:svgNode}, ip.commonQuery || svgImagesProps[svgImagesProps[docId].rootLayer]?.commonQuery);
 						
 					} else if ( childCategory == TEXT ){ // text要素の場合(2014.7.22)
 						var cStyle = getStyle( svgNode , pStyle );
@@ -2456,7 +2456,7 @@ function getIntValue( p0 , span0 ){ // y側でも使えます
 
 var loadingImgs = new Array(); // 読み込み途上のimgのリストが入る　2021/1/26 通常booleanだがビットイメージの場合非線形変換用の情報が入る
 
-function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo, specialToken){
+function getImgElement( x, y, width, height, href , id , opacity , category , meta , title , transform , href_fragment , pixelated , imageFilter , nocache , crossoriginProp, svgimageInfo, commonQuery){
 	var img = document.createElement("img");
 	
 	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
@@ -2476,8 +2476,8 @@ function getImgElement( x, y, width, height, href , id , opacity , category , me
 		href = getNoCacheRequest(href);
 	}
 
-	if( specialToken ){// 認可を突破するためにクエリストリングに認証キーを設置
-		href = addSpecialTokenAtQueryString(href, specialToken);
+	if( commonQuery ){// 認証キーなどに用いるレイヤー(もしくはフレームワーク共通)クエリストリング設置
+		href = addCommonQueryAtQueryString(href, commonQuery);
 	}
 
 	var crossOriginFlag = false;
@@ -3437,7 +3437,7 @@ function getDevicePixelRatio(docId){
 
 // POI,タイル(use,image要素)のプロパティを得る DIRECTPOI,USEDPOIの処理に変更2018.3.2
 function getImageProps( imgE , category , parentProps , subCategory , GISgeometry){
-	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment, specialToken;
+	var x, y, width, height, meta, title, elemClass, href, transform, text , cdx , cdy , href_fragment, commonQuery;
 	var nonScaling = false;
 	cdx = 0;
 	cdy = 0;
@@ -3670,8 +3670,8 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		opacity = 1;
 	}
 
-	// クエリパラメータを用いた認可を突破する用途を想定したトークン
-	specialToken = imgE.getAttribute("specialToken");
+	//  認証キーなどに用いるレイヤー(もしくはフレームワーク全体)共通クエリストリング
+	commonQuery = imgE.getAttribute("commonQuery");
 	
 	return {
 		x : x ,
@@ -3695,7 +3695,7 @@ function getImageProps( imgE , category , parentProps , subCategory , GISgeometr
 		pixelated : pixelated,
 		imageFilter : imageFilter,
 		crossorigin: crossorigin,
-		specialToken: specialToken,
+		commonQuery: commonQuery,
 	}
 }
 
