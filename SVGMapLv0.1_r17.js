@@ -182,6 +182,9 @@
 // 2022/04/06 : image:crossorigin(値は見てない), svgMap.getCORSURL()
 // 2022/04/12 : line Hittesterの改善 (use isPointInStroke) 
 // 2022/05/16 : customHitTester
+// 2022/05/30 : pixelated, opacity,filterのDOM操作を反映させる
+// 2022/09/22 : customHitTesterに、isMapCenterHitTestで(伸縮スクロール時自動発生する)中心ヒットテストなのかどうかを送信できるようにした
+// 2022/09/26 : 指定したレイヤーに対して共通クエリパラメータを付与する仕組みを設置(tokenの設定などで使用できる)
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -1767,9 +1770,9 @@ function parseSVG( svgElem , docId , parentElem , eraseAll , symbols , inCanvas 
 					if ( childCategory == POI || childCategory == BITIMAGE ){ // image,use要素の場合
 //						console.log("AlreadyLoadedBitimage:" + imageId + " dispay:" + imgElem.style.display);
 						// x,y,w,hを書き換える
-						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , imageId , ip.crossorigin, {docId:docId,svgNode:svgNode} ); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
+						setImgElement(imgElem , xd.p0 , yd.p0, xd.span , yd.span , getImageURL(ip.href,docDir), elmTransform , 0, 0, false, ip.nonScaling, ip.href_fragment , ip.pixelated , ip.imageFilter, imageId , ip.opacity , ip.crossorigin, {docId:docId,svgNode:svgNode} ); // 2015.7.8 本来ip.cdxyは入れるべきだと思うが、どこかでダブルカウントされるバグがある
 					} else if ( childCategory == TEXT ){ // 2014.7.22
-						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , imageId , null, {docId:docId,svgNode:svgNode} );
+						setImgElement(imgElem , xd.p0 , yd.p0 , 0 , yd.span , "" , elmTransform , ip.cdx , ip.cdy , true , ip.nonScaling , null , ip.pixelated , ip.imageFilter, imageId , ip.opacity , null, {docId:docId,svgNode:svgNode} );
 					} else { // animation|iframe要素の場合(svgTile/Layer)
 //						console.log("id:" + imageId );
 //						console.log( " ISsvgImages:" + svgImages[imageId]);
@@ -2633,7 +2636,7 @@ function getSpanTextElement( x, y, cdx, cdy, text , id , opacity , transform , s
 	return ( img );
 }
 
-function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , id , crossoriginProp, svgimageInfo ){
+function setImgElement( img , x, y, width, height, href , transform , cdx , cdy , txtFlg , txtNonScaling , href_fragment , pixelated, imageFilter, id , opacity, crossoriginProp, svgimageInfo ){
 	if ( ! cdx ){
 		cdx = 0;
 	}
@@ -2663,6 +2666,32 @@ function setImgElement( img , x, y, width, height, href , transform , cdx , cdy 
 		img.style.width = width+"px";
 		img.style.height = height+"px";
 	}
+	
+	// 2022/05/30 : pixelated, opacity,filterのDOM操作を反映させる
+	if ( pixelated ){ // Disable anti-alias http://dachou.daa.jp/tanaka_parsonal/pixelart-topics/  Edgeが・・・
+		img.style.imageRendering="pixelated";
+		img.style.imageRendering="-moz-crisp-edges";
+		img.style.msInterpolationMode="nearest-neighbor";
+		img.style.imageRendering="optimize-contrast";
+		img.dataset.pixelated="true";
+	} else {
+		img.style.imageRendering="";
+		img.style.imageRendering="";
+		img.style.msInterpolationMode="";
+		img.style.imageRendering="";
+		img.dataset.pixelated="true";
+	}
+	if ( opacity ){
+		img.style.opacity=opacity;
+	} else {
+		img.style.opacity="";
+	}
+	if ( imageFilter){
+		img.style.filter=imageFilter;
+	}else {
+		img.style.filter="";
+	}
+	
 	var crossOriginFlag=false;
 	if ( crossoriginProp != null ){
 		crossOriginFlag = true;
@@ -5076,7 +5105,7 @@ function checkTicker(px,py){
 	} else {
 		hittedObjects = getHittedObjects( ); // 2018.1.18 setCentralVectorObjectsGetterと組み合わせ、getVectorObjectsAtPointを代替して効率化 : ベクタでヒットしたモノ
 		hittedPoiObjects = getPoiObjectsAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // ラスタPOIでヒットしたモノ
-		hittedLayerHitTests = getLayerHitTestAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2 ); // 2022/05
+		hittedLayerHitTests = getLayerHitTestAtPoint( mapCanvasSize.width / 2, mapCanvasSize.height / 2, true ); // 2022/05 , 2022/09 中心ヒットテスト判別可能にする
 	}
 	
 	if ( hittedPoiObjects.length == 0 && px && py && checkAndKickEditor( hittedObjects , px, py ) ){ // POIがヒットしていない場合に限り、ベクタを対象にオーサリングツールのキック可能性をチェックし、キックされたならそのまま終了する
@@ -6996,8 +7025,8 @@ function getPoiObjectsAtPoint( x, y ){
 	return ( hittedPOIs );
 }
 
-// 2020/05 カスタムヒットテスト関数を呼び出す
-function getLayerHitTestAtPoint( x, y ){
+// 2020/05 カスタムヒットテスト関数を呼び出す , 2022/09 isMapCenterHitTestを追加し、中心ヒットテスト判別可能に
+function getLayerHitTestAtPoint( x, y, isMapCenterHitTest ){
 	var geop = screen2Geo(x , y );
 	var pos = {
 		clientX: x,
@@ -7005,6 +7034,9 @@ function getLayerHitTestAtPoint( x, y ){
 		lat:geop.lat, 
 		lng: geop.lng
 	};
+	if ( isMapCenterHitTest ){
+		pos.isMapCenterHitTest = true;
+	}
 	var anses =[];
 	for (var  layerId in svgImagesProps){
 		var sip = svgImagesProps[layerId];
