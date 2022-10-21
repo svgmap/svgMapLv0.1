@@ -46,6 +46,7 @@
 // 2021/10/27 ラスターGISの画像キャッシュの明示的なOn/Offを可能に
 // 2022/03/xx geoJsonのレンダラのバグ修正・高速化
 // 2022/04/xx Proxy処理をリファクタリング(メインのFW側および切り出したcorsProxy.js側で処理するように)
+// 2022/10/21 ラスターGIS: filterをサポート
 //
 // ISSUES:
 //
@@ -1250,7 +1251,7 @@ var svgMapGIStool = ( function(){
 		if ( targetCoverage && targetCoverage.href ){
 			var targetCoverageURL = targetCoverage.href;
 			//console.log("getImagePixData:",getImagePixData);
-			getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
+			getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"), targetCoverage.src.getAttribute("style"));
 		} else {
 			halt = false;
 			superParam.cbFunc(superParam.ans, superParam.param);
@@ -1407,7 +1408,7 @@ var svgMapGIStool = ( function(){
 			if ( targetCoverage && targetCoverage.href ){
 				var targetCoverageURL = targetCoverage.href;
 				// getImagePixData経由で再帰実行されるcomputeInRangePointsを呼び出し処理を進める
-				getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"));
+				getImagePixData(targetCoverageURL, computeInRangePoints, superParam, targetCoverage.src.getAttribute("iid"), targetCoverage.src.getAttribute("style"));
 			} else {
 				// これは異常終了のケース？
 				halt = false;
@@ -1480,21 +1481,22 @@ var svgMapGIStool = ( function(){
 		imageCache = [];
 		imageCacheQueue=[];
 	}
-	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID){
+	function getImagePixData(imageUrl, callbackFunc, callbackFuncParams, imageIID, imageStyle){
 		// 2020.1.30 自ドメイン経由のビットイメージの場合、画面に表示しているimgリソースをそのまま画像処理用として利用する。　これをより有効にするため、コアモジュールもbitimageをproxy経由で取得させる機能を実装している(svgMap.setProxyURLFactory)
+//		console.log("imageStyle:",imageStyle);
 //		console.log("getImagePixData: url,iid,iid's elem: ",imageUrl,imageIID,document.getElementById(imageIID));
 		var imageURLobj = getImageURL(imageUrl,true);
 //		console.log("getImagePixData imageURLobj:",imageURLobj);
 		var imageURL_int = imageURLobj.url;
 		if ( imageCacheEnabled && imageCache[imageURL_int]){
 //			console.log("Hit imageCache");
-			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams)
+			returnImageRanderedCanvas(imageCache[imageURL_int],callbackFunc, callbackFuncParams, imageStyle)
 		} else {
 			var documentImage = document.getElementById(imageIID);
 			var imgSrcURL = documentImage.getAttribute("src");
 			if ( imgSrcURL.indexOf("http")!=0 || getImageURL(imgSrcURL)==imgSrcURL){
 				console.log("use image element's image :", documentImage); 
-				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams);
+				returnImageRanderedCanvas(documentImage,callbackFunc, callbackFuncParams, imageStyle);
 				if ( imageCacheEnabled ){
 					addImageCache(imageURL_int, documentImage);
 				}
@@ -1507,7 +1509,7 @@ var svgMapGIStool = ( function(){
 				// console.log("Fetch image : ", imageUrl);
 				img.src = imageURL_int;
 				img.onload = function() {
-					returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams);
+					returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams, imageStyle);
 					if ( imageCacheEnabled ){
 						addImageCache(imageURL_int, img);
 					}
@@ -1516,25 +1518,31 @@ var svgMapGIStool = ( function(){
 		}
 	}
 	
-	function returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams){
+	function returnImageRanderedCanvas(img,callbackFunc, callbackFuncParams, imageStyle){
 		var canvas = document.createElement("canvas");
 //		canvas.width  = img.width;
 		canvas.width  = img.naturalWidth;
 //		canvas.height = img.height;
 		canvas.height = img.naturalHeight;
-		//console.log(img);
 		var cContext = canvas.getContext('2d');
 		cContext.mozImageSmoothingEnabled = false;
 		cContext.webkitImageSmoothingEnabled = false;
 		cContext.msImageSmoothingEnabled = false;
 		cContext.imageSmoothingEnabled = false;
+		applyFilter(cContext, imageStyle); // 2022/10/21 imgにfilterをかけているケースに対応
 		cContext.drawImage(img, 0, 0);
 		var pixData = cContext.getImageData(0, 0, canvas.width, canvas.height).data;
 //		console.log("pixData:",pixData);
 		callbackFunc(pixData, canvas.width, canvas.height, callbackFuncParams);
 	}
 	
-	
+	function applyFilter(cContext, styleStr){ // 2022/10/21 imgにfilterをかけているケースに対応
+		var ans = styleStr.match(/filter:([^;]+);/);
+		if ( ans ){
+			console.log("applyFilter:",ans);
+			cContext.filter =   ans[1].trim();
+		}
+	}
 	
 	// 線(ポリライン)とビットイメージ間のGIS 2020/7/3
 	function computeInRangeLineParts( pixData , pixWidth , pixHeight, geomCrd, superParam ){
