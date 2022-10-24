@@ -2729,7 +2729,7 @@ var svgMapGIStool = ( function(){
 			poie.setAttribute( "fill", fill);
 		}
 		if ( strokeWidth > 0 ){
-			poie.setAttribute("stroke",strokeColor);
+			poie.setAttribute("stroke",stroke);
 			poie.setAttribute("stroke-width",strokeWidth);
 			poie.setAttribute("vector-effect","non-scaling-stroke");
 		} else {
