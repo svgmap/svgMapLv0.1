@@ -1537,10 +1537,12 @@ var svgMapGIStool = ( function(){
 	}
 	
 	function applyFilter(cContext, styleStr){ // 2022/10/21 imgにfilterをかけているケースに対応
-		var ans = styleStr.match(/filter:([^;]+);/);
-		if ( ans ){
-			console.log("applyFilter:",ans);
-			cContext.filter =   ans[1].trim();
+		if ( styleStr ){
+			var ans = styleStr.match(/filter:([^;]+);/);
+			if ( ans ){
+				console.log("applyFilter:",ans);
+				cContext.filter =   ans[1].trim();
+			}
 		}
 	}
 	
