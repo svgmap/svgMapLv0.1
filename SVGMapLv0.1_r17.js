@@ -185,6 +185,7 @@
 // 2022/05/30 : pixelated, opacity,filterのDOM操作を反映させる
 // 2022/09/22 : customHitTesterに、isMapCenterHitTestで(伸縮スクロール時自動発生する)中心ヒットテストなのかどうかを送信できるようにした
 // 2022/09/26 : 指定したレイヤーに対して共通クエリパラメータを付与する仕組み(commonQuery)を設置(コンテンツ取得用tokenの設定などで使用できる)
+// 2022/10/31 : Shift + drag zoom実装
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -430,6 +431,11 @@ function startPan( evt ){
 	} else {
 		zoomingTransitionFactor = -1; // パン
 	}
+	var shiftZoom = false;
+	if ( evt && evt.shiftKey && zoomingTransitionFactor== -1  ){
+		console.log("SHIFT-ZOOM MODE");
+		shiftZoom = true;
+	}
 //	alert("startPan");
 //	mapImgs = mapCanvas.getElementsByTagName("img");
 /**
@@ -471,12 +477,19 @@ function startPan( evt ){
 	var mouseGeoPos = screen2Geo( mouseX0 , mouseY0 );
 //	console.log("mouse:"+mouseX0+","+mouseY0+" : geo["+mouseGeoPos.lat+","+mouseGeoPos.lng+"]");
 	
-	if ( typeof requestAnimationFrame == "function" ){
-		timerID = requestAnimationFrame( panningAnim ); // not use string param ( eval )
+	if ( shiftZoom == true ){
+		if ( typeof requestAnimationFrame == "function" ){
+			timerID = requestAnimationFrame( shiftZoomingAnim ); // not use string param ( eval )
+		} else {
+			timerID = setTimeout( shiftZoomingAnim , smoothZoomInterval ); // not use string param ( eval )
+		}
 	} else {
-		timerID = setTimeout( panningAnim , smoothZoomInterval ); // not use string param ( eval )
+		if ( typeof requestAnimationFrame == "function" ){
+			timerID = requestAnimationFrame( panningAnim ); // not use string param ( eval )
+		} else {
+			timerID = setTimeout( panningAnim , smoothZoomInterval ); // not use string param ( eval )
+		}
 	}
-	
 	
 	if ( isIE ){
 		return (true); // IEの場合は、特にその効果がなくて、しかも上にあるFormのUIが触れなくなる？
@@ -495,7 +508,18 @@ function endPan( ){
 	
 	if (panning ){
 		panning = false;
-		if ( difX != 0 || difY != 0 ){ // 変化分があるときはpan/zoom処理
+		if ( shiftZoomingBox && shiftZoomingBox.style.display == "" ){ // 2022/10/31 add shiftZoomMode
+			shiftZoomingBox.style.display = "none";
+			var sx = Math.min( mouseX0 + difX, mouseX0 );
+			var sy = Math.max( mouseY0 + difY, mouseY0 );
+			var gxy0 = screen2Geo(sx, sy);
+			sx = Math.max( mouseX0 + difX, mouseX0 );
+			sy = Math.min( mouseY0 + difY, mouseY0 );
+			var gxy1 = screen2Geo(sx, sy);
+			//console.log("do Shift Zoom :", gxy0, gxy1, " :: " , gxy0.lat, gxy0.lng, gxy1.lat - gxy0.lat , gxy1.lng - gxy0.lng);
+			checkLoadCompleted( true ); // 読み込み中にズームパンしたときはテンポラリの画像を強制撤去する20130801
+			setGeoViewPort( gxy0.lat, gxy0.lng, gxy1.lat - gxy0.lat , gxy1.lng - gxy0.lng );
+		} else if ( difX != 0 || difY != 0 ){ // 変化分があるときはpan/zoom処理
 			mapCanvas.style.top  = "0px";
 			mapCanvas.style.left = "0px";
 			setCssTransform(mapCanvas,{a:1, b:0, c:0, d:1, e:0, f:0});
@@ -574,6 +598,34 @@ function showPanning( evt ){
 		
 	}
 	return (false);
+}
+
+var shiftZoomingBox;
+function shiftZoomingAnim(){
+	if ( panning){
+		if ( !shiftZoomingBox){
+			shiftZoomingBox = document.createElement("span");
+			shiftZoomingBox.id="shiftZoomingBox";
+			shiftZoomingBox.style.position="absolute";
+			shiftZoomingBox.style.opacity="0.5";
+			shiftZoomingBox.style.backgroundColor="gray";
+			document.getElementById("centerSight").insertAdjacentElement("afterend", shiftZoomingBox );
+		}
+		
+		shiftZoomingBox.style.display = "";
+		var x0 = Math.min( mouseX0 + difX, mouseX0 );
+		var y0 = Math.min( mouseY0 + difY, mouseY0 );
+		shiftZoomingBox.style.top = y0 + "px";
+		shiftZoomingBox.style.left = x0 + "px";
+		shiftZoomingBox.style.width = Math.abs(difX)+"px";
+		shiftZoomingBox.style.height = Math.abs(difY)+"px";
+		
+		if ( typeof requestAnimationFrame == "function" ){
+			timerID = requestAnimationFrame( shiftZoomingAnim );
+		} else {
+			timerID = setTimeout( shiftZoomingAnim , smoothZoomInterval );
+		}
+	}
 }
 
 function panningAnim(){
