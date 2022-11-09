@@ -7,4 +7,7 @@ Partial polyfill for mapping framework by SVG2
 
 [documents](http://svg2.mbsrv.net/wiki)
 
-stakagi is performing standards work for performing most functions of this polyfill to the native function of a web browser. 
+
+
+## code format
+```prettier --use-tabs``` 
