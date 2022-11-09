@@ -1,11 +1,11 @@
-#svgMapLv0.1
+# SvgMapLv0.1
 ===========
 
-Partial polyfill for mapping framework by SVG2
+SVGMap is a web mapping framework based on SVG. It has decentralized mapping capabilities that conventional mapping frameworks do not have, as well as an advanced tiling mechanism that goes beyond ordinary vector tiles, making it possible to implement large-scale WebGIS.
 
-[examples](http://svg2.mbsrv.net/devinfo/devkddi/lvl0.1/)
+The standardization activities are being undertaken at W3C.
 
-[documents](http://svg2.mbsrv.net/wiki)
+[HomePage][https://www.svgmap.org](https://svgmap.org/)
 
 
 
