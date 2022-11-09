@@ -4,8 +4,11 @@ SVGMap is a web mapping framework based on SVG. It has decentralized mapping cap
 
 The standardization activities are being undertaken at W3C.
 
-[HomePage][https://www.svgmap.org](https://svgmap.org/)
+* [HomePage](https://svgmap.org/)
 
+* [API Docs](https://www.svgmap.org/wiki/index.php?title=%E8%A7%A3%E8%AA%AC%E6%9B%B8)
+
+* [demo](https://svgmap.org/devinfo/devkddi/lvl0.1/demos/demo0.html)
 
 
 ## code format
