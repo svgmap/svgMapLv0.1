@@ -186,6 +186,8 @@
 // 2022/09/22 : customHitTesterに、isMapCenterHitTestで(伸縮スクロール時自動発生する)中心ヒットテストなのかどうかを送信できるようにした
 // 2022/09/26 : 指定したレイヤーに対して共通クエリパラメータを付与する仕組み(commonQuery)を設置(コンテンツ取得用tokenの設定などで使用できる)
 // 2022/10/31 : Shift + drag zoom実装
+// 2022/12/05 : PCでもタッチ対応
+// 2023/02/15 : Line hitPoint廃止
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -411,7 +413,7 @@
 
 		function getMouseXY(evt) {
 			if (!isIE) {
-				if (isSP) {
+				if (evt.type.indexOf("touch") >= 0) {
 					if (evt.touches.length > 0) {
 						mx = evt.touches[0].pageX;
 						my = evt.touches[0].pageY;
@@ -459,7 +461,7 @@
 			var mxy = getMouseXY(evt);
 			mouseX0 = mxy.x;
 			mouseY0 = mxy.y;
-			if (!isIE && isSP && evt.touches.length > 1) {
+			if (!isIE && evt.type.indexOf("touch") >= 0 && evt.touches.length > 1) {
 				zoomingTransitionFactor = 1; // スマホのときのピンチでのズーム
 				initialTouchDisance = getTouchDistance(evt);
 				//				putCmt("initDist:"+initialTouchDisance);
@@ -570,7 +572,7 @@
 				//		console.log("button:",evt.button,event.button);
 
 				if (!isIE) {
-					if (isSP) {
+					if (evt.type.indexOf("touch") >= 0) {
 						//				printTouchEvt(evt);
 						difX = evt.touches[0].pageX - mouseX0;
 						difY = evt.touches[0].pageY - mouseY0;
@@ -4863,7 +4865,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 
 			if (verIE > 8) {
 				// !isIEから変更（たぶんもう不要？ 2014.6.29)
-				if (isSP) {
+				if (true) {
 					// タッチパネルデバイスの場合(POIが選べない・・2013/4/4)
 					var mc = document.getElementById("mapcanvas");
 
@@ -4882,21 +4884,9 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					addEvent(mc, "touchend", endPan);
 					addEvent(mc, "touchmove", showPanning);
 					addEvent(window, "resize", refreshWindowSize);
-					/**
-			mc.ontouchstart = startPan;
-			mc.ontouchend = endPan;
-			mc.ontouchmove = showPanning;
-			window.onresize = refreshWindowSize;
-			**/
-				} else {
+
 					// 緯度経度文字を選べるようにね/ 2012/12/07
 					var mc = document.getElementById("mapcanvas");
-					/**
-			mc.onmousedown = startPan;
-			mc.onmouseup = endPan;
-			mc.onmousemove = showPanning;
-			window.onresize = refreshWindowSize;
-			**/
 
 					addEvent(mc, "mousedown", startPan);
 					addEvent(mc, "mouseup", endPan);
@@ -7510,6 +7500,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			var cp;
 			var closed = false;
 
+			/**
 			var hitPoint = new Object(); // pathのhitPoint(線のためのhitTestエリア)を追加してみる(2013/11/28)
 
 			function getHitPoint(hp, cp, isEdgePoint) {
@@ -7563,6 +7554,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 				// console.log( "getHitPoint: cp:",cp,isEdgePoint,"  hitPoint:",hp );
 				return hp;
 			}
+			**/
 
 			//	console.log(d);
 
@@ -7792,7 +7784,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 					}
 					if (clickable) {
 						// console.log("clk:",i,d.length-1);
-						hitPoint = getHitPoint(hitPoint, cp, i == 2 || i == d.length - 1);
+						// hitPoint = getHitPoint(hitPoint, cp, i == 2 || i == d.length - 1);
 					}
 				}
 
@@ -7846,7 +7838,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			if (
 				clickable &&
 				canvasNonFillFlag &&
-				hitPoint.x &&
+				// hitPoint.x &&
 				!pathHitTest.pointPrevent
 			) {
 				var tmpLineWidth = context.lineWidth;
@@ -7871,11 +7863,13 @@ function testCSclick(){ // Obsolute 2018.1.31
 					}
 				}
 				// 線の場合　疑似ヒットポイントを設置(旧版との互換維持のため) ToDo消せるようにもしようね 2022/4/12
+				/** 2023/1/25 廃止しても良いと思う・・
 				context.beginPath();
 				context.strokeStyle = "rgba(255,00,00,0.8)";
 				context.lineWidth = 3;
 				context.arc(hitPoint.x, hitPoint.y, 2, 0, 2 * Math.PI, true);
 				context.stroke();
+				**/
 
 				context.lineWidth = tmpLineWidth;
 				context.strokeStyle = tmpStrokeStyle;
