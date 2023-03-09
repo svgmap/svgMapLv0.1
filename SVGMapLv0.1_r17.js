@@ -2583,7 +2583,8 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 						GISgeometry.href = getImageURL(GISgeometry.href, docDir);
 						if (
 							imgElem.naturalHeight > 0 ||
-							GISgeometry.href.indexOf("data:") == 0
+							GISgeometry.href.indexOf("data:") == 0 ||
+							GISgeometry.href.indexOf("blob:") == 0
 						) {
 							// ロードできてないイメージは外す。 cesiumのimageryではerr404imgで動作が停止する・・　何とかしてよねぇ‥
 							// ただし、ロード済みでないとこの値はセットされないので・・　ロード中にgisgeomを呼ぶパターンでは使えないはず・・ 2018.2.27
@@ -2606,7 +2607,8 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 			if (
 				href.lastIndexOf("http://", 0) == 0 ||
 				href.lastIndexOf("https://", 0) == 0 ||
-				href.lastIndexOf("data:", 0) == 0
+				href.lastIndexOf("data:", 0) == 0 ||
+				href.lastIndexOf("blob:", 0) == 0
 			) {
 				// 2016.5.10 debug  2019.10.10 add dataURL
 				//	if ( href.indexOf("http://") == 0  ){}
