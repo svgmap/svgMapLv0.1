@@ -461,6 +461,7 @@
 			var mxy = getMouseXY(evt);
 			mouseX0 = mxy.x;
 			mouseY0 = mxy.y;
+			initialTouchDisance = 0;
 			if (!isIE && evt.type.indexOf("touch") >= 0 && evt.touches.length > 1) {
 				zoomingTransitionFactor = 1; // スマホのときのピンチでのズーム
 				initialTouchDisance = getTouchDistance(evt);
@@ -890,8 +891,8 @@
 			} else {
 				// リフロー多発を抑制 2023/4/3
 				// https://ui.appleple.blog/entry-109.html
-				var xds=[];
-				var yds=[];
+				var xds = [];
+				var yds = [];
 				for (var i = mapImgs.length - 1; i >= 0; i--) {
 					var il = Number(mapImgs.item(i).style.left.replace("px", ""));
 					var it = Number(mapImgs.item(i).style.top.replace("px", ""));
@@ -910,11 +911,10 @@
 							sftY,
 						ih * zoomFactor
 					);
-					xds[i]=(xd);
-					yds[i]=(yd);
+					xds[i] = xd;
+					yds[i] = yd;
 				}
-				
-				
+
 				for (var i = mapImgs.length - 1; i >= 0; i--) {
 					var xd = xds[i];
 					var yd = yds[i];
