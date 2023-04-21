@@ -1299,23 +1299,28 @@
 				svgImagesProps[docId].script = getScript(svgImages[docId]); // ここに移動した
 				svgImagesProps[docId].CRS = getCrs(svgImages[docId], docId);
 				svgImagesProps[docId].refresh = getRefresh(svgImages[docId]);
-				
+
 				// 2023/4/18 ベクタ描画性能向上策の検証
 				svgImagesProps[docId].styleMap = new WeakMap();
 				svgImagesProps[docId].altdMap = new WeakMap();
-				var mutationObs = new MutationObserver( function(mutations){
+				var mutationObs = new MutationObserver(function (mutations) {
 					// 2023/4/19 MutationObserverで、キャッシュ不整合の解消を実施
-					mutations.forEach(function(mutation){
-						if(mutation.type=="attributes"){
-//							console.log("Detect attr change, delete parsed cache for : ",mutation.target);
+					mutations.forEach(function (mutation) {
+						if (mutation.type == "attributes") {
+							//							console.log("Detect attr change, delete parsed cache for : ",mutation.target);
 							svgImagesProps[docId].styleMap.delete(mutation.target);
 							svgImagesProps[docId].altdMap.delete(mutation.target);
 						}
 					});
 				});
-				mutationObs.observe(svgImages[docId].documentElement, { subtree:true, childList : true, attributes:true, characterData:true});
-				svgImagesProps[docId].domMutationObserver=mutationObs; // delete 直前にsvgImagesProps[docId].domMutationObserver を.disconnect();したほうが良いのかも？
-				
+				mutationObs.observe(svgImages[docId].documentElement, {
+					subtree: true,
+					childList: true,
+					attributes: true,
+					characterData: true,
+				});
+				svgImagesProps[docId].domMutationObserver = mutationObs; // delete 直前にsvgImagesProps[docId].domMutationObserver を.disconnect();したほうが良いのかも？
+
 				updateMetaSchema(docId); // added 2017.8.10  2018.2.26 関数化
 				//		if ( !svgImagesProps[docId].CRS  ){
 				//			// 文書は地図として成り立っていないので消去し、終了する
@@ -2044,7 +2049,12 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 								);
 							} else if (childCategory == TEXT) {
 								// text要素の場合(2014.7.22)
-								var cStyle = getStyle(svgNode, pStyle, null, svgImagesProps[docId].styleMap);
+								var cStyle = getStyle(
+									svgNode,
+									pStyle,
+									null,
+									svgImagesProps[docId].styleMap
+								);
 								img = getSpanTextElement(
 									xd.p0,
 									yd.p0,
@@ -2296,7 +2306,12 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 							hasHyperLink = true;
 						}
 
-						var cStyle = getStyle(svgNode, pStyle, hasHyperLink, svgImagesProps[docId].styleMap);
+						var cStyle = getStyle(
+							svgNode,
+							pStyle,
+							hasHyperLink,
+							svgImagesProps[docId].styleMap
+						);
 
 						if (childSubCategory == SYMBOL) {
 							// 2017.1.17 group use : beforeElemがどうなるのか要確認
@@ -2358,8 +2373,13 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					} else {
 						// 生成済みのcanvasを使用する
 					}
-					
-					var cStyle= getStyle(svgNode, pStyle, null, svgImagesProps[docId].styleMap);
+
+					var cStyle = getStyle(
+						svgNode,
+						pStyle,
+						null,
+						svgImagesProps[docId].styleMap
+					);
 					//console.log("thisObj:",svgNode, " thisObj's style:",cStyle, "   parent's style:",pStyle);
 					if (GISgeometry) {
 						if (GISgeometry.type === "TBD") {
@@ -4622,14 +4642,14 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 				if (svgImagesProps[imageId].script) {
 					svgImagesProps[imageId].script.handleScriptCf(true); // やはりこの仕組みは一度見直しが必要・・・ 2018.9.7
 				}
-				if (svgImagesProps[imageId].domMutationObserver){
-					svgImagesProps[imageId].domMutationObserver.disconnect()
+				if (svgImagesProps[imageId].domMutationObserver) {
+					svgImagesProps[imageId].domMutationObserver.disconnect();
 				}
 				delete svgImages[imageId];
 				delete svgImagesProps[imageId];
 			} else if (svgImagesProps[imageId] && svgImagesProps[imageId].loadError) {
-				if (svgImagesProps[imageId].domMutationObserver){
-					svgImagesProps[imageId].domMutationObserver.disconnect()
+				if (svgImagesProps[imageId].domMutationObserver) {
+					svgImagesProps[imageId].domMutationObserver.disconnect();
 				}
 				delete svgImagesProps[imageId];
 			}
@@ -4643,8 +4663,8 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 			for (key in svgImages) {
 				// console.log("key:",key,"  is Used?:",usedImages[key]);
 				if (!usedImages[key]) {
-					if ( svgImagesProps[key].domMutationObserver ){
-						svgImagesProps[key].domMutationObserver.disconnect()
+					if (svgImagesProps[key].domMutationObserver) {
+						svgImagesProps[key].domMutationObserver.disconnect();
 					}
 					delete svgImages[key];
 					delete svgImagesProps[key];
@@ -7442,7 +7462,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 				d = d.replace(ssppRe7, "$1 $3 $4 "); // shorthand elliptical arc path syntax
 				d = trim(compressSpaces(d)); // compress multiple spaces
 				d = d.split(" "); // compress multiple spaces
-				inCanvas.altdMap.set(pathNode,d); 
+				inCanvas.altdMap.set(pathNode, d);
 			} else {
 				d = altd;
 			}
@@ -7914,52 +7934,52 @@ function testCSclick(){ // Obsolute 2018.1.31
 		function getStyle(svgNode, defaultStyle, hasHyperLink, styleCacheMap) {
 			// 親のスタイルを継承して該当要素のスタイルを生成する
 			// hasUpdateはその要素自身にスタイルattrが付いていたときに設定される
-			
+
 			var nodeStyle;
-			
-			if ( styleCacheMap ){
+
+			if (styleCacheMap) {
 				nodeStyle = styleCacheMap.get(svgNode);
 			}
-			
-			if ( nodeStyle==undefined){
-//			if ( true){}
-				nodeStyle = getNodeStyle(svgNode,hasHyperLink);
-				if ( styleCacheMap ){
+
+			if (nodeStyle == undefined) {
+				//			if ( true){}
+				nodeStyle = getNodeStyle(svgNode, hasHyperLink);
+				if (styleCacheMap) {
 					styleCacheMap.set(svgNode, nodeStyle);
 				}
 			}
-			
+
 			var computedStyle = {};
 			var hasStyle = false;
-			for (var styleName of  styleCatalog) {
-				if ( nodeStyle[styleName]){
+			for (var styleName of styleCatalog) {
+				if (nodeStyle[styleName]) {
 					computedStyle[styleName] = nodeStyle[styleName];
 					hasStyle = true;
-				} else if ( defaultStyle && defaultStyle[styleName]){
+				} else if (defaultStyle && defaultStyle[styleName]) {
 					computedStyle[styleName] = defaultStyle[styleName];
 					hasStyle = true;
 				}
 			}
-			if ( nodeStyle.minZoom ){
+			if (nodeStyle.minZoom) {
 				computedStyle.minZoom = nodeStyle.minZoom;
-			} else if ( defaultStyle && defaultStyle.minZoom) {
+			} else if (defaultStyle && defaultStyle.minZoom) {
 				computedStyle.minZoom = defaultStyle.minZoom;
 				hasStyle = true;
 			}
-			if ( nodeStyle.maxZoom ){
+			if (nodeStyle.maxZoom) {
 				computedStyle.maxZoom = nodeStyle.maxZoom;
-			} else if ( defaultStyle && defaultStyle.maxZoom) {
+			} else if (defaultStyle && defaultStyle.maxZoom) {
 				computedStyle.maxZoom = defaultStyle.maxZoom;
 				hasStyle = true;
 			}
-			if (nodeStyle.nonScalingOffset){
+			if (nodeStyle.nonScalingOffset) {
 				computedStyle.nonScalingOffset = nodeStyle.nonScalingOffset;
-			}else if ( defaultStyle && defaultStyle.nonScalingOffset) {
+			} else if (defaultStyle && defaultStyle.nonScalingOffset) {
 				// 2017.1.17 debug
 				computedStyle.nonScalingOffset = defaultStyle.nonScalingOffset;
 				hasStyle = true;
 			}
-			if ( defaultStyle && defaultStyle.usedParent) {
+			if (defaultStyle && defaultStyle.usedParent) {
 				// use要素のためのhittest用情報・・・ 2017.1.17
 				computedStyle.usedParent = defaultStyle.usedParent;
 				hasStyle = true;
@@ -7967,8 +7987,8 @@ function testCSclick(){ // Obsolute 2018.1.31
 			//console.log(svgNode.nodeName, computedStyle, nodeStyle);
 			return computedStyle;
 		}
-		
-		function getNodeStyle(svgNode, hasHyperLink){
+
+		function getNodeStyle(svgNode, hasHyperLink) {
 			// getStyleの親スタイル継承部を分離した処理
 			var hasUpdate = false;
 			var style = {};
@@ -9049,11 +9069,16 @@ function testCSclick(){ // Obsolute 2018.1.31
 			// MutationObserverとの不整合を回避するため、refreshScreenはマイクロタスクに積む
 			// https://zenn.dev/canalun/articles/js_async_and_company_summary
 			// https://developer.mozilla.org/ja/docs/Web/API/queueMicrotask
-			if ( withinContext ){
-				return ( refreshScreenSync(noRetry, parentCaller, isRetryCall, withinContext) );
+			if (withinContext) {
+				return refreshScreenSync(
+					noRetry,
+					parentCaller,
+					isRetryCall,
+					withinContext
+				);
 			} else {
-				queueMicrotask(function(){
-					 refreshScreenSync(noRetry, parentCaller, isRetryCall) 
+				queueMicrotask(function () {
+					refreshScreenSync(noRetry, parentCaller, isRetryCall);
 				});
 			}
 		}
