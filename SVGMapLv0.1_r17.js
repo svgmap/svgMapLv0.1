@@ -188,6 +188,8 @@
 // 2022/10/31 : Shift + drag zoom実装
 // 2022/12/05 : PCでもタッチ対応
 // 2023/02/15 : Line hitPoint廃止
+// 2023/04/07 : ビットイメージアイコンを中心としたパフォーマンスチューニング
+// 2023/04/21 : ベクトルグラフィックスのパフォーマンスチューニング(XML属性キャッシュ)
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -270,8 +272,8 @@
 		var root2Geo; //上の逆 ( rootのsvg - > geo ) 2020/3/17 transform関数が入るケースがある
 		var geoViewBox = { x: 0, y: 0, width: 1, height: 1 }; // と、それを使って出したgeoのviewBox
 
-		var svgImages = new Array(); // svg文書群(XML) arrayのハッシュキーはimageId("root"以外は"i"+連番)
-		var svgImagesProps = new Array(); // 同svg文書群の .Path,.CRS,.script,.editable,.editing,.isClickable,.parentDocId,.childImages,.controller,.metaSchema
+		var svgImages = {}; // svg文書群(XML) arrayのハッシュキーはimageId("root"以外は"i"+連番)
+		var svgImagesProps = {}; // 同svg文書群の .Path,.CRS,.script,.editable,.editing,.isClickable,.parentDocId,.childImages,.controller,.metaSchema
 
 		var ticker; // Ticker文字のdiv要素
 		var tickerTable; // 同 table要素
@@ -1297,6 +1299,23 @@
 				svgImagesProps[docId].script = getScript(svgImages[docId]); // ここに移動した
 				svgImagesProps[docId].CRS = getCrs(svgImages[docId], docId);
 				svgImagesProps[docId].refresh = getRefresh(svgImages[docId]);
+				
+				// 2023/4/18 ベクタ描画性能向上策の検証
+				svgImagesProps[docId].styleMap = new WeakMap();
+				svgImagesProps[docId].altdMap = new WeakMap();
+				var mutationObs = new MutationObserver( function(mutations){
+					// 2023/4/19 MutationObserverで、キャッシュ不整合の解消を実施
+					mutations.forEach(function(mutation){
+						if(mutation.type=="attributes"){
+//							console.log("Detect attr change, delete parsed cache for : ",mutation.target);
+							svgImagesProps[docId].styleMap.delete(mutation.target);
+							svgImagesProps[docId].altdMap.delete(mutation.target);
+						}
+					});
+				});
+				mutationObs.observe(svgImages[docId].documentElement, { subtree:true, childList : true, attributes:true, characterData:true});
+				svgImagesProps[docId].domMutationObserver=mutationObs; // delete 直前にsvgImagesProps[docId].domMutationObserver を.disconnect();したほうが良いのかも？
+				
 				updateMetaSchema(docId); // added 2017.8.10  2018.2.26 関数化
 				//		if ( !svgImagesProps[docId].CRS  ){
 				//			// 文書は地図として成り立っていないので消去し、終了する
@@ -1678,6 +1697,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 			if (svgElem.nodeName == "svg") {
 				updateMetaSchema(docId); // 2018.2.28 metaSchemaがDOM操作で変更されることがある・・・
 				usedImages[docId] = true; // 2019.5.22 メモリリーク防止用　今描画されてるドキュメントのID表を作る
+				inCanvas = {};
 			}
 
 			var beforeElem = null;
@@ -1831,10 +1851,6 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 				) {
 					// image||animation,iframe||use(add201210)要素の場合
 					// Point||Coverage的要素のパース。ただし hittest時はsvgの埋め込みのパースのみ(その他のヒットテストはhtml表示のonClickなどのイベントで処理している)
-					if (!summarizeCanvas && inCanvas) {
-						// vector2dデータが前にないのでcanvas統合はここで打ち止め
-						inCanvas = null;
-					}
 					var imageId = svgNode.getAttribute("iid");
 					// 読み込んだSVG Image,(iframe|Animation),use要素に共通　通し番のIDを付ける
 					if (!imageId || imageId.indexOf("i") != 0) {
@@ -2028,7 +2044,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 								);
 							} else if (childCategory == TEXT) {
 								// text要素の場合(2014.7.22)
-								var cStyle = getStyle(svgNode, pStyle);
+								var cStyle = getStyle(svgNode, pStyle, null, svgImagesProps[docId].styleMap);
 								img = getSpanTextElement(
 									xd.p0,
 									yd.p0,
@@ -2280,20 +2296,13 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 							hasHyperLink = true;
 						}
 
-						var cStyle = getStyle(svgNode, pStyle, hasHyperLink);
+						var cStyle = getStyle(svgNode, pStyle, hasHyperLink, svgImagesProps[docId].styleMap);
 
 						if (childSubCategory == SYMBOL) {
 							// 2017.1.17 group use : beforeElemがどうなるのか要確認
 							cStyle.usedParent = svgNode;
 							svgNode = symbols[useHref].node;
 							//					console.log("childSubCategory:group  : " , svgNode);
-						}
-						//				console.log("minZ:" , cStyle.minZoom , " maxZ:" , cStyle.maxZoom);
-						//				console.log( "group: fill:" , cStyle["fill"] , " stroke:" , cStyle["stroke"] , svgNode);
-						if (inCanvas && cStyle) {
-							// スタイルを設定する。
-							//					console.log("<g> set subStyle", cStyle);
-							setCanvasStyle(cStyle, inCanvas.getContext("2d"));
 						}
 						beforeElem = parseSVG(
 							svgNode,
@@ -2305,13 +2314,9 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 							cStyle,
 							dontChildResLoading
 						);
-						if (inCanvas && cStyle) {
-							// スタイルを元に戻す
-							//					console.log("</g> restore to Parent Style",pStyle);
-							setCanvasStyle(pStyle, inCanvas.getContext("2d"));
-						}
 					}
 				} else if (childCategory == VECTOR2D) {
+					//ETcalc(true);
 					//			console.log("VECTOR2D",svgNode,pStyle);
 					if (dontChildResLoading) {
 						// svgImagesProps,svgImagesなどだけを生成し空回りさせる(resume用)
@@ -2319,105 +2324,43 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					}
 
 					// canvas (inCanvas)を用意する (これ以下のブロック　例えばgetCanvas()とかを作るべきですな)
-					if (!inCanvas) {
+					if (!inCanvas.context) {
 						// 統合キャンバス(inCanvas)を新規作成する
 
 						if (!summarizeCanvas) {
-							// 2014.5.26以前の既存モード
-
-							var imageId = svgNode.getAttribute("iid");
-							// この状態では編集機能をベクタに入れると破綻します！！！！！！(idなくなるので)
-							//				if ( ! imageId ){} // idの無い要素にidを付ける (元々idが付いていると破綻するかも・・)
-							if (!imageId || imageId.indexOf("i") != 0) {
-								// 上記、結構よく破綻する・・・ これがバグだった・・ 2013.8.20
-								imageId = "i" + imageSeqNumber;
-								svgNode.setAttribute("iid", imageId);
-								++imageSeqNumber;
-							}
-
-							inCanvas = isLoadedImage(imageId); // この判断で誤っていた！ 2013.8.20
-
-							/**
-					if ( docPath.indexOf("Cntr0029_l4_28-83.svg") >=0){
-						console.log("isLoadedImage?:",imageId);
-						console.log(inCanvas);
-					}
-					**/
-
-							if (!inCanvas) {
-								//					console.log("build new Canvas",imageId);
-								// canvas2dを生成する
-								inCanvas = document.createElement("canvas");
-								inCanvas.style.position = "absolute";
-								inCanvas.style.left = "0px";
-								inCanvas.style.top = "0px";
-								inCanvas.width = mapCanvasSize.width;
-								inCanvas.height = mapCanvasSize.height;
-								inCanvas.id = imageId;
-
-								if (beforeElem) {
-									// SVGのデータ順序の通りにhtmlのinCanvas要素を設置する処理
-									// 一つ前のもののあとに入れる
-									parentElem.insertBefore(inCanvas, beforeElem.nextSibling);
-								} else {
-									if (parentElem.hasChildNodes()) {
-										// 子要素がある場合は最初のspan要素の直前に挿入する？
-										var childSpans = parentElem.getElementsByTagName("div");
-										if (childSpans) {
-											parentElem.insertBefore(inCanvas, childSpans.item(0));
-										} else {
-											parentElem.insertBefore(inCanvas, parentElem.lastChild);
-										}
-									} else {
-										parentElem.appendChild(inCanvas);
-									}
-								}
-							} else {
-								//					console.log("Found Canvas Reuse",imageId);
-								inCanvas
-									.getContext("2d")
-									.clearRect(0, 0, inCanvas.width, inCanvas.height);
-								inCanvas.style.left = "0px";
-								inCanvas.style.top = "0px";
-								inCanvas.width = mapCanvasSize.width;
-								inCanvas.height = mapCanvasSize.height;
-								inCanvas.setAttribute("hasdrawing", "false");
-							}
-							if (pStyle) {
-								setCanvasStyle(pStyle, inCanvas.getContext("2d"));
-							}
+							// このモードはだいぶ昔(2014)に消滅している
 						} else {
 							// summarizeCanvas=true rootLayer毎のcanvasとりまとめ高速化/省メモリモード 2014.5.27
-							inCanvas = document.getElementById(
+							var inCanvasElement = document.getElementById(
 								svgImagesProps[docId].rootLayer + "_canvas"
 							);
-							if (!inCanvas) {
-								inCanvas = document.createElement("canvas");
-								inCanvas.style.position = "absolute";
-								inCanvas.style.left = "0px";
-								inCanvas.style.top = "0px";
-								inCanvas.width = mapCanvasSize.width;
-								inCanvas.height = mapCanvasSize.height;
-								inCanvas.id = svgImagesProps[docId].rootLayer + "_canvas";
+							if (!inCanvasElement) {
+								inCanvasElement = document.createElement("canvas");
+								inCanvasElement.style.position = "absolute";
+								inCanvasElement.style.left = "0px";
+								inCanvasElement.style.top = "0px";
+								inCanvasElement.width = mapCanvasSize.width;
+								inCanvasElement.height = mapCanvasSize.height;
+								inCanvasElement.id =
+									svgImagesProps[docId].rootLayer + "_canvas";
 								//						console.log("rootLayer:",docId,svgImagesProps[docId],svgImagesProps[docId].rootLayer, document.getElementById(svgImagesProps[docId].rootLayer));
 								document
 									.getElementById(svgImagesProps[docId].rootLayer)
-									.appendChild(inCanvas); //前後関係をもう少し改善できると思う 2015.3.24 rootLayerのdivが生成されていない状況で、appendしてerrが出ることがある　非同期処理によるものかもしれない。（要継続観察）
-								inCanvas.setAttribute("hasdrawing", "false");
+									.appendChild(inCanvasElement); //前後関係をもう少し改善できると思う 2015.3.24 rootLayerのdivが生成されていない状況で、appendしてerrが出ることがある　非同期処理によるものかもしれない。（要継続観察）
+								inCanvasElement.setAttribute("hasdrawing", "false");
 								//						console.log("new canvas:" + inCanvas.id );
 							} else {
 								// inCanvas.styleの初期化系はresetSummarizedCanvasに移動
 							}
-							if (pStyle) {
-								setCanvasStyle(pStyle, inCanvas.getContext("2d"));
-							}
+							inCanvas.element = inCanvasElement;
+							inCanvas.context2d = inCanvasElement.getContext("2d");
 						}
 					} else {
 						// 生成済みのcanvasを使用する
 					}
-
-					var cStyle = getStyle(svgNode, pStyle);
-					//			console.log("thisObj's style:",cStyle, "   parent's style:",pStyle);
+					
+					var cStyle= getStyle(svgNode, pStyle, null, svgImagesProps[docId].styleMap);
+					//console.log("thisObj:",svgNode, " thisObj's style:",cStyle, "   parent's style:",pStyle);
 					if (GISgeometry) {
 						if (GISgeometry.type === "TBD") {
 							// 2016.12.1 for GIS: TBD要素は塗りがあるならPolygonにする
@@ -2436,29 +2379,15 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					//			console.log(cStyle);
 					//			console.log( "vect: fill:" , cStyle["fill"] , " stroke:" , cStyle["stroke"] , svgNode);
 
-					var canContext;
 					if (GISgeometriesCaptureOptions.SkipVectorRendering) {
 						// 2021.9.16
-						canContext = GISgeometriesCaptureOptions.dummy2DContext;
+						inCanvas.context = GISgeometriesCaptureOptions.dummy2DContext;
 						//canContext = dummy2DContextBuilder(); // ベクタ描画をスキップするためのダミーの2d context
 					} else {
-						canContext = inCanvas.getContext("2d"); // canvas2dコンテキスト取得
+						inCanvas.context = inCanvas.context2d; // canvas2dコンテキスト取得
 					}
+					inCanvas.altdMap = svgImagesProps[docId].altdMap;
 
-					// 必要に応じてスタイルを設定する(ここまでやらなくても性能出るかも？)
-					if (cStyle.hasUpdate) {
-						// 親のスタイルを継承しているだけでない
-						//				console.log("set specific style", cStyle);
-						setCanvasStyle(cStyle, canContext);
-						nextStyleUpdate = true;
-					} else if (nextStyleUpdate) {
-						// 親のスタイルを継承しているだけだが、直前の要素がそうでない
-						//				console.log("restore style" , cStyle , pStyle);
-						setCanvasStyle(cStyle, canContext);
-						nextStyleUpdate = false;
-					} else {
-						// do nothing
-					}
 					if (
 						inZoomRange(cStyle, zoom, child2root.scale) &&
 						(!cStyle.display || cStyle.display != "none") &&
@@ -2469,20 +2398,20 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 						if (childSubCategory == PATH) {
 							bbox = setSVGpathPoints(
 								svgNode,
-								canContext,
+								inCanvas,
 								child2canvas,
 								clickable,
 								null,
-								cStyle.nonScalingOffset,
+								cStyle,
 								GISgeometry
 							);
 						} else if (childSubCategory == RECT) {
 							bbox = setSVGrectPoints(
 								svgNode,
-								canContext,
+								inCanvas,
 								child2canvas,
 								clickable,
-								cStyle.nonScalingOffset,
+								cStyle,
 								GISgeometry
 							);
 						} else if (
@@ -2491,11 +2420,11 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 						) {
 							bbox = setSVGcirclePoints(
 								svgNode,
-								canContext,
+								inCanvas,
 								child2canvas,
 								clickable,
 								childSubCategory,
-								cStyle.nonScalingOffset,
+								cStyle,
 								GISgeometry
 							);
 						} else if (
@@ -2504,11 +2433,11 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 						) {
 							bbox = setSVGpolyPoints(
 								svgNode,
-								canContext,
+								inCanvas,
 								child2canvas,
 								clickable,
 								childSubCategory,
-								cStyle.nonScalingOffset,
+								cStyle,
 								GISgeometry
 							);
 						} else {
@@ -2540,14 +2469,14 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 								};
 
 								//						canContext.setLineDash([0]); // 2016.9.6 不要？？ ffox45でフリーズ原因・・
-								canContext.setLineDash([]);
+								inCanvas.context.setLineDash([]);
 								setSVGpathPoints(
 									svgNode,
-									canContext,
+									inCanvas,
 									markMat,
 									clickable,
 									markPath,
-									cStyle.nonScalingOffset
+									cStyle
 								);
 								//						console.log("draw marker:",markPath);
 								//						var ret = setSVGpathPoints( pathNode ,  context , child2canvas , clickable , repld , vectorEffectOffset);
@@ -2561,11 +2490,12 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 								pathHitTest.hittedElementsUsedParent.push(cStyle.usedParent);
 							}
 							if (isIntersect(bbox, mapCanvasSize)) {
-								inCanvas.setAttribute("hasdrawing", "true");
+								inCanvas.element.setAttribute("hasdrawing", "true");
 								onViewport = true;
 							}
 						}
 					}
+					//ETcalc(false);
 				}
 
 				if (GISgeometry && onViewport) {
@@ -4692,9 +4622,15 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 				if (svgImagesProps[imageId].script) {
 					svgImagesProps[imageId].script.handleScriptCf(true); // やはりこの仕組みは一度見直しが必要・・・ 2018.9.7
 				}
+				if (svgImagesProps[imageId].domMutationObserver){
+					svgImagesProps[imageId].domMutationObserver.disconnect()
+				}
 				delete svgImages[imageId];
 				delete svgImagesProps[imageId];
 			} else if (svgImagesProps[imageId] && svgImagesProps[imageId].loadError) {
+				if (svgImagesProps[imageId].domMutationObserver){
+					svgImagesProps[imageId].domMutationObserver.disconnect()
+				}
 				delete svgImagesProps[imageId];
 			}
 		}
@@ -4707,6 +4643,9 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 			for (key in svgImages) {
 				// console.log("key:",key,"  is Used?:",usedImages[key]);
 				if (!usedImages[key]) {
+					if ( svgImagesProps[key].domMutationObserver ){
+						svgImagesProps[key].domMutationObserver.disconnect()
+					}
 					delete svgImages[key];
 					delete svgImagesProps[key];
 					if (GISgeometries) {
@@ -6621,6 +6560,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					//			console.log("loading Completed");
 					//			loadCompleted = true; // これ意味ない
 					removeUnusedDocs(); // 2019.5.22 メモリリーク対策
+					//console.log("etVal:", etVal);
 					if (viewBoxChanged()) {
 						// 2017.3.16 本当にviewboxが変化したときのみzoomPanMap ev出す
 						var customEvent = document.createEvent("HTMLEvents");
@@ -7245,11 +7185,11 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 		function setSVGcirclePoints(
 			pathNode,
-			context,
+			inCanvas,
 			child2canvas,
 			clickable,
 			category,
-			vectorEffectOffset,
+			cStyle,
 			GISgeometry
 		) {
 			var cx = Number(pathNode.getAttribute("cx"));
@@ -7296,14 +7236,14 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 			var ret = setSVGpathPoints(
 				pathNode,
-				context,
+				inCanvas,
 				child2canvas,
 				clickable,
 				repld,
-				vectorEffectOffset,
+				cStyle,
 				GISgeometry
 			);
-			if (vectorEffectOffset) {
+			if (cStyle.nonScalingOffset) {
 				// non scaling circle support 2018.3.6
 				ret.y -= ry;
 				ret.height = ry * 2;
@@ -7320,10 +7260,10 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 		function setSVGrectPoints(
 			pathNode,
-			context,
+			inCanvas,
 			child2canvas,
 			clickable,
-			vectorEffectOffset,
+			cStyle,
 			GISgeometry
 		) {
 			var rx = Number(pathNode.getAttribute("x"));
@@ -7357,11 +7297,11 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 			var ret = setSVGpathPoints(
 				pathNode,
-				context,
+				inCanvas,
 				child2canvas,
 				clickable,
 				repld,
-				vectorEffectOffset,
+				cStyle,
 				GISgeometry
 			);
 			return ret;
@@ -7369,11 +7309,11 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 		function setSVGpolyPoints(
 			pathNode,
-			context,
+			inCanvas,
 			child2canvas,
 			clickable,
 			nodeType,
-			vectorEffectOffset,
+			cStyle,
 			GISgeometry
 		) {
 			var pp = pathNode.getAttribute("points");
@@ -7399,11 +7339,11 @@ function testCSclick(){ // Obsolute 2018.1.31
 
 					var ret = setSVGpathPoints(
 						pathNode,
-						context,
+						inCanvas,
 						child2canvas,
 						clickable,
 						repld,
-						vectorEffectOffset,
+						cStyle,
 						GISgeometry
 					);
 					return ret;
@@ -7411,15 +7351,43 @@ function testCSclick(){ // Obsolute 2018.1.31
 			}
 		}
 
+		var etVal, etTemp;
+		function ETcalc(start, reset) {
+			if (reset) {
+				etVal = 0;
+				return;
+			}
+			if (start) {
+				etTemp = new Date().getTime();
+			} else {
+				etVal += new Date().getTime() - etTemp;
+			}
+		}
+
+		const ssppRe0 = new RegExp(/,/gm);
+		const ssppRe1 = new RegExp(
+			/([MmZzLlHhVvCcSsQqTtAa])([MmZzLlHhVvCcSsQqTtAa])/gm
+		);
+		const ssppRe2 = new RegExp(
+			/([MmZzLlHhVvCcSsQqTtAa])([MmZzLlHhVvCcSsQqTtAa])/gm
+		);
+		const ssppRe3 = new RegExp(/([MmZzLlHhVvCcSsQqTtAa])([^\s])/gm);
+		const ssppRe4 = new RegExp(/([^\s])([MmZzLlHhVvCcSsQqTtAa])/gm);
+		const ssppRe5 = new RegExp(/([0-9])([+\-])/gm);
+		const ssppRe6 = new RegExp(/(\.[0-9]*)(\.)/gm);
+		const ssppRe7 = new RegExp(/([Aa](\s+[0-9]+){3})\s+([01])\s*([01])/gm);
+
 		function setSVGpathPoints(
 			pathNode,
-			context,
+			inCanvas,
 			child2canvas,
 			clickable,
 			repld,
-			vectorEffectOffset,
+			cStyle,
 			GISgeometry
 		) {
+			var vectorEffectOffset = cStyle.nonScalingOffset;
+			var context = inCanvas.context;
 			// this routine is based on canvg.js's path parser
 			//	if ( vectorEffectOffset ){
 			//		console.log( "setSVGpathPoints:" , pathNode , vectorEffectOffset );
@@ -7440,12 +7408,13 @@ function testCSclick(){ // Obsolute 2018.1.31
 				}
 			}
 
+			var sret = setCanvasStyle(cStyle, context);
 			var canvasNonFillFlag = false;
-			if (context.fillStyle == "rgba(0, 0, 0, 0)") {
+			if (!sret.fillStyle) {
 				canvasNonFillFlag = true;
 			}
 			var canvasNonStrokeFlag = false;
-			if (context.strokeStyle == "rgba(0, 0, 0, 0)") {
+			if (!sret.strokeStyle) {
 				canvasNonStrokeFlag = true;
 			}
 
@@ -7454,28 +7423,30 @@ function testCSclick(){ // Obsolute 2018.1.31
 				miny = 60000,
 				maxy = -60000;
 			// 指定されたcanvas 2d contextに対して、svgのpathNodeを座標変換(child2canvas)して出力する
+			//ETcalc(true);
 			var d;
-			if (repld) {
-				d = repld;
+			var altd = inCanvas.altdMap.get(pathNode); // 正規化済みpathをinCanvas.altdMapに投入しておく (TBD issue: dが変化した場合にobserveできていない2024/4/17)
+			if (!altd) {
+				if (repld) {
+					d = repld;
+				} else {
+					d = pathNode.getAttribute("d"); // from canvg
+				}
+				d = d.replace(ssppRe0, " "); // get rid of all commas
+				d = d.replace(ssppRe1, "$1 $2"); // separate commands from commands
+				d = d.replace(ssppRe2, "$1 $2"); // separate commands from commands
+				d = d.replace(ssppRe3, "$1 $2"); // separate commands from points
+				d = d.replace(ssppRe4, "$1 $2"); // separate commands from points
+				d = d.replace(ssppRe5, "$1 $2"); // separate digits when no comma
+				d = d.replace(ssppRe6, "$1 $2"); // separate digits when no comma
+				d = d.replace(ssppRe7, "$1 $3 $4 "); // shorthand elliptical arc path syntax
+				d = trim(compressSpaces(d)); // compress multiple spaces
+				d = d.split(" "); // compress multiple spaces
+				inCanvas.altdMap.set(pathNode,d); 
 			} else {
-				d = pathNode.getAttribute("d"); // from canvg
+				d = altd;
 			}
-			//	console.log(d);
-			d = d.replace(/,/gm, " "); // get rid of all commas
-			d = d.replace(
-				/([MmZzLlHhVvCcSsQqTtAa])([MmZzLlHhVvCcSsQqTtAa])/gm,
-				"$1 $2"
-			); // separate commands from commands
-			d = d.replace(
-				/([MmZzLlHhVvCcSsQqTtAa])([MmZzLlHhVvCcSsQqTtAa])/gm,
-				"$1 $2"
-			); // separate commands from commands
-			d = d.replace(/([MmZzLlHhVvCcSsQqTtAa])([^\s])/gm, "$1 $2"); // separate commands from points
-			d = d.replace(/([^\s])([MmZzLlHhVvCcSsQqTtAa])/gm, "$1 $2"); // separate commands from points
-			d = d.replace(/([0-9])([+\-])/gm, "$1 $2"); // separate digits when no comma
-			d = d.replace(/(\.[0-9]*)(\.)/gm, "$1 $2"); // separate digits when no comma
-			d = d.replace(/([Aa](\s+[0-9]+){3})\s+([01])\s*([01])/gm, "$1 $3 $4 "); // shorthand elliptical arc path syntax
-			d = trim(compressSpaces(d)).split(" "); // compress multiple spaces
+			//ETcalc(false);
 			//	console.log(pathNode , d);
 
 			var prevCommand = "M";
@@ -7493,62 +7464,6 @@ function testCSclick(){ // Obsolute 2018.1.31
 			var command = d[i];
 			var cp;
 			var closed = false;
-
-			/**
-			var hitPoint = new Object(); // pathのhitPoint(線のためのhitTestエリア)を追加してみる(2013/11/28)
-
-			function getHitPoint(hp, cp, isEdgePoint) {
-				// 2019/4/16 なるべく端を設定しないように改良中　今後は選択したら選択した線を明示する機能が必要だね
-				// hp: ひとつ前のステップで決めたヒットポイント
-				// なるべく端点は使いたくない(というより端点だったら、次の点との間の中点を使う)
-				if (hp.prevX) {
-					// console.log("check half: hp.prevXY:",hp.prevX,hp.prevY ,"  cp.xy:",cp.x,cp.y,"  flg:",hp.isEdgePoint,isEdgePoint,hp.prevIsEdgePoint);
-					if (hp.isEdgePoint != false && (isEdgePoint || hp.prevIsEdgePoint)) {
-						// hpが設定済みだけれど、hpに端点が設定されいた・・
-						// console.log("set half point");
-						var tmpx = (hp.prevX + cp.x) / 2;
-						var tmpy = (hp.prevY + cp.y) / 2;
-						if (
-							tmpx > 35 &&
-							tmpx < mapCanvasSize.width - 35 &&
-							tmpy > 35 &&
-							tmpy < mapCanvasSize.height - 35
-						) {
-							hp.x = tmpx;
-							hp.y = tmpy;
-							hp.isNearEdgePoint = true;
-						}
-					}
-				}
-
-				if (
-					cp.x > 35 &&
-					cp.x < mapCanvasSize.width - 35 &&
-					cp.y > 35 &&
-					cp.y < mapCanvasSize.height - 35
-				) {
-					if (!hp.x) {
-						// まだ未設定の場合は端点でもなんでもひとまず設定しておく
-						//			console.log("set:",cp);
-						hp.x = cp.x;
-						hp.y = cp.y;
-						hp.isEdgePoint = isEdgePoint;
-						hp.isNearEdgePoint = false;
-					} else if (!isEdgePoint && (hp.isEdgePoint || hp.isNearEdgePoint)) {
-						// 設定済みの場合、端点で無くて、hpが端点だったときはそれを設定する。
-						hp.x = cp.x;
-						hp.y = cp.y;
-						hp.isEdgePoint = false;
-						hp.isNearEdgePoint = false;
-					}
-				}
-				hp.prevX = cp.x;
-				hp.prevY = cp.y;
-				hp.prevIsEdgePoint = isEdgePoint;
-				// console.log( "getHitPoint: cp:",cp,isEdgePoint,"  hitPoint:",hp );
-				return hp;
-			}
-			**/
 
 			//	console.log(d);
 
@@ -7628,7 +7543,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 						}
 						break;
 					case "A": // non scaling が効いていない・・のをたぶん解消 2017.1.18
-						var curr = transform(Number(sx), Number(sy)); // これはmatrixないので無変換..
+						var curr = { x: sx, y: sy };
 						++i;
 						var rx = Number(d[i]);
 						++i;
@@ -7644,19 +7559,26 @@ function testCSclick(){ // Obsolute 2018.1.31
 						++i;
 						sy = Number(d[i]);
 
-						cp = transform(sx, sy);
+						cp = { x: sx, y: sy };
 						var point = function (x, y) {
 							return { x: x, y: y };
 						};
 						// Conversion from endpoint to center parameterization
 						// http://www.w3.org/TR/SVG11/implnote.html#ArcImplementationNotes
 						// x1', y1' (in user coords)
-						var currp = transform(
-							(Math.cos(xAxisRotation) * (curr.x - cp.x)) / 2.0 +
-								(Math.sin(xAxisRotation) * (curr.y - cp.y)) / 2.0,
-							(-Math.sin(xAxisRotation) * (curr.x - cp.x)) / 2.0 +
-								(Math.cos(xAxisRotation) * (curr.y - cp.y)) / 2.0
-						); // これも無変換だ・・
+						var currp;
+						if (xAxisRotation == 0) {
+							currp = { x: (curr.x - cp.x) / 2.0, y: (curr.y - cp.y) / 2.0 };
+						} else {
+							currp = {
+								x:
+									(Math.cos(xAxisRotation) * (curr.x - cp.x)) / 2.0 +
+									(Math.sin(xAxisRotation) * (curr.y - cp.y)) / 2.0,
+								y:
+									(-Math.sin(xAxisRotation) * (curr.x - cp.x)) / 2.0 +
+									(Math.cos(xAxisRotation) * (curr.y - cp.y)) / 2.0,
+							};
+						}
 						// adjust radii
 
 						var l =
@@ -7677,20 +7599,30 @@ function testCSclick(){ // Obsolute 2018.1.31
 										Math.pow(ry, 2) * Math.pow(currp.x, 2))
 							);
 						if (isNaN(s)) s = 0;
-						var cpp = transform(
-							(s * rx * currp.y) / ry,
-							(s * -ry * currp.x) / rx
-						); // これも無変換・・・
+						var cpp = {
+							x: (s * rx * currp.y) / ry,
+							y: (s * -ry * currp.x) / rx,
+						};
 
 						// cx, cy
-						var centp = transform(
-							(curr.x + cp.x) / 2.0 +
-								Math.cos(xAxisRotation) * cpp.x -
-								Math.sin(xAxisRotation) * cpp.y,
-							(curr.y + cp.y) / 2.0 +
-								Math.sin(xAxisRotation) * cpp.x +
-								Math.cos(xAxisRotation) * cpp.y
-						); // これも無変換・・・
+						var centp;
+						if (xAxisRotation == 0) {
+							centp = {
+								x: (curr.x + cp.x) / 2.0 + cpp.x,
+								y: (curr.y + cp.y) / 2.0 + cpp.y,
+							};
+						} else {
+							centp = {
+								x:
+									(curr.x + cp.x) / 2.0 +
+									Math.cos(xAxisRotation) * cpp.x -
+									Math.sin(xAxisRotation) * cpp.y,
+								y:
+									(curr.y + cp.y) / 2.0 +
+									Math.sin(xAxisRotation) * cpp.x +
+									Math.cos(xAxisRotation) * cpp.y,
+							};
+						}
 
 						// vector magnitude
 						var m = function (v) {
@@ -7730,17 +7662,21 @@ function testCSclick(){ // Obsolute 2018.1.31
 						var tsc;
 						if (vectorEffectOffset) {
 							// 2017.1.17 non scaling 対応
-							tsc = transform(ssx, ssy);
+							tsc = { x: ssx, y: ssy };
 						} else {
 							tsc = transform(ssx, ssy, child2canvas, true); // スケール計算 これがVE fixed size効いていない
 						}
 
 						context.translate(tc.x, tc.y);
-						context.rotate(xAxisRotation);
-						context.scale(tsc.x, tsc.y);
-						context.arc(0, 0, r, a1, a1 + ad, 1 - sweepFlag);
-						context.scale(1 / tsc.x, 1 / tsc.y);
-						context.rotate(-xAxisRotation);
+						if (xAxisRotation == 0 && tsc.x == 1 && tsc.y == 1) {
+							context.arc(0, 0, r, a1, a1 + ad, 1 - sweepFlag);
+						} else {
+							context.rotate(xAxisRotation);
+							context.scale(tsc.x, tsc.y);
+							context.arc(0, 0, r, a1, a1 + ad, 1 - sweepFlag);
+							context.scale(1 / tsc.x, 1 / tsc.y);
+							context.rotate(-xAxisRotation);
+						}
 						context.translate(-tc.x, -tc.y);
 						cp = transform(sx, sy, child2canvas, false, vectorEffectOffset);
 						break;
@@ -7776,10 +7712,6 @@ function testCSclick(){ // Obsolute 2018.1.31
 					if (cp.y > maxy) {
 						maxy = cp.y;
 					}
-					if (clickable) {
-						// console.log("clk:",i,d.length-1);
-						// hitPoint = getHitPoint(hitPoint, cp, i == 2 || i == d.length - 1);
-					}
 				}
 
 				if (!prevCont) {
@@ -7792,10 +7724,6 @@ function testCSclick(){ // Obsolute 2018.1.31
 					prevCont = false;
 					--i;
 				}
-			}
-			if (!closed) {
-				//		console.log("force close");
-				//		context.closePath(); // BUGだった？
 			}
 			if (!canvasNonFillFlag) {
 				context.fill();
@@ -7829,12 +7757,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 				}
 			}
 
-			if (
-				clickable &&
-				canvasNonFillFlag &&
-				// hitPoint.x &&
-				!pathHitTest.pointPrevent
-			) {
+			if (clickable && canvasNonFillFlag && !pathHitTest.pointPrevent) {
 				var tmpLineWidth = context.lineWidth;
 				var tmpStrokeStyle = context.strokeStyle;
 				if (context.lineWidth < 6) {
@@ -7988,12 +7911,67 @@ function testCSclick(){ // Obsolute 2018.1.31
 			"image-rendering"
 		);
 
-		function getStyle(svgNode, defaultStyle, hasHyperLink) {
+		function getStyle(svgNode, defaultStyle, hasHyperLink, styleCacheMap) {
 			// 親のスタイルを継承して該当要素のスタイルを生成する
 			// hasUpdateはその要素自身にスタイルattrが付いていたときに設定される
-			var hasStyle = false,
-				hasUpdate = false;
-			var style = new Array();
+			
+			var nodeStyle;
+			
+			if ( styleCacheMap ){
+				nodeStyle = styleCacheMap.get(svgNode);
+			}
+			
+			if ( nodeStyle==undefined){
+//			if ( true){}
+				nodeStyle = getNodeStyle(svgNode,hasHyperLink);
+				if ( styleCacheMap ){
+					styleCacheMap.set(svgNode, nodeStyle);
+				}
+			}
+			
+			var computedStyle = {};
+			var hasStyle = false;
+			for (var styleName of  styleCatalog) {
+				if ( nodeStyle[styleName]){
+					computedStyle[styleName] = nodeStyle[styleName];
+					hasStyle = true;
+				} else if ( defaultStyle && defaultStyle[styleName]){
+					computedStyle[styleName] = defaultStyle[styleName];
+					hasStyle = true;
+				}
+			}
+			if ( nodeStyle.minZoom ){
+				computedStyle.minZoom = nodeStyle.minZoom;
+			} else if ( defaultStyle && defaultStyle.minZoom) {
+				computedStyle.minZoom = defaultStyle.minZoom;
+				hasStyle = true;
+			}
+			if ( nodeStyle.maxZoom ){
+				computedStyle.maxZoom = nodeStyle.maxZoom;
+			} else if ( defaultStyle && defaultStyle.maxZoom) {
+				computedStyle.maxZoom = defaultStyle.maxZoom;
+				hasStyle = true;
+			}
+			if (nodeStyle.nonScalingOffset){
+				computedStyle.nonScalingOffset = nodeStyle.nonScalingOffset;
+			}else if ( defaultStyle && defaultStyle.nonScalingOffset) {
+				// 2017.1.17 debug
+				computedStyle.nonScalingOffset = defaultStyle.nonScalingOffset;
+				hasStyle = true;
+			}
+			if ( defaultStyle && defaultStyle.usedParent) {
+				// use要素のためのhittest用情報・・・ 2017.1.17
+				computedStyle.usedParent = defaultStyle.usedParent;
+				hasStyle = true;
+			}
+			//console.log(svgNode.nodeName, computedStyle, nodeStyle);
+			return computedStyle;
+		}
+		
+		function getNodeStyle(svgNode, hasHyperLink){
+			// getStyleの親スタイル継承部を分離した処理
+			var hasUpdate = false;
+			var style = {};
 			style.fill = null; // Array.prototype.fill()があるので、バッティングしておかしいことがあり得る・・ 2016.12.1
 
 			// "style"属性の値を取る
@@ -8003,37 +7981,20 @@ function testCSclick(){ // Obsolute 2018.1.31
 				var st = getStyleOf(styleCatalog[i], svgNode, styleAtt);
 				if (st) {
 					style[styleCatalog[i]] = st;
-					hasStyle = true;
 					hasUpdate = true;
-				} else if (defaultStyle && defaultStyle[styleCatalog[i]]) {
-					style[styleCatalog[i]] = defaultStyle[styleCatalog[i]];
-					hasStyle = true;
 				}
 			}
 
-			// add "visibleMin/MaxZoom" 2013/8/19 とても出来が悪い・・・
 			if (svgNode.getAttribute("visibleMinZoom")) {
 				style.minZoom = Number(svgNode.getAttribute("visibleMinZoom")) / 100.0;
-				//		console.log("setMinZoom",style.minZoom , style);
 				hasUpdate = true;
-				hasStyle = true;
-			} else if (defaultStyle && defaultStyle.minZoom) {
-				style.minZoom = defaultStyle.minZoom;
-				hasStyle = true;
 			}
 			if (svgNode.getAttribute("visibleMaxZoom")) {
 				style.maxZoom = Number(svgNode.getAttribute("visibleMaxZoom")) / 100.0;
-				//		console.log("setMaxZoom",style.maxZoom , style);
 				hasUpdate = true;
-				hasStyle = true;
-			} else if (defaultStyle && defaultStyle.maxZoom) {
-				style.maxZoom = defaultStyle.maxZoom;
-				hasStyle = true;
 			}
 
 			style.hasUpdate = hasUpdate;
-			//	console.log("update style",style.hasUpdate);
-			//	console.log("Node:" , svgNode , "Style:" , style , " hasStyle:", hasStyle);
 
 			if (hasHyperLink) {
 				var hyperLink = svgNode.getAttribute("xlink:href");
@@ -8041,36 +8002,20 @@ function testCSclick(){ // Obsolute 2018.1.31
 				if (hyperLink) {
 					style.hyperLink = hyperLink;
 					style.target = hyperLinkTarget;
-					hasStyle = true;
 				}
 			}
 
 			if (svgNode.getAttribute("transform")) {
 				// <g>の svgt1.2ベースのnon-scaling機能のオフセット値を"スタイル"として設定する・・ 2014.5.12
 				style.nonScalingOffset = getNonScalingOffset(svgNode);
-				hasStyle = true;
-			} else if (defaultStyle && defaultStyle.nonScalingOffset) {
-				// 2017.1.17 debug
-				style.nonScalingOffset = defaultStyle.nonScalingOffset;
-				hasStyle = true;
 			}
-
-			if (defaultStyle && defaultStyle.usedParent) {
-				// use要素のためのhittest用情報・・・ 2017.1.17
-				style.usedParent = defaultStyle.usedParent;
-			}
-
-			if (hasStyle) {
-				return style;
-			} else {
-				return null;
-			}
+			return style;
 		}
 
 		function getStyleAttribute(svgElement) {
 			var styles = null;
 			if (svgElement.getAttribute("style")) {
-				styles = new Array();
+				styles = {};
 				//		console.log(svgElement.getAttribute("style"));
 				var stylesa = svgElement.getAttribute("style").split(";");
 				if (stylesa) {
@@ -8107,6 +8052,10 @@ function testCSclick(){ // Obsolute 2018.1.31
 		function setCanvasStyle(style, context) {
 			// var styleCatalog = new Array("stroke" , "stroke-width" , "stroke-linejoin" , "stroke-linecap" , "fill" , "fill-rule" , "fill-opacity" , "opacity" , "vector-effect");
 			// http://www.html5.jp/canvas/ref/method/beginPath.html
+			var ret = {
+				fillStyle: null,
+				strokeStyle: null,
+			};
 
 			if (style) {
 				if (style["stroke"]) {
@@ -8114,6 +8063,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 						context.strokeStyle = "rgba(0, 0, 0, 0)";
 					} else {
 						context.strokeStyle = style["stroke"];
+						ret.strokeStyle = style.stroke;
 					}
 				} else {
 					context.strokeStyle = "rgba(0, 0, 0, 0)";
@@ -8123,6 +8073,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 						context.fillStyle = "rgba(0, 0, 0, 0)";
 					} else {
 						context.fillStyle = style.fill;
+						ret.fillStyle = style.fill;
 					}
 					//		console.log("setContext fill:",context.fillStyle);
 				}
@@ -8160,6 +8111,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 					context.globalAlpha = style["fill-opacity"];
 				}
 			}
+			return ret;
 		}
 
 		function getCollidedImgs(imgs) {
@@ -8476,7 +8428,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 				pathHitTest.enable = false;
 				return null;
 			}
-			refreshScreen(); // 本来この関数は非同期の動きをするのでこの呼び方はまずいけれど・・・（ロードさえ生じなければ同期してるはずなので大丈夫だと思う）この呼び出しケースの場合、原理的にはロード生じないはずなのでオーケー・・でもなかった　リドロー完了形のイベントがまともに動かなくなってしまう2017.8.18
+			refreshScreenSync(); // 本来この関数は非同期の動きをするのでこの呼び方はまずいけれど・・・（ロードさえ生じなければ同期してるはずなので大丈夫だと思う）この呼び出しケースの場合、原理的にはロード生じないはずなのでオーケー・・でもなかった　リドロー完了形のイベントがまともに動かなくなってしまう2017.8.18　（2023/4/20この呼び方をする関数を内部関数化)
 			loadCompleted = true; // 2019/12/19 debug　ロード済みの同期呼び出しだから当然・・・ベクトルヒットテスト(checkticker)でおかしくなってた
 			return getHittedObjects();
 		}
@@ -9093,7 +9045,19 @@ function testCSclick(){ // Obsolute 2018.1.31
 		}
 
 		var retryingRefreshScreen = false;
-		function refreshScreen(noRetry, parentCaller, isRetryCall) {
+		function refreshScreen(noRetry, parentCaller, isRetryCall, withinContext) {
+			// MutationObserverとの不整合を回避するため、refreshScreenはマイクロタスクに積む
+			// https://zenn.dev/canalun/articles/js_async_and_company_summary
+			// https://developer.mozilla.org/ja/docs/Web/API/queueMicrotask
+			if ( withinContext ){
+				return ( refreshScreenSync(noRetry, parentCaller, isRetryCall, withinContext) );
+			} else {
+				queueMicrotask(function(){
+					 refreshScreenSync(noRetry, parentCaller, isRetryCall) 
+				});
+			}
+		}
+		function refreshScreenSync(noRetry, parentCaller, isRetryCall) {
 			// スクロール・パンを伴わずに画面の表示を更新(内部のSVGMapDOMとシンクロ)する処理
 			// SVGMapコンテンツ全体のDOMトラバースが起きるため基本的に重い処理
 			// SVGMapLv0.1.jsは画面の更新は定期的に行われ"ない" 実際は末尾のdynamicLoad()でそれが起きる
@@ -9104,6 +9068,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			// 一方、他の非同期読み込みが進んでいるときに動作することは好ましくないので・・
 
 			// ペンディングされている間に、更に新たなrefreshScreenが来た場合は、原理的に不要(caputureGISgeomも含め)のはずなので無視する。
+			//ETcalc(null, true);
 			if (retryingRefreshScreen && !isRetryCall) {
 				console.log("Is refreshScreen retry queue:: SKIP this Call");
 				return;
