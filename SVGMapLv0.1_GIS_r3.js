@@ -47,6 +47,7 @@
 // 2022/03/xx geoJsonのレンダラのバグ修正・高速化
 // 2022/04/xx Proxy処理をリファクタリング(メインのFW側および切り出したcorsProxy.js側で処理するように)
 // 2022/10/21 ラスターGIS: filterをサポート
+// 2023/05/11 getBufferedPolygon
 //
 // ISSUES:
 //
@@ -4100,6 +4101,116 @@
 			var uri = canvas.toDataURL("image/png");
 			return uri;
 		}
+		
+		function getBufferedPolygon(geom,bufferLength){
+			// jstsを用いて経度緯度系のgeometryのバッファ計算を行う
+			// geom : 経度緯度系のgeomerty(line,polygon,polylineなんでも)
+			// bufferLength : バッファ長[m]
+			//
+			// xx領域が十分狭いことを前提として、経度緯度系geometryの重心を基にした1次の変換によるメートル系への平面直角座標変換を行い、バッファ計算後、緯度座標に戻す
+			var ct = getCentroid(geom);
+			var cost = Math.cos(ct[1] * Math.PI/180 );
+			//console.log("centroid:",ct, " cos:",cost);
+			var tf = [
+			111111.11 * cost,
+			0,
+			0,
+			111111.11,
+			0,
+			0
+			];
+			var ngm = {
+				type:geom.type,
+				coordinates:geom.coordinates
+			}
+			ngm = transformGeometry(ngm,tf,true);
+			var f = getFeature(ngm);
+			f = f.buffer(bufferLength);
+			var bufGeom = getGeoJson(f);
+			var rtf = [
+			1/(111111.11 * cost),
+			0,
+			0,
+			1/111111.11,
+			0,
+			0
+			];
+			transformGeometry(bufGeom,rtf);
+			if ( geom.src){
+				bufGeom.src = geom.src;
+			}
+			return ( bufGeom );
+		}
+		function getCentroid(geom){
+			function opf(){
+				var count=0;
+				var sumX=0;
+				var sumY=0;
+				function set(crd){
+					sumX+=crd[0];
+					sumY+=crd[1];
+					++count;
+					//console.log(sumX,sumY,count);
+				}
+				function getResult(){
+					//console.log(sumX,sumY,count);
+					if ( count >0){
+						return ( [sumX / count, sumY / count]);
+					} else {
+						return null;
+					}
+				}
+				return{
+					getResult,
+					set
+				}
+			}
+			var op = opf();
+			parseCoordinates(geom.coordinates, op);
+			//console.log(op.getResult());
+			return ( op.getResult() );
+		}
+		function transformGeometry(geom,transform, doDeepCopy){
+			var transformOp;
+			if ( doDeepCopy ){
+				geom = structuredClone(geom);
+			}
+			if (typeof(transform)=="function"){
+				transformOp = function(){
+					function set(crd){
+						return(transform(crd));
+					}
+					return{set}
+				}
+			} else {
+				transformOp = function(){
+					function set(crd){
+						var ansX = crd[0]*transform[0] + crd[1]*transform[2] + transform[4]
+						var ansY = crd[0]*transform[1] + crd[1]*transform[3] + transform[5]
+						return [ansX,ansY];
+					}
+					return{set}
+				}
+			}
+			var op = transformOp();
+			//console.log(op);
+			parseCoordinates(geom.coordinates, op);
+			return ( geom );
+		}
+		function parseCoordinates(cd, operator){
+			//console.log(operator);
+			if ( typeof(cd[0])=="number" && cd.length == 2){
+				var ocd = operator.set(cd);
+				if ( ocd ){
+					cd[0]=ocd[0];
+					cd[1]=ocd[1];
+				}
+			} else {
+				for ( var scd of cd ){
+					parseCoordinates(scd, operator)
+				}
+			}
+		}
 
 		return {
 			// svgMapGIStool. で公開する関数のリスト
@@ -4113,6 +4224,7 @@
 			drawKml: drawKml,
 			disableImageCache: disableImageCache,
 			enableImageCache: enableImageCache,
+			getBufferedPolygon: getBufferedPolygon,
 			getExcludedPoints: getExcludedPoints,
 			getColorString: getColorString,
 			getImage: getImage,

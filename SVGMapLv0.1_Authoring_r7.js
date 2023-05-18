@@ -323,10 +323,11 @@
 			var symbols = svgMap.getSymbols(svgImages[poiDocId]);
 			var metaSchema = getMetaSchema(poiDocId);
 
+			var symbolCount = 0;
 			for (var key in symbols) {
 				++symbolCount;
 			}
-
+			console.log("symbols:",symbols,"  symbolCount:",symbolCount);
 			var ihtml = '<table id="poiEditor">';
 			if (symbolCount > 1) {
 				ihtml += '<tr><td colspan="2" id="iconselection" >';
@@ -337,7 +338,6 @@
 			}
 
 			firstSymbol = true;
-			var symbolCount = 0;
 			for (var key in symbols) {
 				// srcに相対パスが正しく入っているか？
 				if (symbols[key].type == "symbol") {
@@ -464,6 +464,7 @@
 			setPoiUiEvents(uiDoc, poiDocId);
 			setMetaUiEvents(uiDoc, poiDocId);
 			setEditConfEvents(uiDoc, poiDocId);
+			return ( uiMapping );
 		}
 
 		function setMetaUiEvents(targetDoc) {
@@ -1512,7 +1513,12 @@
 			var svgPos = svgMap.getPoiPos(poiNode);
 			var poiHref = poiNode.getAttribute("xlink:href");
 			//	var metaSchema = poiNode.parentNode.getAttribute("property").split(",");
-			var metaData = poiNode.getAttribute("content").split(",");
+			var metaData = poiNode.getAttribute("content");
+			if ( metaData !="" ){
+				metaData = metaData.split(",");
+			} else {
+				metaData = [];
+			}
 			var title = poiNode.getAttribute("xlink:title");
 			var latlng = svgMap.SVG2Geo(
 				Number(svgPos.x),
@@ -1732,6 +1738,7 @@
 					displayPolyProps(svgTarget);
 				}
 			}
+			svgMap.refreshScreen(); // 選択状態を解除(2023/1/20)
 		}
 
 		var selectedObjectID; // これは、メイン画面上の選択されたオブジェクト(アイコン)のIDなのでたぶんグローバルで問題ないはずです。
@@ -1774,6 +1781,7 @@
 			if (uiDoc.getElementById("poiEditorTitle")) {
 				uiDoc.getElementById("poiEditorTitle").value = props.title;
 			}
+			console.log(props.metaData);
 			for (var i = 0; i < props.metaData.length; i++) {
 				//		console.log(props.metaData[i],me.rows[i].cells[1]);
 				uiDoc.getElementById("meta" + i).value = props.metaData[i];
@@ -2011,6 +2019,8 @@
 			setPolyUiEvents(uiDoc, poiDocId);
 			setMetaUiEvents(uiDoc, poiDocId);
 			setEditConfEvents(uiDoc, poiDocId);
+			
+			return ( uiMapping );
 		}
 
 		function testTouch(e) {
