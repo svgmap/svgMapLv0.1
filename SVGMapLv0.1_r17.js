@@ -190,6 +190,7 @@
 // 2023/02/15 : Line hitPoint廃止
 // 2023/04/07 : ビットイメージアイコンを中心としたパフォーマンスチューニング
 // 2023/04/21 : ベクトルグラフィックスのパフォーマンスチューニング(XML属性キャッシュ)
+// 2023/05/24 : mapcanvasを囲むmapCanvasWrapperをつくりイベント検出に使い、右クリック下ドラッグによるズームアウトの操作性を改善(サイドエフェクトを少し注意しておく)
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -330,6 +331,22 @@
 				console.log("NO id:mapcanvas div exit..");
 				return;
 			}
+			
+			// 2023/05/24 zoom-out UI を改善するため、全画面mapcanvasのラッパーを仕掛ける
+			var childMapCanvas = document.createElement("div");
+			mapCanvas.setAttribute("id","mapCanvasWrapper");
+			for ( var mcatr of mapCanvas.attributes){
+				if ( mcatr.name=="id"){
+					childMapCanvas.setAttribute("id","mapcanvas");
+				} else if (mcatr.name=="title"){
+				} else {
+					childMapCanvas.setAttribute(mcatr.name,mcatr.value);
+				}
+			}
+			mapCanvas.appendChild(childMapCanvas);
+			mapCanvas.setAttribute("style","position: absolute; overflow: hidden; top: 0px; left: 0px; width: 100%; height: 100%;");
+			mapCanvas = childMapCanvas;
+			
 			var rootSVGpath;
 			if (mapCanvas.dataset.src) {
 				// data-src属性に読み込むべきSVGの相対リンクがある 2017.3.6
@@ -4820,7 +4837,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 				// !isIEから変更（たぶんもう不要？ 2014.6.29)
 				if (true) {
 					// タッチパネルデバイスの場合(POIが選べない・・2013/4/4)
-					var mc = document.getElementById("mapcanvas");
+					var mc = document.getElementById("mapCanvasWrapper");
 
 					addEvent(mc, "touchstart", function (e) {
 						// 2014/06/03
@@ -4839,7 +4856,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					addEvent(window, "resize", refreshWindowSize);
 
 					// 緯度経度文字を選べるようにね/ 2012/12/07
-					var mc = document.getElementById("mapcanvas");
+//					var mc = document.getElementById("mapcanvas");
 
 					addEvent(mc, "mousedown", startPan);
 					addEvent(mc, "mouseup", endPan);
