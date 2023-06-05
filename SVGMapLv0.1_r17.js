@@ -267,6 +267,7 @@
 
 		var resume = false; // 2016/10/26 resume機能
 		var resumeSpan = 3; // resumeの有効期限 (日) 2021/3 rev17で無効化する予定
+		var initialRootLayersProps; // 2023/06/05 for permanentLink generation
 
 		var rootViewBox; // aspectを加味し実際に開いているルートSVGのviewBox
 		var rootCrs; // ルートSVGのCRS ( geo->rootのsvg ) 2020/3/17 matrixだけでなく関数(当初はメルカトル変換)(transform(geo->mercatorRoot),inverse(その逆))になるケースがある
@@ -9390,6 +9391,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 				}
 
 				var lp = getRootLayersProps();
+				initialRootLayersProps = lp;
 				// 2021/2/4 レイヤーのカスタムOFF＆追加＆変更を設定できるsvgMapCustomLayersManagerの情報を導入する
 				// cook.customLayers の中のJSONデータからレイヤーの削除、追加などを実施する
 				if (cook.customLayers && window.svgMapCustomLayersManager) {
@@ -9626,58 +9628,89 @@ function testCSclick(){ // Obsolute 2018.1.31
 		function saveResumeData() {
 			var expire = new Date();
 			expire.setTime(expire.getTime() + 1000 * 3600 * 24 * resumeSpan); // 3日の有効期限..
-			var resumeObj = {};
 			//setCookie( "resume", resume , expire );
-			resumeObj.resume = resume;
+			var resumeObj = {};
 			if (resume == true) {
-				// resumeがfalseの場合は、そもそもこれらは不要
-				/**
-		setCookie( "vbLng", geoViewBox.x , expire );
-		setCookie( "vbLat", geoViewBox.y , expire );
-		setCookie( "vbLngSpan", geoViewBox.width , expire );
-		setCookie( "vbLatSpan", geoViewBox.height , expire );
-		**/
-				resumeObj.vbLng = geoViewBox.x;
-				resumeObj.vbLat = geoViewBox.y;
-				resumeObj.vbLngSpan = geoViewBox.width;
-				resumeObj.vbLatSpan = geoViewBox.height;
-				var lps = getRootLayersProps();
-				// クッキーの個数よりもレイヤーがとても多い場合があるので簡略化
-				//		var layerStatStr="";
-				var layersProps = {};
-				for (var i = 0; i < lps.length; i++) {
-					var lp = lps[i];
-					var key = lp.title; // WARN titleが同じものがあるとここで上書きされることになります！！！ 2021/2/3
-					var lpProps = {
-						visible: lp.visible,
-						editing: lp.editing,
-						groupName: lp.groupName,
-						groupFeature: lp.groupFeature,
-						href: lp.href,
-						title: lp.title,
-						href: lp.href,
-					};
-					layersProps[key] = lpProps;
-
-					/**
-			if ( lps[i].visible ){
-				if ( lps[i].editing ){
-					layerStatStr += "e";
-				} else {
-					layerStatStr += "v";
-				}
-			} else {
-				layerStatStr += "-";
+				resumeObj = getResumeObj();
 			}
-			**/
-				}
-				// setCookie ( "layersProperties" , JSON.stringify(layersProps) , expire );
-				resumeObj.layersProperties = layersProps;
-
-				//		setCookie ( "layerStat" , layerStatStr , expire );
-				//	console.log("save resume data",decodeURIComponent(document.cookie));
-			}
+			resumeObj.resume = resume;
 			setCookie("resume", JSON.stringify(resumeObj), expire);
+		}
+		
+		function getResumeObj(){
+			var resumeObj = {};
+			resumeObj.vbLng = geoViewBox.x;
+			resumeObj.vbLat = geoViewBox.y;
+			resumeObj.vbLngSpan = geoViewBox.width;
+			resumeObj.vbLatSpan = geoViewBox.height;
+			var lps = getRootLayersProps();
+			var layersProps = getBasicLayersPropsObject(lps);
+			resumeObj.layersProperties = layersProps;
+			return resumeObj;
+		}
+		
+		function getBasicLayersPropsObject(rootLayersProps){
+			var layersProps = {};
+			for (var i = 0; i < rootLayersProps.length; i++) {
+				var lp = rootLayersProps[i];
+				var key = lp.title; // WARN titleが同じものがあるとここで上書きされることになります！！！ 2021/2/3
+				var lpProps = {
+					visible: lp.visible,
+					editing: lp.editing,
+					groupName: lp.groupName,
+					groupFeature: lp.groupFeature,
+					href: lp.href,
+					title: lp.title,
+					href: lp.href,
+				};
+				layersProps[key] = lpProps;
+			}
+			return layersProps;
+		}
+		
+		function getBasicPermanentLink(copyLinkTextToClipboard){
+			// 今見ているレイヤー可視状況及びビューポートのパーマリンクを発生する
+			// contaier.svgにもともとあったもののみを対象とする基本的なもの
+			// customLayerManagerによってレイヤの意追加や順番が変わったりしたものは、customLayerManagerの機構を別途設ける
+			// さらにレイヤ固有UIの設定状況もこの機能の対象外、別途機構を設ける
+			console.log("getBasicPermanentLink:",copyLinkTextToClipboard);
+			var resumeObj = getResumeObj();
+			var hiddenDif=[];
+			var visibleDif=[];
+			var initialLayersProperties = getBasicLayersPropsObject(initialRootLayersProps);
+			for ( var layerName in initialLayersProperties){
+				var origLayerProp = initialLayersProperties[layerName];
+				var currentLayerProp =  resumeObj.layersProperties[layerName];
+				if ( currentLayerProp ){
+					if ( origLayerProp.visible != currentLayerProp.visible ){
+						if ( origLayerProp.visible == true ){
+							hiddenDif.push(layerName);
+						} else {
+							visibleDif.push(layerName);
+						}
+					}
+				}
+			}
+			
+			var visHash="";
+			if ( visibleDif.length >0){
+				visHash =`&visibleLayer=${visibleDif.join(",")}`
+			}
+			var hidHash="";
+			if ( hiddenDif.length >0){
+				hidHash =`&hiddenLayer=${hiddenDif.join(",")}`
+			}
+			
+			var vbHash = `xywh=global:${resumeObj.vbLng.toFixed(6)},${resumeObj.vbLat.toFixed(6)},${resumeObj.vbLngSpan.toFixed(6)},${resumeObj.vbLatSpan.toFixed(6)}`;
+			
+			var permaLink= new URL(location.pathname,location.origin);
+			var plHash = vbHash + visHash + hidHash;
+			permaLink.hash = plHash;
+			if ( copyLinkTextToClipboard == true){
+				navigator.clipboard.writeText(permaLink.href);
+			}
+			return ( permaLink );
+			//return ({current:resumeObj, initialLayersProperties,permaLink});
 		}
 
 		function resumeToggle(evt) {
@@ -10270,6 +10303,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			POIviewSelection: POIviewSelection,
 			SVG2Geo: SVG2Geo,
 			addEvent: addEvent,
+			//get basicPermanentLink(){return getBasicPermanentLink()},
 			callFunction: function (fname, p1, p2, p3, p4, p5) {
 				//		console.log("call callFunc:",fname , p1,p2,p3,p4,p5);
 				eval("var vFunc = " + fname); // "
@@ -10310,6 +10344,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			dynamicLoad: dynamicLoad,
 			escape: escape,
 			geo2Screen: geo2Screen,
+			getBasicPermanentLink:getBasicPermanentLink,
 			getBBox: getBBox,
 			getCentralGeoCoorinates: getCentralGeoCoorinates,
 			getConversionMatrixViaGCS: getConversionMatrixViaGCS,
