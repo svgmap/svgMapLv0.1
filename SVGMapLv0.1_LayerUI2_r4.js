@@ -672,6 +672,7 @@
 
 				var llUIdiv = document.createElement("div");
 				llUIdiv.id = "layerTableDiv";
+				layerTableDiv = llUIdiv;
 				llUIdiv.style.width = "100%";
 				llUIdiv.style.height = "100%";
 				llUIdiv.style.overflowY = "scroll";
