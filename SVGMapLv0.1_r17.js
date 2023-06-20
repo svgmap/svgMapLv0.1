@@ -332,22 +332,25 @@
 				console.log("NO id:mapcanvas div exit..");
 				return;
 			}
-			
+
 			// 2023/05/24 zoom-out UI を改善するため、全画面mapcanvasのラッパーを仕掛ける
 			var childMapCanvas = document.createElement("div");
-			mapCanvas.setAttribute("id","mapCanvasWrapper");
-			for ( var mcatr of mapCanvas.attributes){
-				if ( mcatr.name=="id"){
-					childMapCanvas.setAttribute("id","mapcanvas");
-				} else if (mcatr.name=="title"){
+			mapCanvas.setAttribute("id", "mapCanvasWrapper");
+			for (var mcatr of mapCanvas.attributes) {
+				if (mcatr.name == "id") {
+					childMapCanvas.setAttribute("id", "mapcanvas");
+				} else if (mcatr.name == "title") {
 				} else {
-					childMapCanvas.setAttribute(mcatr.name,mcatr.value);
+					childMapCanvas.setAttribute(mcatr.name, mcatr.value);
 				}
 			}
 			mapCanvas.appendChild(childMapCanvas);
-			mapCanvas.setAttribute("style","position: absolute; overflow: hidden; top: 0px; left: 0px; width: 100%; height: 100%;");
+			mapCanvas.setAttribute(
+				"style",
+				"position: absolute; overflow: hidden; top: 0px; left: 0px; width: 100%; height: 100%;"
+			);
 			mapCanvas = childMapCanvas;
-			
+
 			var rootSVGpath;
 			if (mapCanvas.dataset.src) {
 				// data-src属性に読み込むべきSVGの相対リンクがある 2017.3.6
@@ -3021,7 +3024,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 			var p2 = Math.floor(p0 + span0);
 			return {
 				p0: p1,
-				span: p2 - p1 + 0.02 // この整数化処理をしても継ぎ目が見える時がたまにあるのは、多分devicePixelRatioが整数でない為? そこで、spabにごくわずかな値をプラスする。(0.005とかだと効かず、0.01だとごくたまに。0.02だとほぼなくなる様子。) 2023/05/26
+				span: p2 - p1 + 0.02, // この整数化処理をしても継ぎ目が見える時がたまにあるのは、多分devicePixelRatioが整数でない為? そこで、spabにごくわずかな値をプラスする。(0.005とかだと効かず、0.01だとごくたまに。0.02だとほぼなくなる様子。) 2023/05/26
 			};
 		}
 
@@ -4857,7 +4860,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					addEvent(window, "resize", refreshWindowSize);
 
 					// 緯度経度文字を選べるようにね/ 2012/12/07
-//					var mc = document.getElementById("mapcanvas");
+					//					var mc = document.getElementById("mapcanvas");
 
 					addEvent(mc, "mousedown", startPan);
 					addEvent(mc, "mouseup", endPan);
@@ -9636,8 +9639,8 @@ function testCSclick(){ // Obsolute 2018.1.31
 			resumeObj.resume = resume;
 			setCookie("resume", JSON.stringify(resumeObj), expire);
 		}
-		
-		function getResumeObj(){
+
+		function getResumeObj() {
 			var resumeObj = {};
 			resumeObj.vbLng = geoViewBox.x;
 			resumeObj.vbLat = geoViewBox.y;
@@ -9648,8 +9651,8 @@ function testCSclick(){ // Obsolute 2018.1.31
 			resumeObj.layersProperties = layersProps;
 			return resumeObj;
 		}
-		
-		function getBasicLayersPropsObject(rootLayersProps){
+
+		function getBasicLayersPropsObject(rootLayersProps) {
 			var layersProps = {};
 			for (var i = 0; i < rootLayersProps.length; i++) {
 				var lp = rootLayersProps[i];
@@ -9667,23 +9670,25 @@ function testCSclick(){ // Obsolute 2018.1.31
 			}
 			return layersProps;
 		}
-		
-		function getBasicPermanentLink(copyLinkTextToClipboard){
+
+		function getBasicPermanentLink(copyLinkTextToClipboard) {
 			// 今見ているレイヤー可視状況及びビューポートのパーマリンクを発生する
 			// contaier.svgにもともとあったもののみを対象とする基本的なもの
 			// customLayerManagerによってレイヤの意追加や順番が変わったりしたものは、customLayerManagerの機構を別途設ける
 			// さらにレイヤ固有UIの設定状況もこの機能の対象外、別途機構を設ける
-			console.log("getBasicPermanentLink:",copyLinkTextToClipboard);
+			console.log("getBasicPermanentLink:", copyLinkTextToClipboard);
 			var resumeObj = getResumeObj();
-			var hiddenDif=[];
-			var visibleDif=[];
-			var initialLayersProperties = getBasicLayersPropsObject(initialRootLayersProps);
-			for ( var layerName in initialLayersProperties){
+			var hiddenDif = [];
+			var visibleDif = [];
+			var initialLayersProperties = getBasicLayersPropsObject(
+				initialRootLayersProps
+			);
+			for (var layerName in initialLayersProperties) {
 				var origLayerProp = initialLayersProperties[layerName];
-				var currentLayerProp =  resumeObj.layersProperties[layerName];
-				if ( currentLayerProp ){
-					if ( origLayerProp.visible != currentLayerProp.visible ){
-						if ( origLayerProp.visible == true ){
+				var currentLayerProp = resumeObj.layersProperties[layerName];
+				if (currentLayerProp) {
+					if (origLayerProp.visible != currentLayerProp.visible) {
+						if (origLayerProp.visible == true) {
 							hiddenDif.push(layerName);
 						} else {
 							visibleDif.push(layerName);
@@ -9691,25 +9696,29 @@ function testCSclick(){ // Obsolute 2018.1.31
 					}
 				}
 			}
-			
-			var visHash="";
-			if ( visibleDif.length >0){
-				visHash =`&visibleLayer=${visibleDif.join(",")}`
+
+			var visHash = "";
+			if (visibleDif.length > 0) {
+				visHash = `&visibleLayer=${visibleDif.join(",")}`;
 			}
-			var hidHash="";
-			if ( hiddenDif.length >0){
-				hidHash =`&hiddenLayer=${hiddenDif.join(",")}`
+			var hidHash = "";
+			if (hiddenDif.length > 0) {
+				hidHash = `&hiddenLayer=${hiddenDif.join(",")}`;
 			}
-			
-			var vbHash = `xywh=global:${resumeObj.vbLng.toFixed(6)},${resumeObj.vbLat.toFixed(6)},${resumeObj.vbLngSpan.toFixed(6)},${resumeObj.vbLatSpan.toFixed(6)}`;
-			
-			var permaLink= new URL(location.pathname,location.origin);
+
+			var vbHash = `xywh=global:${resumeObj.vbLng.toFixed(
+				6
+			)},${resumeObj.vbLat.toFixed(6)},${resumeObj.vbLngSpan.toFixed(
+				6
+			)},${resumeObj.vbLatSpan.toFixed(6)}`;
+
+			var permaLink = new URL(location.pathname, location.origin);
 			var plHash = vbHash + visHash + hidHash;
 			permaLink.hash = plHash;
-			if ( copyLinkTextToClipboard == true){
+			if (copyLinkTextToClipboard == true) {
 				navigator.clipboard.writeText(permaLink.href);
 			}
-			return ( permaLink );
+			return permaLink;
 			//return ({current:resumeObj, initialLayersProperties,permaLink});
 		}
 
@@ -10344,7 +10353,7 @@ function testCSclick(){ // Obsolute 2018.1.31
 			dynamicLoad: dynamicLoad,
 			escape: escape,
 			geo2Screen: geo2Screen,
-			getBasicPermanentLink:getBasicPermanentLink,
+			getBasicPermanentLink: getBasicPermanentLink,
 			getBBox: getBBox,
 			getCentralGeoCoorinates: getCentralGeoCoorinates,
 			getConversionMatrixViaGCS: getConversionMatrixViaGCS,

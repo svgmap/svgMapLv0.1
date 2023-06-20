@@ -141,7 +141,7 @@
 				syncLayerSpecificUiExistence(lps[i].id, lps[i].visible); // 基幹処理(レイヤ固有UI)をレイヤリストUI更新(setLayerTable)から分けた
 			}
 			if (tb) {
-				var ltst= layerTableDiv.scrollTop;
+				var ltst = layerTableDiv.scrollTop;
 				removeAllLayerItems(tb);
 				setLayerTable(tb, lps);
 				layerTableDiv.scrollTop = ltst; // 2023/06/19 Edgeのこの時点のバージョンで、DOM再構築後scrollTopが保持されない問題が起きたパッチ(他のブラウザはOKだが・・)
