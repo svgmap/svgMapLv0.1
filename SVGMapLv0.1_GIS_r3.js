@@ -84,12 +84,14 @@
 	var svgMapGIStool = (function () {
 		//	console.log("Hello this is svgMapGIStool");
 
+		var featureReader, featureWriter, getFeature, getGeoJson;
+
 		if (jsts) {
 			// using jsts (JTS javascript edition) https://bjornharrtell.github.io/jsts/
 			//		console.log("This apps has jsts (JavaScript Topology Suites)");
-			this.featureReader = new jsts.io.GeoJSONReader();
-			this.featureWriter = new jsts.io.GeoJSONWriter();
-			this.getFeature = function (geojs) {
+			featureReader = new jsts.io.GeoJSONReader();
+			featureWriter = new jsts.io.GeoJSONWriter();
+			getFeature = function (geojs) {
 				if (geojs.type == "MultiLineString") {
 					for (var i = geojs.coordinates.length - 1; i >= 0; i--) {
 						if (geojs.coordinates[i].length < 2) {
@@ -105,7 +107,7 @@
 				}
 				return featureReader.read(geojs);
 			};
-			this.getGeoJson = function (feature) {
+			getGeoJson = function (feature) {
 				return featureWriter.write(feature);
 			};
 		}
