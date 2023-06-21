@@ -855,14 +855,18 @@
 				j = 0;
 				loop2Count = 0;
 				if (ansFeature) {
-					var ansGeoJs = getGeoJson(ansFeature);
-					if (geomHasCoordinates(ansGeoJs)) {
-						if (params.addMetadata) {
-							//						console.log("Add metada",ansFeatureMetadata);
-							ansGeoJs.metadata = ansFeatureMetadata;
+					try {
+						var ansGeoJs = getGeoJson(ansFeature);
+						if (geomHasCoordinates(ansGeoJs)) {
+							if (params.addMetadata) {
+								//						console.log("Add metada",ansFeatureMetadata);
+								ansGeoJs.metadata = ansFeatureMetadata;
+							}
+							ansFeatures.push(ansGeoJs);
+							//					console.log(ansFeature);
 						}
-						ansFeatures.push(ansGeoJs);
-						//					console.log(ansFeature);
+					} catch (e) {
+						console.warn("Could not build geoJson skip :", ansFeature);
 					}
 				}
 			}

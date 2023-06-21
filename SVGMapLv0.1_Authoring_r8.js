@@ -1988,12 +1988,7 @@
 			isPolylineMode,
 			options
 		) {
-			console.log(
-				"initPolygonTools : isPolylineMode:",
-				isPolylineMode,
-				"  uiMapping.toolsCbFunc:",
-				uiMapping.toolsCbFunc
-			);
+			console.log("initPolygonTools : isPolylineMode:", isPolylineMode);
 
 			removeChildren(targetDiv);
 
