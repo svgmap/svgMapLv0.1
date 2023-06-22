@@ -191,6 +191,7 @@
 // 2023/04/07 : ビットイメージアイコンを中心としたパフォーマンスチューニング
 // 2023/04/21 : ベクトルグラフィックスのパフォーマンスチューニング(XML属性キャッシュ)
 // 2023/05/24 : mapcanvasを囲むmapCanvasWrapperをつくりイベント検出に使い、右クリック下ドラッグによるズームアウトの操作性を改善(サイドエフェクトを少し注意しておく)
+// 2023/06/22 : wheelイベント(含タッチパッドのジェスチャ)によるズーム処理を改良
 //
 // Issues:
 // 2021/10/14 ルートsvgのレイヤ構成をDOMで直接操作した場合、LayerUIが起動/終了しない（下の問題の根源）mutation監視に相当するものが必要（トラバースしているので監視できるのではと思う）
@@ -593,6 +594,9 @@
 		function showPanning(evt) {
 			// ここではズームパンアニメーション自体を行うことはしていない(difX,Y,zTFなどの変化をさせているだけ)
 			if (panning) {
+				if (wheelZooming != 0 && evt.type != "wheelDummy") {
+					return false;
+				}
 				//		console.log("button:",evt.button,event.button);
 
 				if (!isIE) {
@@ -628,7 +632,7 @@
 				if (zoomingTransitionFactor > 0) {
 					if (initialTouchDisance == 0) {
 						zoomingTransitionFactor =
-							Math.exp(-difY / (mapCanvasSize.height / 2)) / Math.exp(0);
+							Math.exp(difY / (mapCanvasSize.height / 2)) / Math.exp(0);
 					}
 					if (zoomingTransitionFactor < 0.1) {
 						zoomingTransitionFactor = 0.1;
@@ -4894,18 +4898,34 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 		window.addEventListener( 'DOMMouseScroll', testWheel, false );
 	}
 	**/
-			window.addEventListener("wheel", testWheel, false);
+			window.addEventListener("wheel", testWheel, { passive: false });
 		}
 
+		var wheelTimerID,
+			wheelZooming = 0;
 		function testWheel(evt) {
-			//	console.log("Wheel:",evt,evt.deltaY );
-			if (evt.deltaY < 0 || evt.detail < 0 || evt.wheelDelta > 0) {
-				//evt.preventDefault();
-				zoomup();
-			} else if (evt.deltaY > 0 || evt.detail > 0 || evt.wheelDelta < 0) {
-				//evt.preventDefault();
-				zoomdown();
+			if (wheelZooming == 0) {
+				startPan({ type: "wheelDummy", button: 2, clientX: 0, clientY: 0 });
 			}
+			var zf = 1;
+			// https://groups.google.com/a/chromium.org/g/chromium-dev/c/VhSKxAJFCs0
+			// たしかに、パッドでピンチするとctrlはtrueになってる
+			if (evt.ctrlKey) {
+				zf = 3;
+			}
+			wheelZooming -= (evt.deltaX + evt.deltaY + evt.deltaZ) * zf;
+			showPanning({
+				type: "wheelDummy",
+				buttons: 1,
+				clientX: 0,
+				clientY: wheelZooming,
+			});
+			clearTimeout(wheelTimerID);
+			wheelTimerID = setTimeout(function () {
+				endPan();
+				wheelZooming = 0;
+			}, 200);
+			evt.preventDefault();
 		}
 
 		function configIE() {
