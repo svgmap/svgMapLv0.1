@@ -6468,6 +6468,11 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					// ビットイメージの各image要素にdata-mercatorTileがtrueで設定され、しかもrootのCRSにmercator属性があったら不要とする特殊処理 2021/08/10
 					return false;
 				}
+				var tfv = imageElem.getAttribute("transform");
+				if ( tfv && tfv.indexOf("ref")==0){
+					// ビットイメージのtransformがref(svg..)の場合は不要とする特殊処理 2023/6/29
+					return false;
+				}
 				return true;
 			}
 		}
