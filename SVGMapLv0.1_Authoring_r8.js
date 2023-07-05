@@ -221,6 +221,7 @@
 			}
 
 			if (
+				uiMapping &&
 				uiMapping.editingMode &&
 				uiMapping.editingMode == "POIreg" &&
 				uiDoc === uiMapping.uiDoc &&
