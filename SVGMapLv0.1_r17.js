@@ -350,7 +350,6 @@
 				"style",
 				"position: absolute; overflow: hidden; top: 0px; left: 0px; width: 100%; height: 100%;"
 			);
-			mapCanvas = childMapCanvas;
 
 			var rootSVGpath;
 			if (mapCanvas.dataset.src) {
@@ -363,6 +362,7 @@
 				console.log("NO id:mapcanvas data-src for root svg container exit..");
 				return;
 			}
+			mapCanvas = childMapCanvas;
 
 			//	console.log("AppName:",navigator.appName,"  UAname:",navigator.userAgent);
 			//	if ( navigator.appName == 'Microsoft Internet Explorer' && window.createPopup )
@@ -6469,7 +6469,7 @@ function viewBoxChanged(docId){ // このルーチンバグあり・・ 2020/6/8
 					return false;
 				}
 				var tfv = imageElem.getAttribute("transform");
-				if ( tfv && tfv.indexOf("ref")==0){
+				if (tfv && tfv.indexOf("ref") == 0) {
 					// ビットイメージのtransformがref(svg..)の場合は不要とする特殊処理 2023/6/29
 					return false;
 				}
