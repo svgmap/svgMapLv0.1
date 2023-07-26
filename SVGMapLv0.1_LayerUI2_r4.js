@@ -51,6 +51,7 @@
 // 2021/06/22 : zoomPanMapCompletedイベントを実装。レイヤ固有UIでzoomPanMapイベント後 独自のXHRによりデータの取得＆描画更新が行われるようなケースでも、その読み込み完了を検知後に発行するイベント。
 // 2021/09/22 : lauerUIwindowsに.setLoadingFlag(): 非同期処理中を知らせるフラグを明示的にセット・解除可能に
 // 2021/10/29 : setRootLayersPropsで設定する限り(rootSvgのDOM直編集をしない限り)svgMap.updateLayerTableを呼ばなくても問題が起きないように(initLayerList(initOptions) > rev17 core svgMap)
+// 2023/07/25 : Firefoxの最新版では、力業のiFrameReady()がDOMContentLoadedタイミングをつかんだ処理ができないケースが多い、そこでloadイベント処理のリトライを行うルーチンを入れた（この実装までにかなりの試行錯誤があった）
 
 // ISSUES, ToDo:
 // 2021/10/14 rootsvgのDOM直編集ではupdateLayerTableが反映されるタイミングが直にない～updateLayerTableを多数呼びたくない理由は、LayerListTableの後進にオーバヘッドがかかるから　なので、それをせずにならば(例えばrefreshScreen毎に)いくら呼んでも気にならないはず
@@ -1253,6 +1254,7 @@
 			// loadより前の段階(ほぼDOMContentLoadedの段階)でfnを実行する。力技のポーリングをしている
 			// https://stackoverflow.com/questions/24603580/how-can-i-access-the-dom-elements-within-an-iframe/24603642#comment38157462_24603642
 			// This function ONLY works for iFrames of the same origin as their parent
+			// この実装、Firefoxの最新版ではうまく動かなくなっている。setTimeoutの実効間隔が長く、その間にload処理が完了してしまう為？
 			var timer;
 			var fired = false;
 			function ready() {
@@ -1260,6 +1262,7 @@
 					fired = true;
 					clearTimeout(timer);
 					fn.call(this);
+					iFrame.contentWindow.removeEventListener("error",retryLoadEvent);
 				}
 			}
 			function readyState() {
@@ -1283,6 +1286,15 @@
 					ready.call(iFrame.contentDocument || iFrame.contentWindow.document);
 				});
 			}
+			
+			// 2023/07/25 iFrameReady失敗のリトライを　エラーが起きた時のみにする処理
+			var errorOccurred = false;
+			function retryLoadEvent(event){
+				console.warn("iFrame error:", event.message);
+				errorOccurred = true;
+			}
+			iFrame.contentWindow.addEventListener("error",retryLoadEvent);
+			
 			function checkLoaded() {
 				var doc = iFrame.contentDocument || iFrame.contentWindow.document;
 				// We can tell if there is a dummy document installed because the dummy document
@@ -1290,7 +1302,16 @@
 				if (doc.URL.indexOf("about:blank") !== 0) {
 					// 2021/06/24 about: => about:blank (patch for about:srcdoc issue)
 					if (doc.readyState === "complete") {
+						console.warn("Already load completed.");
 						ready.call(doc);
+						// 2023/07/25 iFrameReady失敗のリトライ処理の試み　Firefoxの最近のバージョンで起きる確率が高い
+						// このケースは、DOMContentLoaded時点での処理に失敗したケース、故にloadイベントによる初期化にも失敗しているといえるだろう。そのため、loadイベントを再送信してリカバーを試みる
+						// エラーが起きている時だけリトライするべきかもしれないので、そうしてみた。
+						if ( errorOccurred ){
+							console.warn("Retry load process ....");
+							var le = new Event("load");
+							iFrame.contentWindow.dispatchEvent(le);
+						}
 					} else {
 						// set event listener for DOMContentLoaded on the new document
 						addEvent(doc, "DOMContentLoaded", ready);
@@ -1441,6 +1462,20 @@
 			}
 			console.log("initIframePh2(byXHR): httpRes: ", httpRes, "   lid:", lid);
 			var sourceDoc = httpRes.responseText;
+			var baseHtml = `<base href='${httpRes.responseURL}'>`; // 2023/07/26 できるだけ互換を保てるようにbase要素を設定する
+			if (sourceDoc.indexOf("<script") > 0) {
+				if (sourceDoc.indexOf("</head>") > 0) {
+					sourceDoc = sourceDoc.replace(
+						"</head>",
+						`${baseHtml}</head>`
+					);
+				} else {
+					sourceDoc = sourceDoc.replace(
+						/<html[^>]*>/,
+						"$&" + `<head>${baseHtml}</head>`
+					);
+				}
+			}
 			iframe.srcdoc = sourceDoc;
 			//	layerSpecificUIbody.appendChild(iframe);
 			//lsUIbdy.appendChild(iframe);
