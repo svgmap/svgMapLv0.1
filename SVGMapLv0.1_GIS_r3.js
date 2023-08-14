@@ -3228,7 +3228,7 @@
 			fillColor,
 			POIiconId,
 			poiTitle,
-			metadata,
+			parentMetadata,
 			parentElm,
 			metaDictionary
 		) {
@@ -3239,6 +3239,13 @@
 			var svgImagesProp = svgImagesProps[targetSvgDocId];
 			var crs = svgImagesProp.CRS;
 
+			var metadata = {};
+			if (parentMetadata) {
+				for (var mkey in parentMetadata) {
+					metadata[mkey] = parentMetadata[mkey];
+				}
+			}
+
 			if (geojson.metadata) {
 				// 2020/1/8
 				metadata = geojson.metadata;
@@ -3247,15 +3254,9 @@
 
 			if (geojson.properties) {
 				// 拡張メタデータ機構：標準geojsonはFeature下のみ許されるがどこでもOKに、下層はそれを継承上書き（デフォ属性可に）
-				if (!metadata) {
-					metadata = {};
-				}
 				for (var mkey in geojson.properties) {
 					metadata[mkey] = geojson.properties[mkey];
 				}
-			}
-			if (!metadata) {
-				metadata = {};
 			}
 
 			if (!geojson.type && geojson.length > 0) {
