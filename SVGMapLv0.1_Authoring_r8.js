@@ -43,6 +43,7 @@
 // 2023/06/14 Rev8: バッファ付きポイント・ライン・ポリゴンUI、6個のＵＩを統合したＵＩ(initGenericTool)
 // 2023/06/19 POIもoptionsで設定するように変更。 bufferedのvecrot-effectバグ修正、　いずれでもeditingStyle,shapeStyleを設定可能に（POIの場合はbuiffered時有効)
 // 2023/06/20 GenericTool周りのコードのブラッシュアップ、editingStyle,shapeStyleを設定可能に
+// 2023/08/10 フリーハンドツール実装
 //
 // ToDo,ISSUES:
 //  POI以外の描画オブジェクトを選択したときに出るイベントbase fwに欲しい
@@ -167,6 +168,7 @@
 				uiMapping.toolsCbFuncParam,
 				confStat
 			);
+			terminateFreeHandAuthoring();
 
 			// 以下editConfPhase2で済み
 			//	poiCursor.removeCursor();
@@ -561,6 +563,14 @@
 								uiMapping.editingMode === "POLYGON"
 							) {
 								ret = setPolySvg(targetDoc, poiDocId);
+							} else if (uiMapping.editingMode === "FREEHAND") {
+								if (uiMapping.editingGraphicsElement != true) {
+									return;
+								}
+								// フリーハンドツール用の終了処理はこれのみ　キャンセルはここにはない
+								console.log("FREEHAND tools editconf");
+								ret = setFreeHandSvgElement(targetDoc, poiDocId); // options次第で輪郭にするかビットイメージにするかを変える必要がある
+								terminateFreeHandAuthoring();
 							}
 							uiMapping.modifyTargetElement = null;
 							uiMapping.editingGraphicsElement = false;
@@ -1287,6 +1297,11 @@
 				defaultStrokeColor = uiMapping.editingStyle.stroke;
 				defaultLineWidth = uiMapping.editingStyle.strokeWidth;
 
+				var canvasOpacity = 0.6;
+				if (uiMapping.polyCanvasOpacity) {
+					canvasOpacity = uiMapping.polyCanvasOpacity;
+				}
+
 				enabled = true;
 				//		console.log("initCanvas");
 				if (document.getElementById("PolyEditCanvas")) {
@@ -1301,6 +1316,7 @@
 					cv.style.left = "0px";
 					cv.style.top = "0px";
 					cv.style.zIndex = "20";
+					cv.style.opacity = canvasOpacity;
 					//			cv.style.width=cs.width+"px";
 					//			cv.style.height=cs.height+"px";
 					var mapc = document.getElementById("mapcanvas");
@@ -1308,10 +1324,12 @@
 					mapc.appendChild(cv);
 				}
 				cc = cv.getContext("2d");
-				cc.globalAlpha = 0.5;
+				cc.globalAlpha = 1;
 				cc.lineWidth = defaultLineWidth;
 				cc.strokeStyle = defaultStrokeColor;
 				cc.fillStyle = defaultFillColor;
+				cc.lineCap = "round";
+				cc.lineJoin = "round";
 				//		cc.clearRect(0, 0, cv.width, cv.height);
 				//		cc.beginPath();
 				//		cc.fillRect(400,300,500,500);
@@ -1326,9 +1344,49 @@
 				document.addEventListener("zoomPanMap", updateCanvas);
 			}
 
+			function getImageData() {
+				return cc.getImageData(0, 0, cv.width, cv.height);
+			}
+
 			function addPoint(point) {
 				geoPoints.push(point);
 				//		console.log("addPoint:",point,geoPoints);
+				updateCanvas();
+			}
+
+			function movePoint(point) {
+				var p = {
+					lat: point.lat,
+					lng: point.lng,
+					style: {
+						strokeWidth: uiMapping.editingStyle.strokeWidth,
+						strokeColor: uiMapping.editingStyle.stroke,
+						fillColor: uiMapping.editingStyle.fill,
+					},
+				};
+				geoPoints.push(p);
+			}
+
+			function floodFill(point) {
+				var p = {
+					lat: point.lat,
+					lng: point.lng,
+					floodFill: true,
+					style: {
+						color: uiMapping.editingStyle.stroke,
+					},
+				};
+				geoPoints.push(p);
+				updateCanvas();
+			}
+
+			function undoPath() {
+				for (var i = geoPoints.length - 1; i >= 0; i--) {
+					if (geoPoints[i].style) {
+						geoPoints.splice(i);
+						break;
+					}
+				}
 				updateCanvas();
 			}
 
@@ -1352,35 +1410,77 @@
 			}
 
 			function updateCanvas() {
+				/**
 				console.log(
 					"updateCanvas: insP:",
 					uiMapping.insertPointsIndex,
 					"  selP:",
 					uiMapping.selectedPointsIndex,
 					"   isPolygon:",
-					isPolygon
-					//"  geoPoints:",geoPoints,
+					isPolygon,
+					"  geoPoints.length:",geoPoints.length,
 					//" caller:",updateCanvas.caller
 				);
+				**/
 				initCanvas();
 				cc.clearRect(0, 0, cs.width, cs.height);
-				cc.beginPath();
+				if (geoPoints.length == 0) {
+					return;
+				}
+				var firstPath = true; // 最初の点はmoveTo
+
+				var p2ds = [];
+
+				var p2d;
+				// p2d.beginPath();
+				if (!geoPoints[0].style) {
+					geoPoints[0].style = {
+						strokeWidth: defaultLineWidth,
+						strokeColor: defaultStrokeColor,
+						fillColor: defaultFillColor,
+					};
+				}
 				for (var i = 0; i < geoPoints.length; i++) {
 					var screenPoint = svgMap.geo2Screen(
 						geoPoints[i].lat,
 						geoPoints[i].lng
 					);
-					//			console.log(screenPoint);
-					if (i == 0) {
-						cc.moveTo(screenPoint.x, screenPoint.y);
+					screenPoint.x = Math.floor(screenPoint.x);
+					screenPoint.y = Math.floor(screenPoint.y);
+					if (geoPoints[i].floodFill) {
+						var replacementColorInt = toColorInt(geoPoints[i].style.color);
+						p2ds.push({
+							floodFill: true,
+							point: screenPoint,
+							color: replacementColorInt,
+						});
+						continue;
+					}
+					if (geoPoints[i].style) {
+						if (firstPath == false) {
+							if (isPolygon) {
+								p2d.closePath();
+							}
+						} else {
+							firstPath = false;
+						}
+						p2d = new Path2D();
+						p2ds.push({ path: p2d, style: geoPoints[i].style });
+					}
+					p2d.lineTo(screenPoint.x, screenPoint.y);
+				}
+				//console.log(p2ds);
+				for (var p2dObj of p2ds) {
+					if (p2dObj.floodFill) {
+						var delta = -255;
+						floodFill_int(p2dObj.point.x, p2dObj.point.y, p2dObj.color, delta);
 					} else {
-						cc.lineTo(screenPoint.x, screenPoint.y);
+						cc.fillStyle = p2dObj.style.fillColor;
+						cc.strokeStyle = p2dObj.style.strokeColor;
+						cc.lineWidth = p2dObj.style.strokeWidth;
+						cc.stroke(p2dObj.path);
 					}
 				}
-				if (isPolygon) {
-					cc.closePath();
-				}
-				cc.stroke();
 
 				if (geoPoints.length == 1) {
 					hilightPoint(0);
@@ -1494,15 +1594,179 @@
 				isPolygon = polygonMode;
 			}
 
+			// https://stackoverflow.com/questions/53077955/how-do-i-do-flood-fill-on-the-html-canvas-in-javascript
+			// https://stackoverflow.com/questions/2106995/how-can-i-perform-flood-fill-with-html-canvas/56221940#56221940
+			// https://stackoverflow.com/questions/2106995/how-can-i-perform-flood-fill-with-html-canvas/2119892#2119892
+
+			var colorNameTable = {
+				blue: 0x0000ffff,
+				red: 0xff0000ff,
+			};
+
+			function toColorInt(hex) {
+				//console.log(hex);
+				if (colorNameTable[hex]) {
+					return colorNameTable[hex];
+				}
+				const rgbs = hex
+					.replace(
+						/^#?([a-f\d])([a-f\d])([a-f\d])$/i,
+						(m, r, g, b) => "#" + r + r + g + g + b + b
+					)
+					.substring(1)
+					.match(/.{2}/g);
+				const rgb = rgbs.reduce(function (preV, curV) {
+					var ans = (preV << 8) + parseInt(curV, 16);
+					return ans;
+				}, 0);
+				const rgba = (rgb << 8) + 255; // RGB -> RGBA
+				return rgba;
+			}
+
+			function getPixel(pixelData, x, y) {
+				if (x < 0 || y < 0 || x >= pixelData.width || y >= pixelData.height) {
+					return NaN;
+				}
+				var pixels = pixelData.data;
+				var i = (y * pixelData.width + x) * 4;
+				return (
+					((pixels[i + 0] & 0xff) << 24) |
+					((pixels[i + 1] & 0xff) << 16) |
+					((pixels[i + 2] & 0xff) << 8) |
+					((pixels[i + 3] & 0xff) << 0)
+				);
+			}
+
+			function setPixel(pixelData, x, y, color) {
+				var i = (y * pixelData.width + x) * 4;
+				var pixels = pixelData.data;
+				pixels[i + 0] = (color >>> 24) & 0xff; // R G B A順
+				pixels[i + 1] = (color >>> 16) & 0xff;
+				pixels[i + 2] = (color >>> 8) & 0xff;
+				pixels[i + 3] = (color >>> 0) & 0xff;
+			}
+
+			function diff(c1, c2) {
+				if (isNaN(c1) || isNaN(c2)) {
+					return Infinity;
+				}
+
+				var dr = ((c1 >>> 24) & 0xff) - ((c2 >>> 24) & 0xff);
+				var dg = ((c1 >>> 16) & 0xff) - ((c2 >>> 16) & 0xff);
+				var db = ((c1 >>> 8) & 0xff) - ((c2 >>> 8) & 0xff);
+				var da = ((c1 >>> 0) & 0xff) - ((c2 >>> 0) & 0xff);
+
+				return dr * dr + dg * dg + db * db + da * da;
+			}
+
+			function inColorRange(color1, color2, delta) {
+				if (delta < 0) {
+					//console.log(color1.toString(16),( color1 & 0xff ).toString(16));
+					// アルファが100%のものはレンジ外とみなし、それ以外はレンジ内とみなす処理
+					if ((color1 & 0xff) >= -delta) {
+						return false;
+					} else {
+						return true;
+					}
+				} else if (diff(color1, color2) <= delta) {
+					return true;
+				}
+				return false;
+			}
+
+			function floodFill_int(x, y, replacementColor, delta) {
+				// replacementColorはRGBA32bit int　注意
+				// delta: 塗開始ピクセルの色(RGBA値)との違いの大きさ がこれ以下のところを塗る。
+				// マイナス時はα>=abs(delta)以外は全部塗る
+				//console.log("floodFill", x, y, replacementColor.toString(16), delta);
+				var current, w, e, stack, color, cx, cy;
+				var context = cc;
+				var canvas = cv;
+				var pixelData = context.getImageData(0, 0, canvas.width, canvas.height);
+				var done = [];
+				for (var i = 0; i < canvas.width; i++) {
+					done[i] = [];
+				}
+
+				var targetColor = getPixel(pixelData, x, y);
+				if (delta > 0) {
+					delta *= delta;
+				}
+
+				stack = [[x, y]];
+				done[x][y] = true;
+				while ((current = stack.pop())) {
+					cx = current[0];
+					cy = current[1];
+
+					if (inColorRange(getPixel(pixelData, cx, cy), targetColor, delta)) {
+						setPixel(pixelData, cx, cy, replacementColor);
+
+						w = e = cx;
+						while (
+							w > 0 &&
+							inColorRange(getPixel(pixelData, w - 1, cy), targetColor, delta)
+						) {
+							--w;
+							if (done[w][cy]) break;
+							setPixel(pixelData, w, cy, replacementColor);
+						}
+						while (
+							e < pixelData.width - 1 &&
+							inColorRange(getPixel(pixelData, e + 1, cy), targetColor, delta)
+						) {
+							++e;
+							if (done[e][cy]) break;
+							setPixel(pixelData, e, cy, replacementColor);
+						}
+
+						for (cx = w; cx <= e; cx++) {
+							if (cy > 0) {
+								color = getPixel(pixelData, cx, cy - 1);
+								if (inColorRange(color, targetColor, delta)) {
+									if (!done[cx][cy - 1]) {
+										stack.push([cx, cy - 1]);
+										done[cx][cy - 1] = true;
+									}
+								}
+							}
+							if (cy < canvas.height - 1) {
+								color = getPixel(pixelData, cx, cy + 1);
+								if (inColorRange(color, targetColor, delta)) {
+									if (!done[cx][cy + 1]) {
+										stack.push([cx, cy + 1]);
+										done[cx][cy + 1] = true;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				context.putImageData(
+					pixelData,
+					0,
+					0,
+					0,
+					0,
+					canvas.width,
+					canvas.height
+				);
+			}
+
 			return {
 				//		initCanvas: initCanvas,
-				clearPoints: clearPoints,
 				addPoint: addPoint,
-				setPoints: setPoints,
+				clearPoints: clearPoints,
+				floodFill: floodFill,
+				getImageData: getImageData,
 				getPoints: getPoints,
+				movePoint: movePoint,
 				removeCanvas: removeCanvas,
-				updateCanvas: updateCanvas,
+				setPoints: setPoints,
 				setPolygonMode: setPolygonMode,
+				undo: undoPath,
+				updateCanvas: updateCanvas,
 				//		hilightLine: hilightLine,
 				//		hilightPoint: hilightPoint
 			};
@@ -1560,7 +1824,7 @@
 
 			function removeCursor() {
 				enabled = false;
-				console.log("removeCursor", removeCursor.caller);
+				//console.log("removeCursor", removeCursor.caller);
 				document.removeEventListener("screenRefreshed", updateCursorGeo, false);
 				document.removeEventListener("zoomPanMap", updateCursorGeo, false);
 				if (document.getElementById("POIeditCursor")) {
@@ -1811,7 +2075,7 @@
 					svgNode.getAttribute("fill"),
 					uiMapping.editingMode
 				);
-				if (uiMapping.genericMode.panel) {
+				if (uiMapping.genericMode?.panel) {
 					switchGenericTool(svgTarget);
 				} else {
 					//		var targetDocId = svgTarget.docId
@@ -2458,6 +2722,382 @@
 			return metaSchema;
 		}
 
+		// フリーハンドの"編集"ツール 新規追加、削除、変更などが可能　ただし一個しか設置できない
+		// var toolsCbFunc; // uiMapping.toolsCbFuncに収納変更
+		// var toolsCbFuncParam; // 同上
+		function initFreeHandTool(
+			targetDiv,
+			poiDocId,
+			cbFunc,
+			cbFuncParam,
+			options
+		) {
+			console.log("initFreeHandTool :");
+
+			removeChildren(targetDiv);
+
+			var uiDoc = targetDiv.ownerDocument;
+			console.log("called initPolygonTools: docId:", poiDocId);
+			var isRootLayer = svgMap.setRootLayersProps(poiDocId, true, true); // 子docの場合もあり得ると思う・・
+			if (!isRootLayer) {
+				console.log(
+					"This ID is not layer (child document of layer).. thus you can only add new elements ( not edit existing element) "
+				);
+			}
+			svgImages = svgMap.getSvgImages();
+			svgImagesProps = svgMap.getSvgImagesProps();
+			var widthOption = "";
+			var floodFillOption = "";
+			var outlineMode = false;
+			if (options?.outlineMode) {
+				outlineMode = options.outlineMode;
+			} else {
+				widthOption = `<input type="range" min="0" max="7" step="1" value="2" id="freeHandWidth"></input><span id="freeHandWidthMsg">4px</span>`;
+				floodFillOption = `<input type="checkbox" id="freeHandFloodFill"/><label for="freeHandFloodFill" id="freeHandFloodFillLable">Fill</label>`;
+			}
+			var ihtml = `
+			<div id="freeHandEditor" style="width:300px;height:100px;overflow:auto">
+				<input type="button" id="freeHandAdd" value="ADD"/>
+				<span id="editConf"><input type="button" id="pepok" value="END" style="display:none" /></span>
+				<input type="button" id="freeHandUndo" value="UNDO"/>
+				${widthOption}
+				<input type="color" id="freeHandColor" value="#0000ff" >
+				${floodFillOption}
+			</div>`;
+			// 開始/終了、UNDO、色、太さ、
+			targetDiv.innerHTML = ihtml;
+
+			initUiMapping(
+				{
+					uiPanel: targetDiv,
+					editingLayerId: poiDocId,
+					editingMode: "FREEHAND",
+					uiDoc: uiDoc,
+					editingGraphicsElement: false,
+					editingStyle: structuredClone(defaultShapeStyle),
+					shapeStyle: structuredClone(defaultShapeStyle),
+					outlineMode,
+					polyCanvasOpacity: 0.8,
+				},
+				true
+			);
+			if (cbFunc) {
+				uiMapping.toolsCbFunc = cbFunc;
+				uiMapping.toolsCbFuncParam = cbFuncParam;
+			} else {
+				uiMapping.toolsCbFunc = null;
+				uiMapping.toolsCbFuncParam = null;
+			}
+			setFreeHandEvent(uiDoc, poiDocId);
+			//			setPolyUiEvents(uiDoc, poiDocId);
+			//			setMetaUiEvents(uiDoc, poiDocId);
+			setEditConfEvents(uiDoc, poiDocId);
+
+			polyCanvas.updateCanvas();
+
+			return uiMapping;
+		}
+
+		function setFreeHandEvent(targetDoc, poiDocId) {
+			console.log("setFreeHandEvent:", targetDoc, targetDoc.defaultView);
+			var targetWin = targetDoc.defaultView;
+			var mc = document.getElementById("mapCanvasWrapper").parentElement;
+			targetDoc
+				.getElementById("freeHandAdd")
+				.addEventListener("click", function (e) {
+					// 編集開始処理　：　地図の伸縮スクロール操作をブロックしつつフリーハンド描画を可能にする
+					// フレームワークの根幹に作用するので慎重に
+					// https://stackoverflow.com/questions/76025207/how-to-prevent-previously-added-event-listeners-from-being-called
+					e.target.style.display = "none";
+					uiMapping.uiPanel.ownerDocument.getElementById(
+						"pepok"
+					).style.display = "";
+					polyCanvas.clearPoints();
+					mc.addEventListener("mousemove", FreeHandEventListener, {
+						capture: true,
+					});
+					mc.addEventListener("mousedown", FreeHandEventListener, {
+						capture: true,
+					});
+					mc.addEventListener("mouseup", FreeHandEventListener, {
+						capture: true,
+					});
+
+					mc.addEventListener("touchmove", FreeHandEventListener, {
+						capture: true,
+					});
+					mc.addEventListener("touchstart", FreeHandEventListener, {
+						capture: true,
+					});
+					mc.addEventListener("touchend", FreeHandEventListener, {
+						capture: true,
+					});
+
+					uiMapping.editingGraphicsElement = true;
+					polyCanvas.setPolygonMode(false);
+					setFreeHandImagesOpacity(0.5);
+					svgMap.refreshScreen();
+				});
+			targetDoc
+				.getElementById("freeHandUndo")
+				.addEventListener("click", function (e) {
+					if (uiMapping.editingGraphicsElement) {
+						console.log("Delete last drawing block");
+						polyCanvas.undo();
+					} else {
+						console.log("Delete last image element");
+						// delete last Image
+						var imgs;
+						if (uiMapping.outlineMode) {
+							imgs = svgImages[poiDocId].getElementsByTagName("g");
+						} else {
+							imgs = svgImages[poiDocId].getElementsByTagName("image");
+						}
+						if (imgs.length > 0) {
+							imgs[imgs.length - 1].parentElement.removeChild(
+								imgs[imgs.length - 1]
+							);
+							svgMap.refreshScreen();
+						}
+					}
+				});
+			targetDoc
+				.getElementById("freeHandColor")
+				.addEventListener("input", function (e) {
+					var lineColor = e.target.value;
+					uiMapping.editingStyle.stroke = lineColor;
+				});
+			if (!uiMapping.outlineMode) {
+				targetDoc
+					.getElementById("freeHandWidth")
+					.addEventListener("input", function (e) {
+						var lineWidth = Math.pow(2, e.target.value);
+						targetDoc.getElementById(
+							"freeHandWidthMsg"
+						).innerText = `${lineWidth}px`;
+						uiMapping.editingStyle.strokeWidth = lineWidth;
+					});
+				targetDoc
+					.getElementById("freeHandFloodFill")
+					.addEventListener("change", function (e) {
+						if (!uiMapping.editingGraphicsElement) {
+							console.log("no editingGraphicsElement exit");
+							e.target.checked = false;
+							return;
+						}
+						if (e.target.checked) {
+							uiMapping.FloodFillMode = true;
+						} else {
+							uiMapping.FloodFillMode = false;
+						}
+					});
+			}
+		}
+
+		function setFreeHandSvgElement(targetDoc, poiDocId) {
+			// targetDocはUIのhtmlだがここでは不使用・・
+			if (uiMapping.editingMode != "FREEHAND") {
+				return;
+			}
+			var poiDoc = svgImages[poiDocId];
+			var targetSvgGroup;
+			if (uiMapping.outlineMode) {
+				// アウトライン生成モード
+				var targetSvgElem = null;
+				var elmCount = 0;
+				targetSvgGroup = poiDoc.createElement("g");
+				var points = polyCanvas.getPoints();
+				var d = "";
+				for (var point of points) {
+					if (point.style) {
+						if (targetSvgElem) {
+							targetSvgElem.setAttribute("d", d);
+							targetSvgGroup.appendChild(targetSvgElem);
+							++elmCount;
+						}
+						targetSvgElem = poiDoc.createElement("path");
+						targetSvgElem.setAttribute("fill", "none");
+						targetSvgElem.setAttribute("stroke", point.style.strokeColor);
+						targetSvgElem.setAttribute("stroke-width", point.style.strokeWidth);
+						targetSvgElem.setAttribute("vector-effect", "non-scaling-stroke");
+						d = "M";
+					}
+					var svgPoint = svgMap.Geo2SVG(
+						point.lat,
+						point.lng,
+						svgImagesProps[poiDocId].CRS
+					);
+					d += svgPoint.x + "," + svgPoint.y + " ";
+				}
+				if (targetSvgElem) {
+					targetSvgElem.setAttribute("d", d);
+					targetSvgGroup.appendChild(targetSvgElem);
+					++elmCount;
+				}
+				if (elmCount > 0) {
+					poiDoc.documentElement.appendChild(targetSvgGroup);
+				} else {
+					targetSvgGroup = null;
+				}
+			} else {
+				//  ビットイメージ生成モード
+				var img = getImageInLayerCRS(poiDocId);
+				var iurl = getDataURL(
+					img.layerImg,
+					img.layerImgSize.width,
+					img.layerImgSize.height
+				);
+				//console.log(iurl);
+				targetSvgGroup = poiDoc.createElement("image");
+				targetSvgGroup.setAttribute("xlink:href", iurl);
+				targetSvgGroup.setAttribute("preserveAspectRatio", "none");
+				targetSvgGroup.setAttribute("x", img.layerViewBox.x);
+				targetSvgGroup.setAttribute("y", img.layerViewBox.y);
+				targetSvgGroup.setAttribute("width", img.layerViewBox.width);
+				targetSvgGroup.setAttribute("height", img.layerViewBox.height);
+
+				poiDoc.documentElement.appendChild(targetSvgGroup);
+			}
+			return targetSvgGroup;
+		}
+
+		function getDataURL(imageData, width, height) {
+			// https://stackoverflow.com/questions/54523077/how-to-convert-offscreencanvas-to-datauri
+			var canvas = document.createElement("canvas");
+			canvas.width = width;
+			canvas.height = height;
+			var context = canvas.getContext("2d");
+			context.putImageData(imageData, 0, 0);
+			var dataURL = canvas.toDataURL();
+			return dataURL;
+		}
+
+		function getImageInLayerCRS(poiDocId) {
+			// 画面に表示されているルートコンテナによる図法(CRS)から、レイヤコンテンツの図法(CRS)に画像を変換(サンプリング)して、レイヤコンテンツ上での画像を得る　非線形でも得る
+			var rootImg = polyCanvas.getImageData(); //ここで得られるイメージは rootコンテナの図法上のデータ　そのbboxも厳密なものは rootコンテナの図法上のbboxしか得られない
+			var rootImgSize = svgMap.getMapCanvasSize(); // canvasが画面いっぱいに生成されている
+			var rootViewBox = svgMap.getRootViewBox(); // その、ルートコンテナ座標系上でのviewBox
+			var rootCRS = svgImagesProps["root"].CRS;
+			var layerCRS = svgImagesProps[poiDocId].CRS;
+			var root2layer = svgMap.getConversionMatrixViaGCS(rootCRS, layerCRS);
+			var layer2root = svgMap.getConversionMatrixViaGCS(layerCRS, rootCRS);
+			var layerViewBox = svgMap.getTransformedBox(rootViewBox, root2layer);
+
+			var layerImgSize = {
+				width: rootImgSize.width,
+				height: rootImgSize.height,
+			}; // 同じサイズにしてみる
+
+			var layerImg = new ImageData(layerImgSize.width, layerImgSize.height);
+
+			console.log(root2layer, layer2root);
+
+			for (var py = 0; py < layerImgSize.height; py++) {
+				var layerY =
+					(py / layerImgSize.height) * layerViewBox.height + layerViewBox.y;
+				for (var px = 0; px < layerImgSize.width; px++) {
+					var layerX =
+						(px / layerImgSize.width) * layerViewBox.width + layerViewBox.x;
+					var rootXY = svgMap.transform(layerX, layerY, layer2root); // コンテンツSVG系の座標
+					// floorでは画質劣化、roundが良い。　px,pyが整数キリ番なので値がfloorだと値がブレるのが原因か　オーバーサンプリングが好ましい？
+					var rootPx = Math.round(
+						(rootXY.x - rootViewBox.x) * (rootImgSize.width / rootViewBox.width)
+					);
+					var rootPy = Math.round(
+						(rootXY.y - rootViewBox.y) *
+							(rootImgSize.height / rootViewBox.height)
+					);
+					//console.log(px,py,rootPx,rootPy);
+					if (
+						rootPx >= 0 &&
+						rootPx < rootImgSize.width &&
+						rootPy >= 0 &&
+						rootPy < rootImgSize.height
+					) {
+						var rBase = (rootPx + rootPy * rootImgSize.width) * 4;
+						var lBase = (px + py * layerImgSize.width) * 4;
+						layerImg.data[lBase] = rootImg.data[rBase];
+						layerImg.data[lBase + 1] = rootImg.data[rBase + 1];
+						layerImg.data[lBase + 2] = rootImg.data[rBase + 2];
+						layerImg.data[lBase + 3] = rootImg.data[rBase + 3];
+					}
+				}
+			}
+			return { layerImg, layerImgSize, layerViewBox };
+		}
+
+		function terminateFreeHandAuthoring() {
+			if (uiMapping.editingMode != "FREEHAND") {
+				return;
+			}
+			polyCanvas.removeCanvas();
+			//console.log("terminateFreeHandAuthoring : uiMapping:", uiMapping);
+			setFreeHandImagesOpacity();
+			uiMapping.editingGraphicsElement = false; // これはclearTools()でも設定されるが・・
+			var mc = document.getElementById("mapCanvasWrapper").parentElement;
+			mc.removeEventListener("mousemove", FreeHandEventListener, {
+				capture: true,
+			});
+			mc.removeEventListener("mousedown", FreeHandEventListener, {
+				capture: true,
+			});
+			mc.removeEventListener("mouseup", FreeHandEventListener, {
+				capture: true,
+			});
+			mc.removeEventListener("touchmove", FreeHandEventListener, {
+				capture: true,
+			});
+			mc.removeEventListener("touchstart", FreeHandEventListener, {
+				capture: true,
+			});
+			mc.removeEventListener("touchend", FreeHandEventListener, {
+				capture: true,
+			});
+			uiMapping.uiPanel.ownerDocument.getElementById(
+				"freeHandAdd"
+			).style.display = "";
+			uiMapping.uiPanel.ownerDocument.getElementById("pepok").style.display =
+				"none";
+		}
+		function setFreeHandImagesOpacity(opacity) {
+			var poiDocId = uiMapping.editingLayerId;
+			var imgs = svgImages[poiDocId].getElementsByTagName("image");
+			if (!opacity || opacity == 1) {
+				for (var img of imgs) {
+					img.removeAttribute("opacity");
+				}
+			} else {
+				for (var img of imgs) {
+					img.setAttribute("opacity", opacity);
+				}
+			}
+		}
+
+		function FreeHandEventListener(event) {
+			var mxy = svgMap.getMouseXY(event);
+			var geop = svgMap.screen2Geo(mxy.x, mxy.y);
+			var et = event.type;
+			//console.log("FreeHandEventListener: evt:",et, "  xy:", mxy, "  geo:",geop);
+			event.stopImmediatePropagation();
+			event.preventDefault();
+			if (et == "mousedown" || et == "touchstart") {
+				if (uiMapping.FloodFillMode == true) {
+					polyCanvas.floodFill(geop);
+					uiMapping.FloodFillMode = false;
+					if (!uiMapping.outlineMode) {
+						uiMapping.uiDoc.getElementById("freeHandFloodFill").checked = false;
+					}
+				} else {
+					polyCanvas.movePoint(geop);
+					uiMapping.drawing = true;
+				}
+			} else if (et == "mouseup" || et == "touchend") {
+				uiMapping.drawing = false;
+			} else if (uiMapping.drawing) {
+				polyCanvas.addPoint(geop);
+			}
+		}
+
 		function clearTools_with_UI() {
 			var uiPanel;
 			if (uiMapping.genericMode?.panel) {
@@ -2881,6 +3521,7 @@
 			// svgMapGIStool. で公開する関数のリスト
 			cancelPointingPoiRegister: cancelPointingPoiRegister,
 			editPoint: editPoint,
+			initFreeHandTool: initFreeHandTool,
 			initGenericTool: initGenericTool,
 			initPOItools: initPOItools,
 			initPOIregistTool: initPOIregistTool,
