@@ -52,6 +52,7 @@
 // 2021/09/22 : lauerUIwindowsに.setLoadingFlag(): 非同期処理中を知らせるフラグを明示的にセット・解除可能に
 // 2021/10/29 : setRootLayersPropsで設定する限り(rootSvgのDOM直編集をしない限り)svgMap.updateLayerTableを呼ばなくても問題が起きないように(initLayerList(initOptions) > rev17 core svgMap)
 // 2023/07/25 : Firefoxの最新版では、力業のiFrameReady()がDOMContentLoadedタイミングをつかんだ処理ができないケースが多い、そこでloadイベント処理のリトライを行うルーチンを入れた（この実装までにかなりの試行錯誤があった）
+// 2023/08/24 : ↑の問題がChromeでも起きる環境があることが判明。iframeのhtmlのキャッシュを無効化することで対応。そろそろ仕様変更などの本質的な対策が求められる。
 
 // ISSUES, ToDo:
 // 2021/10/14 rootsvgのDOM直編集ではupdateLayerTableが反映されるタイミングが直にない～updateLayerTableを多数呼びたくない理由は、LayerListTableの後進にオーバヘッドがかかるから　なので、それをせずにならば(例えばrefreshScreen毎に)いくら呼んでも気にならないはず
@@ -1050,6 +1051,31 @@
 			}
 		}
 
+		function addCacheDisabledQuery(path) {
+			var hashPos = path.indexOf("#");
+			var queryPos = path.indexOf("?");
+			if (queryPos > hashPos) {
+				queryPos = -1;
+			}
+			var timeStampQuery = "disableCacheQuery=" + new Date().getTime();
+			var ans, queryDelim;
+			if (queryPos > 0) {
+				queryDelim = "&";
+			} else {
+				queryDelim = "?";
+			}
+			if (hashPos > 0) {
+				ans =
+					path.substring(0, hashPos) +
+					queryDelim +
+					timeStampQuery +
+					path.substring(hashPos);
+			} else {
+				ans = path + queryDelim + timeStampQuery;
+			}
+			return ans;
+		}
+
 		function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf) {
 			console.log(
 				"initIframe:",
@@ -1103,7 +1129,7 @@
 					bySrcdoc = true;
 				} else {
 					// 同一ドメインにあるケース(基本ケース)
-					iframe.src = controllerURL;
+					iframe.src = addCacheDisabledQuery(controllerURL); // 2023/08/24 キャッシュからの読み込みでは、iframeReadyが効かないことがあるため、キャッシュ無効化する
 					//			layerSpecificUIbody.appendChild(iframe);
 				}
 			} else {
@@ -1262,7 +1288,7 @@
 					fired = true;
 					clearTimeout(timer);
 					fn.call(this);
-					iFrame.contentWindow.removeEventListener("error",retryLoadEvent);
+					iFrame.contentWindow.removeEventListener("error", retryLoadEvent);
 				}
 			}
 			function readyState() {
@@ -1286,19 +1312,20 @@
 					ready.call(iFrame.contentDocument || iFrame.contentWindow.document);
 				});
 			}
-			
+
 			// 2023/07/25 iFrameReady失敗のリトライを　エラーが起きた時のみにする処理
 			var errorOccurred = false;
-			function retryLoadEvent(event){
+			function retryLoadEvent(event) {
 				console.warn("iFrame error:", event.message);
 				errorOccurred = true;
 			}
-			iFrame.contentWindow.addEventListener("error",retryLoadEvent);
-			
+			iFrame.contentWindow.addEventListener("error", retryLoadEvent);
+
 			function checkLoaded() {
 				var doc = iFrame.contentDocument || iFrame.contentWindow.document;
 				// We can tell if there is a dummy document installed because the dummy document
 				// will have an URL that starts with "about:".  The real document will not have that URL
+				//console.log("checkLoaded : ", doc.URL, doc.readyState );
 				if (doc.URL.indexOf("about:blank") !== 0) {
 					// 2021/06/24 about: => about:blank (patch for about:srcdoc issue)
 					if (doc.readyState === "complete") {
@@ -1307,7 +1334,8 @@
 						// 2023/07/25 iFrameReady失敗のリトライ処理の試み　Firefoxの最近のバージョンで起きる確率が高い
 						// このケースは、DOMContentLoaded時点での処理に失敗したケース、故にloadイベントによる初期化にも失敗しているといえるだろう。そのため、loadイベントを再送信してリカバーを試みる
 						// エラーが起きている時だけリトライするべきかもしれないので、そうしてみた。
-						if ( errorOccurred ){
+						// Firefoxと同じ事象がChromeでも起り得るらしい。(環境依存性高い) ただしその場合は、エラーハンドリングもできない様子 : iframeのsrcのcacheをdisableにすることで、パースが必ず動くようにすると解消される様子(そろそろwebAppの仕様を変えるなど(layerUIでは必ず指定のjsライブラリ読み込みを必須とするとか)、本質的な対処が必要) => addCacheDisabledQuery  2023/08/24
+						if (errorOccurred) {
 							console.warn("Retry load process ....");
 							var le = new Event("load");
 							iFrame.contentWindow.dispatchEvent(le);
@@ -1465,10 +1493,7 @@
 			var baseHtml = `<base href='${httpRes.responseURL}'>`; // 2023/07/26 できるだけ互換を保てるようにbase要素を設定する
 			if (sourceDoc.indexOf("<script") > 0) {
 				if (sourceDoc.indexOf("</head>") > 0) {
-					sourceDoc = sourceDoc.replace(
-						"</head>",
-						`${baseHtml}</head>`
-					);
+					sourceDoc = sourceDoc.replace("</head>", `${baseHtml}</head>`);
 				} else {
 					sourceDoc = sourceDoc.replace(
 						/<html[^>]*>/,
