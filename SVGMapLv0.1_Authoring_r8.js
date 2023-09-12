@@ -901,6 +901,7 @@
 					} else {
 						targetSvgElem.setAttribute("fill", "none");
 					}
+					targetSvgElem.setAttribute("opacity", uiMapping.shapeStyle.opacity);
 					targetSvgElem.setAttribute("stroke", uiMapping.shapeStyle.stroke);
 					targetSvgElem.setAttribute(
 						"stroke-width",
@@ -3431,6 +3432,7 @@
 			bpath.setAttribute("d", getPolygonPathD(bgeom));
 			bpath.setAttribute("fill", uiMapping.shapeStyle.fill);
 			bpath.setAttribute("stroke", uiMapping.shapeStyle.stroke);
+			bpath.setAttribute("opacity", uiMapping.shapeStyle.opacity);
 			bpath.setAttribute("stroke-width", uiMapping.shapeStyle.strokeWidth);
 			bpath.setAttribute("vector-effect", "non-scaling-stroke");
 			svgElem.parentElement.insertBefore(bpath, svgElem);
