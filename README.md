@@ -9,7 +9,7 @@ The standardization activities are being undertaken at W3C.
 * [API Docs](https://www.svgmap.org/wiki/index.php?title=%E8%A7%A3%E8%AA%AC%E6%9B%B8)
 
 * [demo](https://svgmap.org/devinfo/devkddi/lvl0.1/demos/demo0.html)
-
+* [demo(github pages)](https://svgmap.github.io/svgMapDemo/) [(source)](https://github.com/svgmap/svgMapDemo)
 
 ## code format
 ```prettier --use-tabs``` 
