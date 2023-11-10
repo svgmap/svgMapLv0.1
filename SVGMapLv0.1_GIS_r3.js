@@ -3468,6 +3468,9 @@
 			metaDictionary,
 			options
 		) {
+			if (!options) {
+				options = {};
+			}
 			var svgImages = svgMap.getSvgImages();
 			var svgImagesProps = svgMap.getSvgImagesProps();
 			var svgImage = svgImages[targetSvgDocId];
