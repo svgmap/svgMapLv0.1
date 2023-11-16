@@ -7498,6 +7498,9 @@ function testCSclick(){ // Obsolute 2018.1.31
 				} else {
 					d = pathNode.getAttribute("d"); // from canvg
 				}
+				if (!d) {
+					d = "";
+				}
 				d = d.replace(ssppRe0, " "); // get rid of all commas
 				d = d.replace(ssppRe1, "$1 $2"); // separate commands from commands
 				d = d.replace(ssppRe2, "$1 $2"); // separate commands from commands
@@ -10392,13 +10395,14 @@ function testCSclick(){ // Obsolute 2018.1.31
 			getCORSURL: getCORSURL,
 			getElementByImageId: getElementByImgIdNoNS,
 			getGeoViewBox: function () {
+				var cxy = getCentralGeoCoorinates();
 				return {
 					x: geoViewBox.x,
 					y: geoViewBox.y,
 					width: geoViewBox.width,
 					height: geoViewBox.height,
-					cx: geoViewBox.x + 0.5 * geoViewBox.width,
-					cy: geoViewBox.y + 0.5 * geoViewBox.height,
+					cx: cxy.lng,
+					cy: cxy.lat,
 				};
 			},
 			getHashByDocPath: getHashByDocPath,
