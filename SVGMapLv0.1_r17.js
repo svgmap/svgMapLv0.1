@@ -309,7 +309,7 @@
 		});
 
 		addEvent(window, "hashchange", function () {
-			resumeFirstTime = true;
+			// resumeFirstTime = true; // 2024/5/2 ハッシュの変化でresumeの挙動を変えるのはおかしいと思われるのでコメントアウト
 			refreshScreen();
 			if (typeof updateLayerListUIint == "function") {
 				// レイヤリストUIが不整合起こす場合がある(レイヤをon/of指示するケース)。さらにそれに連動してUI自動起動も起きない
