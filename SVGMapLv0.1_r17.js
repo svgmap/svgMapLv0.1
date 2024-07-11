@@ -1593,7 +1593,7 @@
 					// 2020/09/11 preRenderFunctionがエラーアウトすると NOW LOADING:: delay and retry refreshScreenの無限ループに入るのを防止
 					svgImagesProps[docId].preRenderControllerFunction(svgDocStatus);
 				} catch (e) {
-					console.log("Error in handlePreRenderControllerScript:", e);
+					console.error("Error in handlePreRenderControllerScript:", e);
 				}
 			}
 		}
