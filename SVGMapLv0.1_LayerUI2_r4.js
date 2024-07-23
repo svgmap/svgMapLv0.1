@@ -53,6 +53,7 @@
 // 2021/10/29 : setRootLayersPropsで設定する限り(rootSvgのDOM直編集をしない限り)svgMap.updateLayerTableを呼ばなくても問題が起きないように(initLayerList(initOptions) > rev17 core svgMap)
 // 2023/07/25 : Firefoxの最新版では、力業のiFrameReady()がDOMContentLoadedタイミングをつかんだ処理ができないケースが多い、そこでloadイベント処理のリトライを行うルーチンを入れた（この実装までにかなりの試行錯誤があった）
 // 2023/08/24 : ↑の問題がChromeでも起きる環境があることが判明。iframeのhtmlのキャッシュを無効化することで対応。そろそろ仕様変更などの本質的な対策が求められる。
+// 2024/07/23 : To fix issue : https://github.com/svgmap/svgmapjs/issues/5　webAppレイヤーのプログラミング作法の変更あり
 
 // ISSUES, ToDo:
 // 2021/10/14 rootsvgのDOM直編集ではupdateLayerTableが反映されるタイミングが直にない～updateLayerTableを多数呼びたくない理由は、LayerListTableの後進にオーバヘッドがかかるから　なので、それをせずにならば(例えばrefreshScreen毎に)いくら呼んでも気にならないはず
@@ -1075,7 +1076,24 @@
 			}
 			return ans;
 		}
-
+		
+		var iframeOnLoadProcessQueue={};
+		
+		function iframeOnLoadProcessExp(targetIframeWindow){
+			console.log("Called iframeOnLoadProcessExp: targetIframeWindow: ", targetIframeWindow, "  iframeOnLoadProcessQueue:",Object.keys(iframeOnLoadProcessQueue));
+			var iframeParam;
+			for ( var lid in iframeOnLoadProcessQueue){
+				var ifp = iframeOnLoadProcessQueue[lid];
+				if ( ifp.iframe.contentWindow === targetIframeWindow ){
+					iframeParam = ifp;
+				}
+			}
+			if ( !iframeParam){return} // iFrameReadyで実行されてればパス
+			console.log("Do iframeOnLoadProcessExp: layerID: ", lid);
+			iframeOnLoadProcess(iframeParam.iframe, iframeParam.lid, iframeParam.reqSize, iframeParam.controllerURL, iframeParam.cbf);
+			delete  iframeOnLoadProcessQueue[lid];
+		}
+		
 		function initIframe(lid, controllerURL, reqSize, hiddenOnLaunch, cbf) {
 			console.log(
 				"initIframe:",
@@ -1088,7 +1106,7 @@
 			var lsuiDoc = layerSpecificUI.ownerDocument;
 			var iframe = lsuiDoc.createElement("iframe");
 			layerSpecificUIbody.appendChild(iframe); // doc下に設置した時点でloadイベントが走るのが問題だったようだ。 srcなりsrcdocなりを設定してからappendChildすることで初期化不具合が解消 2019/11/26　⇒　いや・・・そのloadイベントはabout:blankからくるものだった(特にsrcdoc設定が遅延するinitIframePh2ケース)　この辺を抑制した関数(iFrameReady)を得たのでその必要はなくなったはず 2021/6/17
-			iframeId = getIframeId(lid);
+			var iframeId = getIframeId(lid);
 			iframe.id = iframeId;
 
 			if (hiddenOnLaunch) {
@@ -1101,11 +1119,15 @@
 		iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf);
 	}, { once: true });
 	**/
+			iframeOnLoadProcessQueue[lid]={iframe, lid, reqSize, controllerURL, cbf};
 			iFrameReady(
 				iframe,
 				function () {
 					// 2021/6/17 layerUIのonload()でsetTimeout要の課題をついに対策できたか
+					console.log("iFrameReady: lid : ", lid , "  iframeOnLoadProcessQueue[lid]:",iframeOnLoadProcessQueue[lid]);
+					if ( !iframeOnLoadProcessQueue[lid]){console.log("skip"); return} // iframeOnLoadProcessExpで実行されていればパス
 					iframeOnLoadProcess(iframe, lid, reqSize, controllerURL, cbf);
+					delete  iframeOnLoadProcessQueue[lid];
 				},
 				false
 			);
@@ -1763,6 +1785,7 @@
 			setLayerListmessage: setLayerListmessage,
 			assignLayerSpecificUiElement: assignLayerSpecificUiElement,
 			//	putGlobalMessage: putGlobalMessage,
+			initSvgMapWebAppLayer: iframeOnLoadProcessExp,
 			customEvents: function () {
 				return {
 					zoomPanMap: true,
